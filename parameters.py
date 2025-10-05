@@ -20,7 +20,7 @@ AVAILABLE_MODELS = [
     "esp_quantization_ready_v2_aggressive"
 ]
 
-MODEL_ARCHITECTURE = "esp_quantization_ready_v2_aggressive"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
+MODEL_ARCHITECTURE = "esp_quantization_ready"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
 
 # ==============================================================================
 # MODEL-SPECIFIC PARAMETERS
