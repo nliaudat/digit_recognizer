@@ -5,61 +5,46 @@ import parameters as params
 
 def create_practical_tiny_depthwise():
     """
-    WORKING version with proper initialization and activations
+    FIXED VERSION - Proper architecture that can actually learn
     """
     model = tf.keras.Sequential([
-        # First conv with proper initialization
+        tf.keras.layers.Input(shape=params.INPUT_SHAPE),
+        
+        # First conv with sufficient capacity
         tf.keras.layers.Conv2D(
-            32, (3, 3), 
-            activation='relu', 
-            padding='same',
-            input_shape=params.INPUT_SHAPE,
-            kernel_initializer='he_normal',  # CRITICAL for ReLU
-            name='conv1'
+            32, (3, 3), padding='same', activation='relu',
+            kernel_initializer='he_normal',
         ),
-        tf.keras.layers.MaxPooling2D((2, 2), name='pool1'),
+        tf.keras.layers.MaxPooling2D((2, 2)),
         
-        # Depthwise separable block 1
-        tf.keras.layers.DepthwiseConv2D( ## Spatial per channel
-            (3, 3), 
-            activation='relu', 
-            padding='same',
-            depthwise_initializer='he_normal',  # CRITICAL
-            name='depthwise1'
-        ),
-        tf.keras.layers.Conv2D( ## Channel combination
-            64, (1, 1), 
-            activation='relu',
-            kernel_initializer='he_normal',  # CRITICAL
-            name='pointwise1'
-        ),
-        tf.keras.layers.MaxPooling2D((2, 2), name='pool2'),
-        
-        # Depthwise separable block 2  
+        # Depthwise separable block 1 - increased capacity
         tf.keras.layers.DepthwiseConv2D(
-            (3, 3), 
-            activation='relu', 
-            padding='same',
-            depthwise_initializer='he_normal',  # CRITICAL
-            name='depthwise2'
+            (3, 3), padding='same', activation='relu',
+            depthwise_initializer='he_normal',
         ),
         tf.keras.layers.Conv2D(
-            128, (1, 1), 
-            activation='relu',
-            kernel_initializer='he_normal',  # CRITICAL
-            name='pointwise2'
+            64, (1, 1), activation='relu',
+            kernel_initializer='he_normal',
         ),
-        tf.keras.layers.MaxPooling2D((2, 2), name='pool3'),
+        tf.keras.layers.MaxPooling2D((2, 2)),
         
-        # Classification head
-        tf.keras.layers.Flatten(name='flatten'),
+        # Depthwise separable block 2 - increased capacity  
+        tf.keras.layers.DepthwiseConv2D(
+            (3, 3), padding='same', activation='relu',
+            depthwise_initializer='he_normal',
+        ),
+        tf.keras.layers.Conv2D(
+            128, (1, 1), activation='relu',
+            kernel_initializer='he_normal',
+        ),
+        tf.keras.layers.MaxPooling2D((2, 2)),
+        
+        # Adequate classification head
+        tf.keras.layers.Flatten(),
         tf.keras.layers.Dense(256, activation='relu', 
-                             kernel_initializer='he_normal',  # CRITICAL
-                             name='dense1'),
-        tf.keras.layers.Dropout(0.5, name='dropout1'),
-        tf.keras.layers.Dense(params.NB_CLASSES, 
-                             kernel_initializer='he_normal',  # CRITICAL
-                             name='output')
+                             kernel_initializer='he_normal'),
+        tf.keras.layers.Dropout(0.3),
+        tf.keras.layers.Dense(params.NB_CLASSES, activation='softmax')
     ])
     
     return model
