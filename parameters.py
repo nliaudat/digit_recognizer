@@ -110,9 +110,20 @@ DATA_SOURCES = [
         'name': 'meterdigits_augmented',
         'type': 'folder_structure',
         'path': 'datasets/meterdigits_augmented',
-        'weight': 0.8,
+        'weight': 0.6,
     },
-    # Add mor
+    # {
+        # 'name': 'MNIST',
+        # 'type': 'folder_structure',
+        # 'path': 'mnist_dataset_folders',
+        # 'weight': 0.15,
+    # },
+        # {
+        # 'name': 'MR-AMR Dataset',
+        # 'type': 'folder_structure',
+        # 'path': 'MR-AMR Dataset',
+        # 'weight': 0.15,
+    # },
 ]
 
 # ==============================================================================
