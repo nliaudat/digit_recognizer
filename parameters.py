@@ -51,8 +51,8 @@ ORIGINAL_HAVERLAND_DROPOUT_RATES = [0.25, 0.25, 0.25, 0.5]  # Fixed from noteboo
 # ==============================================================================
 
 # Image Parameters
-INPUT_WIDTH = 32
-INPUT_HEIGHT = 20
+INPUT_WIDTH = 20
+INPUT_HEIGHT = 32
 INPUT_CHANNELS =1  # 1 for grayscale, 3 for RGB
 INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
 USE_GRAYSCALE = (INPUT_CHANNELS == 1) 
@@ -106,7 +106,13 @@ DATA_SOURCES = [
         'path': 'datasets/meterdigits',
         'weight': 1.0,
     },
-    # Add more data sources as needed
+    {
+        'name': 'meterdigits_augmented',
+        'type': 'folder_structure',
+        'path': 'datasets/meterdigits_augmented',
+        'weight': 0.8,
+    },
+    # Add mor
 ]
 
 # ==============================================================================
@@ -153,3 +159,4 @@ SHUFFLE_SEED = 42
 
 # # Target model size for ESP32
 # TARGET_MODEL_SIZE_KB = 100  # Aim for <100KB quantized
+

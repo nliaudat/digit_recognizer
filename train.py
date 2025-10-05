@@ -21,6 +21,26 @@ def parse_arguments():
     parser.add_argument('--test_all_models', action='store_true',
                        help='Test all available model architectures and compare performance')
     return parser.parse_args()
+    
+def set_all_seeds(seed=params.SHUFFLE_SEED):
+    """Set all random seeds for complete reproducibility"""
+    # Python built-in random
+    import random
+    random.seed(seed)
+    
+    # NumPy
+    np.random.seed(seed)
+    
+    # TensorFlow
+    tf.random.set_seed(seed)
+    
+    # Set environment variables for CUDA (if using GPU)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    os.environ['TF_DETERMINISTIC_OPS'] = '1'
+    os.environ['TF_CUDNN_DETERMINISTIC'] = '1'
+    
+    # Configure TensorFlow for deterministic operations
+    tf.config.experimental.enable_op_determinism()
 
 # Set TensorFlow logging level based on debug flag
 def setup_tensorflow_logging(debug=False):
@@ -596,6 +616,9 @@ def train_model(debug=False):
     """Main training function"""
     # Set up TensorFlow logging based on debug flag
     setup_tensorflow_logging(debug)
+    
+    # Set all random seeds for reproducibility
+    set_all_seeds(params.SHUFFLE_SEED)
     
     # Set up GPU
     print("🔧 Configuring hardware...")
