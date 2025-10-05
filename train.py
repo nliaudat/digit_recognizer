@@ -40,10 +40,11 @@ def setup_tensorflow_logging(debug=False):
         absl.logging.set_verbosity(absl.logging.ERROR)
         
 def analyze_quantization_impact(model, x_test, y_test, tflite_path):
-    """Analyze why quantization reduces accuracy - handles both label types"""
+    """Analyze why quantization reduces accuracy - FIXED VERSION"""
     print("\n🔍 QUANTIZATION ANALYSIS")
     print("=" * 50)
     
+    # 1. Compare predictions before and after quantization
     sample_indices = np.random.choice(len(x_test), 100, replace=False)
     x_sample = x_test[sample_indices]
     y_sample = y_test[sample_indices]
@@ -52,46 +53,54 @@ def analyze_quantization_impact(model, x_test, y_test, tflite_path):
     keras_predictions = model.predict(x_sample, verbose=0)
     keras_classes = np.argmax(keras_predictions, axis=1)
     
-    # Handle both categorical and sparse labels
+    # FIX: Handle both label formats (sparse and categorical)
     if len(y_sample.shape) == 2 and y_sample.shape[1] == params.NB_CLASSES:
-        # Categorical labels (one-hot) - convert to class indices
+        # y_sample is categorical (one-hot), convert to sparse
         true_classes = np.argmax(y_sample, axis=1)
     else:
-        # Sparse labels (already class indices)
+        # y_sample is already sparse
         true_classes = y_sample
     
     keras_accuracy = np.mean(keras_classes == true_classes)
     
-    # TFLite model predictions WITH PROPER DEQUANTIZATION
+    # TFLite model predictions
     interpreter = tf.lite.Interpreter(model_path=tflite_path)
     interpreter.allocate_tensors()
     
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
     
-    tflite_predictions = []
+    print(f"TFLite model details:")
+    print(f"  Input dtype: {input_details[0]['dtype']}")
+    print(f"  Input name: {input_details[0]['name']}")
+    print(f"  Input shape: {input_details[0]['shape']}")
+    if input_details[0]['quantization'] != (0.0, 0):
+        print(f"  Input quantization: {input_details[0]['quantization']}")
     
+    tflite_predictions = []
     for i in range(len(x_sample)):
         test_image = x_sample[i:i+1]
         
-        # Handle input quantization
-        if input_details[0]['dtype'] == np.int8:
+        # Handle all quantization types properly
+        input_dtype = input_details[0]['dtype']
+        
+        if input_dtype == np.int8:
+            # ESP-DL quantization: int8 [-128, 127]
             input_scale, input_zero_point = input_details[0]['quantization']
             test_image = test_image / input_scale + input_zero_point
             test_image = test_image.astype(np.int8)
+        elif input_dtype == np.uint8:
+            # Standard quantization: uint8 [0, 255]
+            input_scale, input_zero_point = input_details[0]['quantization']
+            test_image = test_image / input_scale + input_zero_point
+            test_image = test_image.astype(np.uint8)
         else:
+            # Float model
             test_image = test_image.astype(np.float32)
         
         interpreter.set_tensor(input_details[0]['index'], test_image)
         interpreter.invoke()
         output = interpreter.get_tensor(output_details[0]['index'])
-        
-        # PROPER dequantization
-        if output_details[0]['dtype'] == np.int8:
-            output_scale, output_zero_point = output_details[0]['quantization']
-            output = output.astype(np.float32)
-            output = (output - output_zero_point) * output_scale
-        
         tflite_predictions.append(output[0])
     
     tflite_classes = np.argmax(tflite_predictions, axis=1)
@@ -102,62 +111,110 @@ def analyze_quantization_impact(model, x_test, y_test, tflite_path):
     print(f"  TFLite: {tflite_accuracy:.4f}")
     print(f"  Difference: {keras_accuracy - tflite_accuracy:.4f}")
     
-    # Check where predictions differ
+    # 2. Check where predictions differ
     differing_indices = np.where(keras_classes != tflite_classes)[0]
     print(f"  Differing predictions: {len(differing_indices)}/{len(x_sample)}")
     
     if len(differing_indices) > 0:
         print(f"  Example differences:")
-        for i in differing_indices[:3]:  # Show first 3 differences
-            keras_conf = np.max(keras_predictions[i])
-            tflite_conf = np.max(tflite_predictions[i])
+        for i in differing_indices[:5]:  # Show first 5 differences
             print(f"    Sample {i}: Keras={keras_classes[i]}, TFLite={tflite_classes[i]}, True={true_classes[i]}")
-            print(f"    Keras conf: {keras_conf:.3f}, TFLite conf: {tflite_conf:.3f}")
+            print(f"    Keras conf: {np.max(keras_predictions[i]):.3f}, TFLite conf: {np.max(tflite_predictions[i]):.3f}")
+
             
-def evaluate_tflite_model_universal(tflite_path, x_test, y_test):
-    """Universal TFLite evaluation that handles both label formats and proper dequantization"""
+def evaluate_tflite_model(tflite_path, x_test, y_test):
+    """Universal TFLite evaluation that handles both quantization types - FIXED"""
     interpreter = tf.lite.Interpreter(model_path=tflite_path)
     interpreter.allocate_tensors()
     
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
     
+    print(f"Evaluating TFLite model:")
+    print(f"  Input dtype: {input_details[0]['dtype']}")
+    if input_details[0]['quantization'] != (0.0, 0):
+        print(f"  Input quantization: {input_details[0]['quantization']}")
+    
     predictions = []
     
     for i in tqdm(range(len(x_test)), desc="Evaluating TFLite model", leave=False):
         test_image = x_test[i:i+1]
         
-        # Handle quantization
-        if input_details[0]['dtype'] == np.int8:
+        # FIX: Handle all quantization types properly
+        input_dtype = input_details[0]['dtype']
+        
+        if input_dtype == np.int8:
+            # ESP-DL quantization: int8 [-128, 127]
             input_scale, input_zero_point = input_details[0]['quantization']
             test_image = test_image / input_scale + input_zero_point
             test_image = test_image.astype(np.int8)
+        elif input_dtype == np.uint8:
+            # Standard quantization: uint8 [0, 255]
+            input_scale, input_zero_point = input_details[0]['quantization']
+            test_image = test_image / input_scale + input_zero_point
+            test_image = test_image.astype(np.uint8)
         else:
+            # Float model
             test_image = test_image.astype(np.float32)
         
         interpreter.set_tensor(input_details[0]['index'], test_image)
         interpreter.invoke()
         output = interpreter.get_tensor(output_details[0]['index'])
-        
-        # FIX: PROPER output dequantization
-        if output_details[0]['dtype'] == np.int8:
-            output_scale, output_zero_point = output_details[0]['quantization']
-            # Convert INT8 output back to float
-            output = output.astype(np.float32)
-            output = (output - output_zero_point) * output_scale
-        
         predictions.append(np.argmax(output[0]))
     
     # Convert y_test to sparse labels if it's categorical
     if len(y_test.shape) == 2 and y_test.shape[1] == params.NB_CLASSES:
-        # It's categorical (one-hot), convert to sparse
         true_labels = np.argmax(y_test, axis=1)
     else:
-        # It's already sparse
         true_labels = y_test
     
     accuracy = np.mean(np.array(predictions) == true_labels)
     return accuracy
+
+def debug_tflite_model(tflite_path, x_sample):
+    """Debug TFLite model input/output requirements"""
+    interpreter = tf.lite.Interpreter(model_path=tflite_path)
+    interpreter.allocate_tensors()
+    
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    
+    print("\n🔧 TFLite Model Debug Info:")
+    print("Input details:")
+    for detail in input_details:
+        print(f"  Name: {detail['name']}")
+        print(f"  Shape: {detail['shape']}")
+        print(f"  Dtype: {detail['dtype']}")
+        print(f"  Quantization: {detail['quantization']}")
+    
+    print("Output details:")
+    for detail in output_details:
+        print(f"  Name: {detail['name']}")
+        print(f"  Shape: {detail['shape']}")
+        print(f"  Dtype: {detail['dtype']}")
+        print(f"  Quantization: {detail['quantization']}")
+    
+    # Test with a sample
+    test_image = x_sample[0:1]
+    input_dtype = input_details[0]['dtype']
+    
+    print(f"\nSample input conversion:")
+    print(f"  Original dtype: {test_image.dtype}, range: [{test_image.min():.3f}, {test_image.max():.3f}]")
+    
+    if input_dtype == np.uint8:
+        input_scale, input_zero_point = input_details[0]['quantization']
+        converted = test_image / input_scale + input_zero_point
+        converted = converted.astype(np.uint8)
+        print(f"  Converted to uint8: range [{converted.min()}, {converted.max()}]")
+    elif input_dtype == np.int8:
+        input_scale, input_zero_point = input_details[0]['quantization']
+        converted = test_image / input_scale + input_zero_point
+        converted = converted.astype(np.int8)
+        print(f"  Converted to int8: range [{converted.min()}, {converted.max()}]")
+    
+    return input_details, output_details
+
+
 
 @contextmanager
 def suppress_all_output(debug=False):
@@ -216,6 +273,7 @@ def suppress_all_output(debug=False):
             except (AttributeError, OSError):
                 pass
 
+        
 class TFLiteModelManager:
     def __init__(self, output_dir, debug=False):
         self.output_dir = output_dir
@@ -223,7 +281,7 @@ class TFLiteModelManager:
         self.debug = debug
         
     def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
-        """Save model directly as TFLite with compatibility fix"""
+        """Save model directly as TFLite with ESP-DL compatibility"""
         try:
             # Build model with input shape first
             model.build((None,) + params.INPUT_SHAPE)
@@ -241,24 +299,31 @@ class TFLiteModelManager:
             converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func], model_call)
             
             if quantize:
-                if self.debug:
-                    print(f"🔧 Converting {filename} with INT8 quantization...")
                 converter.optimizations = [tf.lite.Optimize.DEFAULT]
                 if representative_data is not None:
                     converter.representative_dataset = representative_data
-                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-                converter.inference_input_type = tf.int8
-                converter.inference_output_type = tf.int8
                 
-                # Enable experimental features for better quantization
+                # ESP-DL specific quantization
+                if params.ESP_DL_QUANTIZE:
+                    if self.debug:
+                        print(f"🔧 Converting {filename} with INT8 quantization for ESP-DL...")
+                    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+                    converter.inference_input_type = tf.int8
+                    converter.inference_output_type = tf.int8
+                else:
+                    if self.debug:
+                        print(f"🔧 Converting {filename} with UINT8 quantization...")
+                    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+                    converter.inference_input_type = tf.uint8
+                    converter.inference_output_type = tf.uint8
+                
+                converter.allow_custom_ops = False
                 converter.experimental_new_quantizer = True
-                converter._experimental_disable_per_channel = False  # Enable per-channel quantization
+                converter._experimental_disable_per_channel = False
                 
             else:
                 if self.debug:
                     print(f"🔧 Converting {filename} as float32...")
-            
-            converter.allow_custom_ops = False
             
             # Use comprehensive suppression context manager
             with suppress_all_output(self.debug):
@@ -270,7 +335,8 @@ class TFLiteModelManager:
             
             model_size_kb = len(tflite_model) / 1024
             if self.debug:
-                print(f"💾 Saved {filename}: {model_size_kb:.1f} KB")
+                quant_type = "INT8" if (quantize and params.ESP_DL_QUANTIZE) else "UINT8" if quantize else "Float32"
+                print(f"💾 Saved {filename} ({quant_type}): {model_size_kb:.1f} KB")
             
             return tflite_model, model_size_kb
             
@@ -615,44 +681,7 @@ def setup_gpu():
         print(f"⚠️  GPU configuration failed: {e}")
         print("   Falling back to CPU")
         return None
-
-def evaluate_tflite_model(tflite_path, x_test, y_test):
-    """Universal TFLite evaluation that handles both label formats"""
-    interpreter = tf.lite.Interpreter(model_path=tflite_path)
-    interpreter.allocate_tensors()
-    
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    
-    predictions = []
-    
-    for i in tqdm(range(len(x_test)), desc="Evaluating TFLite model", leave=False):
-        test_image = x_test[i:i+1]
-        
-        # Handle quantization
-        if input_details[0]['dtype'] == np.int8:
-            input_scale, input_zero_point = input_details[0]['quantization']
-            test_image = test_image / input_scale + input_zero_point
-            test_image = test_image.astype(np.int8)
-        else:
-            test_image = test_image.astype(np.float32)
-        
-        interpreter.set_tensor(input_details[0]['index'], test_image)
-        interpreter.invoke()
-        output = interpreter.get_tensor(output_details[0]['index'])
-        predictions.append(np.argmax(output[0]))
-    
-    # Convert y_test to sparse labels if it's categorical
-    if len(y_test.shape) == 2 and y_test.shape[1] == params.NB_CLASSES:
-        # It's categorical (one-hot), convert to sparse
-        true_labels = np.argmax(y_test, axis=1)
-    else:
-        # It's already sparse
-        true_labels = y_test
-    
-    accuracy = np.mean(np.array(predictions) == true_labels)
-    return accuracy
-    
+   
 
 def print_training_summary(model, x_train, x_val, x_test, debug=False):
     """Print comprehensive training summary"""
@@ -812,6 +841,10 @@ def train_model(debug=False):
     # Evaluate models
     print("\n📈 Evaluating models...")
     
+    # Add debug info
+    if debug:
+        debug_tflite_model(quantized_tflite_path, x_test[:1])
+    
     # Keras model evaluation with tqdm
     if debug:
         print("Evaluating Keras model...")
@@ -904,7 +937,7 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         
 def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
-    """Comprehensive training diagnostics - FIXED version"""
+    """Comprehensive training diagnostics - FIXED"""
     print("\n🔬 TRAINING DIAGNOSTICS")
     print("=" * 50)
     
@@ -913,17 +946,13 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
     small_x = x_train[:100]
     small_y = y_train[:100]
     
-    # FIX: Determine label type and handle appropriately
+    # FIX: Handle both label formats
     if len(small_y.shape) == 2 and small_y.shape[1] == params.NB_CLASSES:
         # Categorical labels (one-hot)
-        label_type = "categorical"
         model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     else:
         # Sparse labels
-        label_type = "sparse" 
         model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-    
-    print(f"   Label type: {label_type}")
     
     # Train on small dataset
     history = model.fit(small_x, small_y, epochs=10, batch_size=32, verbose=0)
@@ -935,13 +964,12 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
     else:
         print("   ✅ Model can overfit small dataset - architecture OK")
     
-    # 2. Check gradient flow - FIXED for both label types
+    # 2. Check gradient flow
     print("2. Checking gradient flow...")
     with tf.GradientTape() as tape:
         predictions = model(small_x)
-        
-        # FIX: Use appropriate loss calculation based on label type
-        if label_type == "categorical":
+        # FIX: Use appropriate loss calculation based on label format
+        if len(small_y.shape) == 2 and small_y.shape[1] == params.NB_CLASSES:
             loss = tf.keras.losses.categorical_crossentropy(small_y, predictions)
         else:
             loss = tf.keras.losses.sparse_categorical_crossentropy(small_y, predictions)
@@ -949,7 +977,6 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
     gradients = tape.gradient(loss, model.trainable_variables)
     grad_norms = [tf.norm(g).numpy() if g is not None else 0 for g in gradients]
     
-    print(f"   Loss: {tf.reduce_mean(loss).numpy():.3f}")
     print(f"   Gradient norms - Min: {min(grad_norms):.2e}, Max: {max(grad_norms):.2e}")
     
     if max(grad_norms) < 1e-7:
@@ -967,8 +994,9 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
     print(f"   Mean: {x_train.mean():.3f}, Std: {x_train.std():.3f}")
 
 
+
 def verify_model_predictions(model, x_sample, y_sample):
-    """Verify model can learn at all - FIXED version"""
+    """Verify model can learn at all - FIXED"""
     print("\n🧪 MODEL VERIFICATION:")
     
     # Test on a small batch
@@ -994,6 +1022,7 @@ def verify_model_predictions(model, x_sample, y_sample):
     # Check prediction distribution
     print(f"Prediction distribution: {np.bincount(pred_classes, minlength=params.NB_CLASSES)}")
     print(f"True distribution: {np.bincount(true_classes.astype(int), minlength=params.NB_CLASSES)}")
+
     
 def debug_model_architecture(model, x_sample):
     """Debug the current model architecture - FIXED VERSION"""

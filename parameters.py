@@ -5,7 +5,22 @@ Global parameters for Digit Recognition
 # ==============================================================================
 # MODEL SELECTION
 # ==============================================================================
-MODEL_ARCHITECTURE = "original_haverland"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready
+
+AVAILABLE_MODELS = [
+    "practical_tiny_depthwise",
+    "simple_cnn", 
+    "dig_class100_s2",
+    "original_haverland",
+    "esp_optimized_cnn",
+    "esp_ultra_light", 
+    "esp_high_capacity",
+    "esp_quantization_ready",
+    "esp_haverland_compatible",
+    "esp_quantization_ready_v2",
+    "esp_quantization_ready_v2_aggressive"
+]
+
+MODEL_ARCHITECTURE = "esp_quantization_ready_v2_aggressive"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
 
 # ==============================================================================
 # MODEL-SPECIFIC PARAMETERS
@@ -44,7 +59,7 @@ USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 
 # Training Parameters
 BATCH_SIZE = 32
-EPOCHS = 400
+EPOCHS = 200
 LEARNING_RATE = 0.001
 TRAINING_PERCENTAGE = 1.0  # Use 100% of available data
 VALIDATION_SPLIT = 0.2     # 20% of training for validation
@@ -105,6 +120,9 @@ OUTPUT_DIR = "exported_models"
 
 # TFLite Conversion Parameters
 QUANTIZE_MODEL = True
+# ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
+ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
+                         # If False: quantize to uint8 range [0, 255] (default)
 QUANTIZE_NUM_SAMPLES=1000
 TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
 FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
