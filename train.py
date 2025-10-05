@@ -703,6 +703,13 @@ def train_model(debug=False):
     print("📊 Loading dataset from multiple sources...")
     (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
     
+    if params.MODEL_ARCHITECTURE != "original_haverland":
+        # FIX: Convert ALL models to use categorical labels for consistency
+        print("Converting labels to categorical format...")
+        y_train = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
+        y_val = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES) 
+        y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+    
     # Ensure data is properly normalized
     print("🔍 Checking data normalization...")
     print(f"   Data range before preprocessing: [{x_train.min():.3f}, {x_train.max():.3f}]")

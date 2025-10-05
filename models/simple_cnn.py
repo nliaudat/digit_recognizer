@@ -21,7 +21,7 @@ def create_simple_cnn():
         tf.keras.layers.GlobalAveragePooling2D(),
         tf.keras.layers.Dense(params.SIMPLE_CNN_DENSE_UNITS, activation='relu'),
         tf.keras.layers.Dropout(0.3),
-        tf.keras.layers.Dense(params.NB_CLASSES, activation='softmax')
+        tf.keras.layers.Dense(params.NB_CLASSES, activation='softmax', name='output')
     ])
     
     return model

@@ -5,7 +5,7 @@ Global parameters for Digit Recognition
 # ==============================================================================
 # MODEL SELECTION
 # ==============================================================================
-MODEL_ARCHITECTURE = "simple_cnn"  # Options: "practical_tiny_depthwise", "simple_cnn", "dig_class100_s2", "original_haverland"
+MODEL_ARCHITECTURE = "original_haverland"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready
 
 # ==============================================================================
 # MODEL-SPECIFIC PARAMETERS
@@ -113,3 +113,25 @@ FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
 VERBOSE = 1
 SAVE_TRAINING_PLOTS = True
 SHUFFLE_SEED = 42
+
+
+# ESP-DL specific parameters
+# ESP_DL_COMPATIBLE_OPS = [
+    # 'CONV_2D',
+    # 'DEPTHWISE_CONV_2D', 
+    # 'FULLY_CONNECTED',
+    # 'MAX_POOL_2D',
+    # 'RESHAPE',
+    # 'SOFTMAX',
+    # 'LOGISTIC',
+    # 'RELU'
+# ]
+
+
+# # ESP memory constraints
+# ESP32_FLASH_SIZE = 4096  # 4MB typical
+# ESP32_PSRAM_SIZE = 0     # No PSRAM on most boards
+# ESP32_RAM_SIZE = 320     # 320KB SRAM
+
+# # Target model size for ESP32
+# TARGET_MODEL_SIZE_KB = 100  # Aim for <100KB quantized

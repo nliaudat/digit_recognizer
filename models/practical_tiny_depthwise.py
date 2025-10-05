@@ -20,14 +20,14 @@ def create_practical_tiny_depthwise():
         tf.keras.layers.MaxPooling2D((2, 2), name='pool1'),
         
         # Depthwise separable block 1
-        tf.keras.layers.DepthwiseConv2D(
+        tf.keras.layers.DepthwiseConv2D( ## Spatial per channel
             (3, 3), 
             activation='relu', 
             padding='same',
             depthwise_initializer='he_normal',  # CRITICAL
             name='depthwise1'
         ),
-        tf.keras.layers.Conv2D(
+        tf.keras.layers.Conv2D( ## Channel combination
             64, (1, 1), 
             activation='relu',
             kernel_initializer='he_normal',  # CRITICAL
