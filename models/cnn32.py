@@ -15,7 +15,7 @@ def CNN_s2(input_shape=None, nb_classes=params.NB_CLASSES, activation_top='softm
     
     # First conv block
     x = tf.keras.layers.BatchNormalization()(inputs)
-    x = tf.keras.layers.Conv2D(32, (3, 3), padding='same')(x)
+    x = tf.keras.layers.Conv2D(32, (3, 3), padding='same')(x) #tf.keras.layers.Conv2D(32, (3,3))  # Processes all channels together, similar to convert to grayscale
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Activation('relu')(x)
     x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)

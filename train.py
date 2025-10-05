@@ -40,11 +40,10 @@ def setup_tensorflow_logging(debug=False):
         absl.logging.set_verbosity(absl.logging.ERROR)
         
 def analyze_quantization_impact(model, x_test, y_test, tflite_path):
-    """Analyze why quantization reduces accuracy"""
+    """Analyze why quantization reduces accuracy - handles both label types"""
     print("\n🔍 QUANTIZATION ANALYSIS")
     print("=" * 50)
     
-    # 1. Compare predictions before and after quantization
     sample_indices = np.random.choice(len(x_test), 100, replace=False)
     x_sample = x_test[sample_indices]
     y_sample = y_test[sample_indices]
@@ -52,9 +51,18 @@ def analyze_quantization_impact(model, x_test, y_test, tflite_path):
     # Keras model predictions
     keras_predictions = model.predict(x_sample, verbose=0)
     keras_classes = np.argmax(keras_predictions, axis=1)
-    keras_accuracy = np.mean(keras_classes == y_sample)
     
-    # TFLite model predictions
+    # Handle both categorical and sparse labels
+    if len(y_sample.shape) == 2 and y_sample.shape[1] == params.NB_CLASSES:
+        # Categorical labels (one-hot) - convert to class indices
+        true_classes = np.argmax(y_sample, axis=1)
+    else:
+        # Sparse labels (already class indices)
+        true_classes = y_sample
+    
+    keras_accuracy = np.mean(keras_classes == true_classes)
+    
+    # TFLite model predictions WITH PROPER DEQUANTIZATION
     interpreter = tf.lite.Interpreter(model_path=tflite_path)
     interpreter.allocate_tensors()
     
@@ -62,8 +70,62 @@ def analyze_quantization_impact(model, x_test, y_test, tflite_path):
     output_details = interpreter.get_output_details()
     
     tflite_predictions = []
+    
     for i in range(len(x_sample)):
         test_image = x_sample[i:i+1]
+        
+        # Handle input quantization
+        if input_details[0]['dtype'] == np.int8:
+            input_scale, input_zero_point = input_details[0]['quantization']
+            test_image = test_image / input_scale + input_zero_point
+            test_image = test_image.astype(np.int8)
+        else:
+            test_image = test_image.astype(np.float32)
+        
+        interpreter.set_tensor(input_details[0]['index'], test_image)
+        interpreter.invoke()
+        output = interpreter.get_tensor(output_details[0]['index'])
+        
+        # PROPER dequantization
+        if output_details[0]['dtype'] == np.int8:
+            output_scale, output_zero_point = output_details[0]['quantization']
+            output = output.astype(np.float32)
+            output = (output - output_zero_point) * output_scale
+        
+        tflite_predictions.append(output[0])
+    
+    tflite_classes = np.argmax(tflite_predictions, axis=1)
+    tflite_accuracy = np.mean(tflite_classes == true_classes)
+    
+    print(f"Sample set accuracy:")
+    print(f"  Keras:  {keras_accuracy:.4f}")
+    print(f"  TFLite: {tflite_accuracy:.4f}")
+    print(f"  Difference: {keras_accuracy - tflite_accuracy:.4f}")
+    
+    # Check where predictions differ
+    differing_indices = np.where(keras_classes != tflite_classes)[0]
+    print(f"  Differing predictions: {len(differing_indices)}/{len(x_sample)}")
+    
+    if len(differing_indices) > 0:
+        print(f"  Example differences:")
+        for i in differing_indices[:3]:  # Show first 3 differences
+            keras_conf = np.max(keras_predictions[i])
+            tflite_conf = np.max(tflite_predictions[i])
+            print(f"    Sample {i}: Keras={keras_classes[i]}, TFLite={tflite_classes[i]}, True={true_classes[i]}")
+            print(f"    Keras conf: {keras_conf:.3f}, TFLite conf: {tflite_conf:.3f}")
+            
+def evaluate_tflite_model_universal(tflite_path, x_test, y_test):
+    """Universal TFLite evaluation that handles both label formats and proper dequantization"""
+    interpreter = tf.lite.Interpreter(model_path=tflite_path)
+    interpreter.allocate_tensors()
+    
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    
+    predictions = []
+    
+    for i in tqdm(range(len(x_test)), desc="Evaluating TFLite model", leave=False):
+        test_image = x_test[i:i+1]
         
         # Handle quantization
         if input_details[0]['dtype'] == np.int8:
@@ -76,25 +138,26 @@ def analyze_quantization_impact(model, x_test, y_test, tflite_path):
         interpreter.set_tensor(input_details[0]['index'], test_image)
         interpreter.invoke()
         output = interpreter.get_tensor(output_details[0]['index'])
-        tflite_predictions.append(output[0])
+        
+        # FIX: PROPER output dequantization
+        if output_details[0]['dtype'] == np.int8:
+            output_scale, output_zero_point = output_details[0]['quantization']
+            # Convert INT8 output back to float
+            output = output.astype(np.float32)
+            output = (output - output_zero_point) * output_scale
+        
+        predictions.append(np.argmax(output[0]))
     
-    tflite_classes = np.argmax(tflite_predictions, axis=1)
-    tflite_accuracy = np.mean(tflite_classes == y_sample)
+    # Convert y_test to sparse labels if it's categorical
+    if len(y_test.shape) == 2 and y_test.shape[1] == params.NB_CLASSES:
+        # It's categorical (one-hot), convert to sparse
+        true_labels = np.argmax(y_test, axis=1)
+    else:
+        # It's already sparse
+        true_labels = y_test
     
-    print(f"Sample set accuracy:")
-    print(f"  Keras:  {keras_accuracy:.4f}")
-    print(f"  TFLite: {tflite_accuracy:.4f}")
-    print(f"  Difference: {keras_accuracy - tflite_accuracy:.4f}")
-    
-    # 2. Check where predictions differ
-    differing_indices = np.where(keras_classes != tflite_classes)[0]
-    print(f"  Differing predictions: {len(differing_indices)}/{len(x_sample)}")
-    
-    if len(differing_indices) > 0:
-        print(f"  Example differences:")
-        for i in differing_indices[:5]:  # Show first 5 differences
-            print(f"    Sample {i}: Keras={keras_classes[i]}, TFLite={tflite_classes[i]}, True={y_sample[i]}")
-            print(f"    Keras conf: {np.max(keras_predictions[i]):.3f}, TFLite conf: {np.max(tflite_predictions[i]):.3f}")
+    accuracy = np.mean(np.array(predictions) == true_labels)
+    return accuracy
 
 @contextmanager
 def suppress_all_output(debug=False):
@@ -640,6 +703,13 @@ def train_model(debug=False):
     print("📊 Loading dataset from multiple sources...")
     (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
     
+    if params.MODEL_ARCHITECTURE != "original_haverland":
+        # FIX: Convert ALL models to use categorical labels for consistency
+        print("Converting labels to categorical format...")
+        y_train = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
+        y_val = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES) 
+        y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+    
     # Ensure data is properly normalized
     print("🔍 Checking data normalization...")
     print(f"   Data range before preprocessing: [{x_train.min():.3f}, {x_train.max():.3f}]")
@@ -788,17 +858,27 @@ def train_model(debug=False):
     print(f"   Training plot: training_history.png")
     
     # Save training configuration
-    save_training_config(training_dir, quantized_size, float_size, tflite_manager, debug)
+    save_training_config(training_dir, quantized_size, float_size, tflite_manager,
+                        test_accuracy, tflite_accuracy, training_time, debug)
     
     return model, history, training_dir
 
-def save_training_config(training_dir, quantized_size, float_size, tflite_manager, debug=False):
-    """Save training configuration to file"""
+def save_training_config(training_dir, quantized_size, float_size, tflite_manager, 
+                        test_accuracy, tflite_accuracy, training_time, debug=False):
+    """Save training configuration and results to file"""
     config_path = os.path.join(training_dir, "training_config.txt")
     
     with open(config_path, 'w') as f:
         f.write("Digit Recognition Training Configuration\n")
         f.write("=" * 50 + "\n\n")
+        
+        f.write("FINAL RESULTS:\n")
+        f.write(f"  Keras Model Test Accuracy: {test_accuracy:.4f}\n")
+        f.write(f"  TFLite Model Test Accuracy: {tflite_accuracy:.4f}\n")
+        f.write(f"  Best Validation Accuracy: {tflite_manager.best_accuracy:.4f}\n")
+        f.write(f"  Quantized Model Size: {quantized_size:.1f} KB\n")
+        f.write(f"  Float Model Size: {float_size:.1f} KB\n")
+        f.write(f"  Training Time: {training_time}\n\n")
         
         f.write("MODEL OUTPUT:\n")
         f.write(f"  Quantized TFLite: {quantized_size:.1f} KB\n")
@@ -810,6 +890,7 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
             f.write(f"  {i+1}. {source['name']} ({source['type']}) - weight: {source.get('weight', 1.0)}\n")
         
         f.write(f"\nMODEL ARCHITECTURE:\n")
+        f.write(f"  Model: {params.MODEL_ARCHITECTURE}\n")
         f.write(f"  Input shape: {params.INPUT_SHAPE}\n")
         f.write(f"  Classes: {params.NB_CLASSES}\n")
         
@@ -823,7 +904,7 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         
 def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
-    """Comprehensive training diagnostics"""
+    """Comprehensive training diagnostics - FIXED version"""
     print("\n🔬 TRAINING DIAGNOSTICS")
     print("=" * 50)
     
@@ -832,13 +913,17 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
     small_x = x_train[:100]
     small_y = y_train[:100]
     
-    # FIX: Use appropriate loss based on label format
-    if params.MODEL_ARCHITECTURE == "original_haverland":
-        # For categorical labels (one-hot)
+    # FIX: Determine label type and handle appropriately
+    if len(small_y.shape) == 2 and small_y.shape[1] == params.NB_CLASSES:
+        # Categorical labels (one-hot)
+        label_type = "categorical"
         model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     else:
-        # For sparse labels
+        # Sparse labels
+        label_type = "sparse" 
         model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    
+    print(f"   Label type: {label_type}")
     
     # Train on small dataset
     history = model.fit(small_x, small_y, epochs=10, batch_size=32, verbose=0)
@@ -850,12 +935,13 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
     else:
         print("   ✅ Model can overfit small dataset - architecture OK")
     
-    # 2. Check gradient flow
+    # 2. Check gradient flow - FIXED for both label types
     print("2. Checking gradient flow...")
     with tf.GradientTape() as tape:
         predictions = model(small_x)
-        # FIX: Use appropriate loss calculation
-        if params.MODEL_ARCHITECTURE == "original_haverland":
+        
+        # FIX: Use appropriate loss calculation based on label type
+        if label_type == "categorical":
             loss = tf.keras.losses.categorical_crossentropy(small_y, predictions)
         else:
             loss = tf.keras.losses.sparse_categorical_crossentropy(small_y, predictions)
@@ -863,6 +949,7 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
     gradients = tape.gradient(loss, model.trainable_variables)
     grad_norms = [tf.norm(g).numpy() if g is not None else 0 for g in gradients]
     
+    print(f"   Loss: {tf.reduce_mean(loss).numpy():.3f}")
     print(f"   Gradient norms - Min: {min(grad_norms):.2e}, Max: {max(grad_norms):.2e}")
     
     if max(grad_norms) < 1e-7:
@@ -881,7 +968,7 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
 
 
 def verify_model_predictions(model, x_sample, y_sample):
-    """Verify model can learn at all"""
+    """Verify model can learn at all - FIXED version"""
     print("\n🧪 MODEL VERIFICATION:")
     
     # Test on a small batch
@@ -905,8 +992,8 @@ def verify_model_predictions(model, x_sample, y_sample):
     print(f"Sample batch accuracy: {accuracy:.3f}")
     
     # Check prediction distribution
-    print(f"Prediction distribution: {np.bincount(pred_classes)}")
-    print(f"True distribution: {np.bincount(true_classes.astype(int))}")
+    print(f"Prediction distribution: {np.bincount(pred_classes, minlength=params.NB_CLASSES)}")
+    print(f"True distribution: {np.bincount(true_classes.astype(int), minlength=params.NB_CLASSES)}")
     
 def debug_model_architecture(model, x_sample):
     """Debug the current model architecture - FIXED VERSION"""
