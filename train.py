@@ -38,183 +38,6 @@ def setup_tensorflow_logging(debug=False):
         # Suppress absl logging
         import absl.logging
         absl.logging.set_verbosity(absl.logging.ERROR)
-        
-def analyze_quantization_impact(model, x_test, y_test, tflite_path):
-    """Analyze why quantization reduces accuracy - FIXED VERSION"""
-    print("\n🔍 QUANTIZATION ANALYSIS")
-    print("=" * 50)
-    
-    # 1. Compare predictions before and after quantization
-    sample_indices = np.random.choice(len(x_test), 100, replace=False)
-    x_sample = x_test[sample_indices]
-    y_sample = y_test[sample_indices]
-    
-    # Keras model predictions
-    keras_predictions = model.predict(x_sample, verbose=0)
-    keras_classes = np.argmax(keras_predictions, axis=1)
-    
-    # FIX: Handle both label formats (sparse and categorical)
-    if len(y_sample.shape) == 2 and y_sample.shape[1] == params.NB_CLASSES:
-        # y_sample is categorical (one-hot), convert to sparse
-        true_classes = np.argmax(y_sample, axis=1)
-    else:
-        # y_sample is already sparse
-        true_classes = y_sample
-    
-    keras_accuracy = np.mean(keras_classes == true_classes)
-    
-    # TFLite model predictions
-    interpreter = tf.lite.Interpreter(model_path=tflite_path)
-    interpreter.allocate_tensors()
-    
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    
-    print(f"TFLite model details:")
-    print(f"  Input dtype: {input_details[0]['dtype']}")
-    print(f"  Input name: {input_details[0]['name']}")
-    print(f"  Input shape: {input_details[0]['shape']}")
-    if input_details[0]['quantization'] != (0.0, 0):
-        print(f"  Input quantization: {input_details[0]['quantization']}")
-    
-    tflite_predictions = []
-    for i in range(len(x_sample)):
-        test_image = x_sample[i:i+1]
-        
-        # Handle all quantization types properly
-        input_dtype = input_details[0]['dtype']
-        
-        if input_dtype == np.int8:
-            # ESP-DL quantization: int8 [-128, 127]
-            input_scale, input_zero_point = input_details[0]['quantization']
-            test_image = test_image / input_scale + input_zero_point
-            test_image = test_image.astype(np.int8)
-        elif input_dtype == np.uint8:
-            # Standard quantization: uint8 [0, 255]
-            input_scale, input_zero_point = input_details[0]['quantization']
-            test_image = test_image / input_scale + input_zero_point
-            test_image = test_image.astype(np.uint8)
-        else:
-            # Float model
-            test_image = test_image.astype(np.float32)
-        
-        interpreter.set_tensor(input_details[0]['index'], test_image)
-        interpreter.invoke()
-        output = interpreter.get_tensor(output_details[0]['index'])
-        tflite_predictions.append(output[0])
-    
-    tflite_classes = np.argmax(tflite_predictions, axis=1)
-    tflite_accuracy = np.mean(tflite_classes == true_classes)
-    
-    print(f"Sample set accuracy:")
-    print(f"  Keras:  {keras_accuracy:.4f}")
-    print(f"  TFLite: {tflite_accuracy:.4f}")
-    print(f"  Difference: {keras_accuracy - tflite_accuracy:.4f}")
-    
-    # 2. Check where predictions differ
-    differing_indices = np.where(keras_classes != tflite_classes)[0]
-    print(f"  Differing predictions: {len(differing_indices)}/{len(x_sample)}")
-    
-    if len(differing_indices) > 0:
-        print(f"  Example differences:")
-        for i in differing_indices[:5]:  # Show first 5 differences
-            print(f"    Sample {i}: Keras={keras_classes[i]}, TFLite={tflite_classes[i]}, True={true_classes[i]}")
-            print(f"    Keras conf: {np.max(keras_predictions[i]):.3f}, TFLite conf: {np.max(tflite_predictions[i]):.3f}")
-
-            
-def evaluate_tflite_model(tflite_path, x_test, y_test):
-    """Universal TFLite evaluation that handles both quantization types - FIXED"""
-    interpreter = tf.lite.Interpreter(model_path=tflite_path)
-    interpreter.allocate_tensors()
-    
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    
-    print(f"Evaluating TFLite model:")
-    print(f"  Input dtype: {input_details[0]['dtype']}")
-    if input_details[0]['quantization'] != (0.0, 0):
-        print(f"  Input quantization: {input_details[0]['quantization']}")
-    
-    predictions = []
-    
-    for i in tqdm(range(len(x_test)), desc="Evaluating TFLite model", leave=False):
-        test_image = x_test[i:i+1]
-        
-        # FIX: Handle all quantization types properly
-        input_dtype = input_details[0]['dtype']
-        
-        if input_dtype == np.int8:
-            # ESP-DL quantization: int8 [-128, 127]
-            input_scale, input_zero_point = input_details[0]['quantization']
-            test_image = test_image / input_scale + input_zero_point
-            test_image = test_image.astype(np.int8)
-        elif input_dtype == np.uint8:
-            # Standard quantization: uint8 [0, 255]
-            input_scale, input_zero_point = input_details[0]['quantization']
-            test_image = test_image / input_scale + input_zero_point
-            test_image = test_image.astype(np.uint8)
-        else:
-            # Float model
-            test_image = test_image.astype(np.float32)
-        
-        interpreter.set_tensor(input_details[0]['index'], test_image)
-        interpreter.invoke()
-        output = interpreter.get_tensor(output_details[0]['index'])
-        predictions.append(np.argmax(output[0]))
-    
-    # Convert y_test to sparse labels if it's categorical
-    if len(y_test.shape) == 2 and y_test.shape[1] == params.NB_CLASSES:
-        true_labels = np.argmax(y_test, axis=1)
-    else:
-        true_labels = y_test
-    
-    accuracy = np.mean(np.array(predictions) == true_labels)
-    return accuracy
-
-def debug_tflite_model(tflite_path, x_sample):
-    """Debug TFLite model input/output requirements"""
-    interpreter = tf.lite.Interpreter(model_path=tflite_path)
-    interpreter.allocate_tensors()
-    
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    
-    print("\n🔧 TFLite Model Debug Info:")
-    print("Input details:")
-    for detail in input_details:
-        print(f"  Name: {detail['name']}")
-        print(f"  Shape: {detail['shape']}")
-        print(f"  Dtype: {detail['dtype']}")
-        print(f"  Quantization: {detail['quantization']}")
-    
-    print("Output details:")
-    for detail in output_details:
-        print(f"  Name: {detail['name']}")
-        print(f"  Shape: {detail['shape']}")
-        print(f"  Dtype: {detail['dtype']}")
-        print(f"  Quantization: {detail['quantization']}")
-    
-    # Test with a sample
-    test_image = x_sample[0:1]
-    input_dtype = input_details[0]['dtype']
-    
-    print(f"\nSample input conversion:")
-    print(f"  Original dtype: {test_image.dtype}, range: [{test_image.min():.3f}, {test_image.max():.3f}]")
-    
-    if input_dtype == np.uint8:
-        input_scale, input_zero_point = input_details[0]['quantization']
-        converted = test_image / input_scale + input_zero_point
-        converted = converted.astype(np.uint8)
-        print(f"  Converted to uint8: range [{converted.min()}, {converted.max()}]")
-    elif input_dtype == np.int8:
-        input_scale, input_zero_point = input_details[0]['quantization']
-        converted = test_image / input_scale + input_zero_point
-        converted = converted.astype(np.int8)
-        print(f"  Converted to int8: range [{converted.min()}, {converted.max()}]")
-    
-    return input_details, output_details
-
-
 
 @contextmanager
 def suppress_all_output(debug=False):
@@ -281,23 +104,41 @@ class TFLiteModelManager:
         self.debug = debug
         
     def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
-        """Save model directly as TFLite with ESP-DL compatibility"""
+        """Save model directly as TFLite with ESP-DL compatibility - FIXED VERSION"""
         try:
-            # Build model with input shape first
-            model.build((None,) + params.INPUT_SHAPE)
+            # CRITICAL FIX: Ensure model is built by running a forward pass
+            if not model.built:
+                print("🔄 Building model by running forward pass...")
+                # Create a dummy input with the correct shape
+                dummy_input = tf.zeros([1] + list(params.INPUT_SHAPE))
+                _ = model(dummy_input)  # This builds the model
+                print("✅ Model built successfully")
             
-            # FIX: Use tf.function for conversion to avoid _get_save_spec issue
-            @tf.function
-            def model_call(x):
-                return model(x)
+            # Alternative approach: Use the functional API conversion
+            # print(f"🔧 Converting {filename} to TFLite...")
             
-            # Create concrete function from the model
-            concrete_func = model_call.get_concrete_function(
-                tf.TensorSpec([1] + list(params.INPUT_SHAPE), tf.float32)
-            )
+            # Method 1: Try concrete function approach first
+            try:
+                @tf.function
+                def model_call(x):
+                    return model(x)
+                
+                # Create concrete function
+                concrete_func = model_call.get_concrete_function(
+                    tf.TensorSpec([1] + list(params.INPUT_SHAPE), tf.float32)
+                )
+                
+                converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func], model_call)
+                
+            except Exception as e:
+                print(f"⚠️  Concrete function approach failed, trying saved model: {e}")
+                # Method 2: Save as SavedModel then convert
+                import tempfile
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    model.save(temp_dir, save_format='tf')
+                    converter = tf.lite.TFLiteConverter.from_saved_model(temp_dir)
             
-            converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func], model_call)
-            
+            # Configure quantization if needed
             if quantize:
                 converter.optimizations = [tf.lite.Optimize.DEFAULT]
                 if representative_data is not None:
@@ -306,29 +147,29 @@ class TFLiteModelManager:
                 # ESP-DL specific quantization
                 if params.ESP_DL_QUANTIZE:
                     if self.debug:
-                        print(f"🔧 Converting {filename} with INT8 quantization for ESP-DL...")
+                        print(f"🔧 Using INT8 quantization for ESP-DL...")
                     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                     converter.inference_input_type = tf.int8
                     converter.inference_output_type = tf.int8
                 else:
                     if self.debug:
-                        print(f"🔧 Converting {filename} with UINT8 quantization...")
+                        print(f"🔧 Using UINT8 quantization...")
                     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
                     converter.inference_input_type = tf.uint8
                     converter.inference_output_type = tf.uint8
                 
                 converter.allow_custom_ops = False
                 converter.experimental_new_quantizer = True
-                converter._experimental_disable_per_channel = False
                 
             else:
                 if self.debug:
-                    print(f"🔧 Converting {filename} as float32...")
+                    print(f"🔧 Converting as float32...")
             
-            # Use comprehensive suppression context manager
+            # Convert with suppression
             with suppress_all_output(self.debug):
                 tflite_model = converter.convert()
             
+            # Save the model
             model_path = os.path.join(self.output_dir, filename)
             with open(model_path, 'wb') as f:
                 f.write(tflite_model)
@@ -341,10 +182,43 @@ class TFLiteModelManager:
             return tflite_model, model_size_kb
             
         except Exception as e:
-            if self.debug:
-                print(f"❌ TFLite conversion failed: {e}")
-            # Fallback: try traditional conversion
-            return self.save_as_tflite_fallback(model, filename, quantize, representative_data)
+            print(f"❌ TFLite conversion failed: {e}")
+            # Final fallback: try the simple approach
+            return self.save_as_tflite_simple(model, filename, quantize, representative_data)
+
+    def save_as_tflite_simple(self, model, filename, quantize=False, representative_data=None):
+        """Simple fallback conversion method"""
+        try:
+            print(f"🔄 Trying simple conversion for {filename}...")
+            
+            # Ensure model is built
+            if not model.built:
+                dummy_input = tf.zeros([1] + list(params.INPUT_SHAPE))
+                _ = model(dummy_input)
+            
+            # Use Keras model conversion
+            converter = tf.lite.TFLiteConverter.from_keras_model(model)
+            
+            if quantize:
+                converter.optimizations = [tf.lite.Optimize.DEFAULT]
+                if representative_data is not None:
+                    converter.representative_dataset = representative_data
+            
+            with suppress_all_output(self.debug):
+                tflite_model = converter.convert()
+            
+            model_path = os.path.join(self.output_dir, filename)
+            with open(model_path, 'wb') as f:
+                f.write(tflite_model)
+            
+            model_size_kb = len(tflite_model) / 1024
+            print(f"💾 Saved {filename} (simple): {model_size_kb:.1f} KB")
+            
+            return tflite_model, model_size_kb
+            
+        except Exception as e:
+            print(f"❌ Simple conversion also failed: {e}")
+            raise
     
     def save_as_tflite_fallback(self, model, filename, quantize=False, representative_data=None):
         """Fallback conversion method"""
@@ -682,14 +556,24 @@ def setup_gpu():
         print("   Falling back to CPU")
         return None
    
-
 def print_training_summary(model, x_train, x_val, x_test, debug=False):
     """Print comprehensive training summary"""
     print("\n" + "="*60)
     print("TRAINING SUMMARY")
     print("="*60)
     
-    print(f"Model Architecture:")
+    # GPU Information
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    print(f"Hardware:")
+    print(f"  GPU: {'Available' if gpus else 'Not available'}")
+    print(f"  GPU Usage: {'Enabled' if params.USE_GPU else 'Disabled'}")
+    if gpus and params.USE_GPU:
+        print(f"  GPU Count: {len(gpus)}")
+        for i, gpu in enumerate(gpus):
+            print(f"    GPU {i}: {gpu.name}")
+    
+    print(f"\nModel Architecture:")
+    print(f"  Model: {params.MODEL_ARCHITECTURE}")
     print(f"  Input shape: {params.INPUT_SHAPE}")
     print(f"  Classes: {params.NB_CLASSES}")
     print(f"  Total parameters: {model.count_params():,}")
@@ -704,8 +588,7 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     print(f"  Batch size: {params.BATCH_SIZE}")
     print(f"  Epochs: {params.EPOCHS}")
     print(f"  Learning rate: {params.LEARNING_RATE}")
-    print(f"  Validation split: {params.VALIDATION_SPLIT}")
-    print(f"  Training percentage: {params.TRAINING_PERCENTAGE*100}%")
+    print(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}")
     print(f"  Quantization: {params.QUANTIZE_MODEL}")
     print(f"  Debug mode: {'Enabled' if debug else 'Disabled'}")
 
@@ -743,7 +626,6 @@ def train_model(debug=False):
     print("🔍 Checking data normalization...")
     print(f"   Data range before preprocessing: [{x_train.min():.3f}, {x_train.max():.3f}]")
     
-    
     print("🔄 Preprocessing images...")
     x_train = preprocess_images(x_train)
     x_val = preprocess_images(x_val) 
@@ -755,6 +637,7 @@ def train_model(debug=False):
     print(f"   x_test: {x_test.shape}")
     
     print(f"   Data range after preprocessing: [{x_train.min():.3f}, {x_train.max():.3f}]")
+    
     # If data isn't normalized to reasonable range, force it
     if x_train.max() > 5.0 or x_train.min() < -5.0:
         print("⚠️  Data range too large - applying normalization...")
@@ -762,7 +645,6 @@ def train_model(debug=False):
         x_val = (x_val - x_val.mean()) / (x_val.std() + 1e-8)
         x_test = (x_test - x_test.mean()) / (x_test.std() + 1e-8)
         print(f"   Data range after normalization: [{x_train.min():.3f}, {x_train.max():.3f}]")
-    
     
     # Convert labels for Haverland model (categorical instead of sparse)
     if params.MODEL_ARCHITECTURE == "original_haverland":
@@ -784,8 +666,14 @@ def train_model(debug=False):
         print(f"🧠 Creating {params.MODEL_ARCHITECTURE} model...")
         model = create_model()
         model = compile_model(model)
-    
-    # CRITICAL: Verify model is built and can forward pass
+
+    # CRITICAL: Explicitly build the model by specifying input shape
+    print("🔧 Building model with explicit input shape...")
+    model.build(input_shape=(None,) + params.INPUT_SHAPE)
+    print(f"✅ Model built with input shape: {model.input_shape}")
+        
+
+    # Verify model is built and can forward pass
     print("🔍 Verifying model can forward pass...")
     try:
         test_input = tf.random.normal([1] + list(params.INPUT_SHAPE))
@@ -841,8 +729,12 @@ def train_model(debug=False):
     # Evaluate models
     print("\n📈 Evaluating models...")
     
+    # Import analysis functions
+    from analyse import evaluate_tflite_model, analyze_quantization_impact, debug_tflite_model
+    
     # Add debug info
     if debug:
+        quantized_tflite_path = os.path.join(training_dir, params.TFLITE_FILENAME)
         debug_tflite_model(quantized_tflite_path, x_test[:1])
     
     # Keras model evaluation with tqdm
@@ -858,18 +750,19 @@ def train_model(debug=False):
         tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test)   
         # Analyze quantization impact
         analyze_quantization_impact(model, x_test, y_test, quantized_tflite_path)
-    
     else:
         tflite_accuracy = 0.0
     
     # Save training plots
     monitor.save_training_plots()
     
-    
-    ## temporary debugs
-    training_diagnostics(model, x_train, y_train, x_val, y_val, debug=args.debug)
+    # Import and run diagnostics
+    from analyse import training_diagnostics, verify_model_predictions, debug_model_architecture
+    training_diagnostics(model, x_train, y_train, x_val, y_val, debug=debug)
     verify_model_predictions(model, x_train[:100], y_train[:100])
-    debug_model_architecture(model, x_train[:10])
+    
+    if debug:
+        debug_model_architecture(model, x_train[:10])
     
     # Print final results
     print("\n" + "="*60)
@@ -935,150 +828,7 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         f.write(f"  Debug mode: {'Enabled' if debug else 'Disabled'}\n")
         
         f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        
-def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
-    """Comprehensive training diagnostics - FIXED"""
-    print("\n🔬 TRAINING DIAGNOSTICS")
-    print("=" * 50)
-    
-    # 1. Check if model can overfit a small dataset
-    print("1. Testing if model can overfit small dataset...")
-    small_x = x_train[:100]
-    small_y = y_train[:100]
-    
-    # FIX: Handle both label formats
-    if len(small_y.shape) == 2 and small_y.shape[1] == params.NB_CLASSES:
-        # Categorical labels (one-hot)
-        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-    else:
-        # Sparse labels
-        model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-    
-    # Train on small dataset
-    history = model.fit(small_x, small_y, epochs=10, batch_size=32, verbose=0)
-    small_acc = history.history['accuracy'][-1]
-    print(f"   Small dataset accuracy after 10 epochs: {small_acc:.3f}")
-    
-    if small_acc < 0.8:
-        print("   ⚠️  Model cannot overfit small dataset - architecture issue!")
-    else:
-        print("   ✅ Model can overfit small dataset - architecture OK")
-    
-    # 2. Check gradient flow
-    print("2. Checking gradient flow...")
-    with tf.GradientTape() as tape:
-        predictions = model(small_x)
-        # FIX: Use appropriate loss calculation based on label format
-        if len(small_y.shape) == 2 and small_y.shape[1] == params.NB_CLASSES:
-            loss = tf.keras.losses.categorical_crossentropy(small_y, predictions)
-        else:
-            loss = tf.keras.losses.sparse_categorical_crossentropy(small_y, predictions)
-    
-    gradients = tape.gradient(loss, model.trainable_variables)
-    grad_norms = [tf.norm(g).numpy() if g is not None else 0 for g in gradients]
-    
-    print(f"   Gradient norms - Min: {min(grad_norms):.2e}, Max: {max(grad_norms):.2e}")
-    
-    if max(grad_norms) < 1e-7:
-        print("   ⚠️  Vanishing gradients detected!")
-    elif min(grad_norms) > 1e3:
-        print("   ⚠️  Exploding gradients detected!")
-    else:
-        print("   ✅ Gradient flow looks OK")
-    
-    # 3. Check data preprocessing
-    print("3. Data preprocessing check...")
-    print(f"   Input shape: {x_train.shape}")
-    print(f"   Data type: {x_train.dtype}")
-    print(f"   Value range: [{x_train.min():.3f}, {x_train.max():.3f}]")
-    print(f"   Mean: {x_train.mean():.3f}, Std: {x_train.std():.3f}")
 
-
-
-def verify_model_predictions(model, x_sample, y_sample):
-    """Verify model can learn at all - FIXED"""
-    print("\n🧪 MODEL VERIFICATION:")
-    
-    # Test on a small batch
-    sample_idx = np.random.choice(len(x_sample), 10, replace=False)
-    x_batch = x_sample[sample_idx]
-    y_batch = y_sample[sample_idx]
-    
-    # Forward pass
-    predictions = model.predict(x_batch, verbose=0)
-    pred_classes = np.argmax(predictions, axis=1)
-    
-    # FIX: Handle both categorical and sparse labels
-    if len(y_batch.shape) == 2 and y_batch.shape[1] == params.NB_CLASSES:
-        # Categorical labels - convert to class indices
-        true_classes = np.argmax(y_batch, axis=1)
-    else:
-        # Sparse labels
-        true_classes = y_batch
-    
-    accuracy = np.mean(pred_classes == true_classes)
-    print(f"Sample batch accuracy: {accuracy:.3f}")
-    
-    # Check prediction distribution
-    print(f"Prediction distribution: {np.bincount(pred_classes, minlength=params.NB_CLASSES)}")
-    print(f"True distribution: {np.bincount(true_classes.astype(int), minlength=params.NB_CLASSES)}")
-
-    
-def debug_model_architecture(model, x_sample):
-    """Debug the current model architecture - FIXED VERSION"""
-    print("\n🔧 MODEL ARCHITECTURE DEBUG")
-    print("=" * 40)
-    
-    # Ensure model is built
-    if not model.built:
-        print("🔄 Building model...")
-        model.build((None,) + params.INPUT_SHAPE)
-    
-    # Test forward pass
-    print("Testing forward pass...")
-    try:
-        sample_output = model(x_sample[:1])
-        print(f"✅ Forward pass works")
-        print(f"   Input shape: {x_sample[:1].shape}")
-        print(f"   Output shape: {sample_output.shape}")
-        print(f"   Output sum: {tf.reduce_sum(sample_output).numpy():.4f}")
-        
-    except Exception as e:
-        print(f"❌ Forward pass failed: {e}")
-        return
-    
-    # Layer by layer debugging - FIXED VERSION
-    print("\nLayer-by-layer output shapes:")
-    for i, layer in enumerate(model.layers):
-        try:
-            # Create temporary model that outputs from this layer
-            temp_model = tf.keras.Model(inputs=model.input, outputs=layer.output)
-            layer_out = temp_model(x_sample[:1])
-            print(f"   {layer.name:20} -> {layer_out.shape}")
-        except Exception as e:
-            print(f"   {layer.name:20} -> ERROR: {e}")
-
-if __name__ == "__main__":
-    # Parse command line arguments
-    args = parse_arguments()
-    
-    # Set random seeds for reproducibility (same as original)
-    tf.random.set_seed(params.SHUFFLE_SEED)
-    np.random.seed(params.SHUFFLE_SEED)
-    
-    try:
-        model, history, training_dir = train_model(debug=args.debug)
-        
-        print(f"\n✅ Training successful!")
-        print(f"📁 Output directory: {training_dir}")
-        print(f"🚀 Your model is ready for ESP-DL deployment!")
-        print(f"   Use: {os.path.join(training_dir, params.TFLITE_FILENAME)}")
-        
-    except Exception as e:
-        print(f"\n❌ Training failed with error: {e}")
-        import traceback
-        traceback.print_exc()
-        
 def test_all_models(x_train, y_train, x_val, y_val):
     """Test all available model architectures"""
     original_model = params.MODEL_ARCHITECTURE
@@ -1129,45 +879,6 @@ def test_all_models(x_train, y_train, x_val, y_val):
     
     return results
 
-
-
-# ADD GPU INFO TO TRAINING SUMMARY
-def print_training_summary(model, x_train, x_val, x_test, debug=False):
-    """Print comprehensive training summary"""
-    print("\n" + "="*60)
-    print("TRAINING SUMMARY")
-    print("="*60)
-    
-    # GPU Information
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    print(f"Hardware:")
-    print(f"  GPU: {'Available' if gpus else 'Not available'}")
-    print(f"  GPU Usage: {'Enabled' if params.USE_GPU else 'Disabled'}")
-    if gpus and params.USE_GPU:
-        print(f"  GPU Count: {len(gpus)}")
-        for i, gpu in enumerate(gpus):
-            print(f"    GPU {i}: {gpu.name}")
-    
-    print(f"\nModel Architecture:")
-    print(f"  Model: {params.MODEL_ARCHITECTURE}")
-    print(f"  Input shape: {params.INPUT_SHAPE}")
-    print(f"  Classes: {params.NB_CLASSES}")
-    print(f"  Total parameters: {model.count_params():,}")
-    
-    print(f"\nDataset Information:")
-    print(f"  Training samples: {len(x_train):,}")
-    print(f"  Validation samples: {len(x_val):,}")
-    print(f"  Test samples: {len(x_test):,}")
-    print(f"  Data sources: {len(params.DATA_SOURCES)}")
-    
-    print(f"\nTraining Configuration:")
-    print(f"  Batch size: {params.BATCH_SIZE}")
-    print(f"  Epochs: {params.EPOCHS}")
-    print(f"  Learning rate: {params.LEARNING_RATE}")
-    print(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}")
-    print(f"  Quantization: {params.QUANTIZE_MODEL}")
-    print(f"  Debug mode: {'Enabled' if debug else 'Disabled'}")
-    
 def get_gpu_memory_usage():
     """Get current GPU memory usage"""
     try:
@@ -1176,13 +887,39 @@ def get_gpu_memory_usage():
             'nvidia-smi', '--query-gpu=memory.used,memory.total', 
             '--format=csv,nounits,noheader'
         ], encoding='utf-8')
-        
-        gpu_memory = []
-        for line in result.strip().split('\n'):
-            used, total = map(int, line.split(', '))
-            gpu_memory.append({'used_mb': used, 'total_mb': total, 'usage_percent': (used/total)*100})
-        
-        return gpu_memory
+        memory_info = result.strip().split('\n')[0].split(', ')
+        used = int(memory_info[0])
+        total = int(memory_info[1])
+        return used, total
     except:
-        return None
+        return None, None
+
+def main():
+    """Main entry point"""
+    args = parse_arguments()
+    
+    try:
+        # Load data first for model testing
+        (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
         
+        # Test all models if requested
+        if args.test_all_models:
+            test_all_models(x_train, y_train, x_val, y_val)
+            return
+        
+        # Normal training
+        model, history, output_dir = train_model(debug=args.debug)
+        
+        print(f"\n✅ Training completed successfully!")
+        print(f"📁 Output directory: {output_dir}")
+        
+    except KeyboardInterrupt:
+        print("\n⚠️  Training interrupted by user")
+    except Exception as e:
+        print(f"\n❌ Training failed: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+
+if __name__ == "__main__":
+    main()
