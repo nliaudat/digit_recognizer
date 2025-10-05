@@ -84,7 +84,7 @@ def model_summary(model):
 def get_available_models():
     """Return list of all available model architectures"""
     available = []
-    for model_name in MODEL_CREATORS.keys():
+    for model_name in params.AVAILABLE_MODELS:
         creator = _get_model_creator(model_name)
         if creator is not None:
             available.append(model_name)

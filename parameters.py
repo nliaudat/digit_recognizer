@@ -20,7 +20,7 @@ AVAILABLE_MODELS = [
     "esp_quantization_ready_v2_aggressive"
 ]
 
-MODEL_ARCHITECTURE = "esp_quantization_ready_v2_aggressive"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
+MODEL_ARCHITECTURE = "esp_quantization_ready"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
 
 # ==============================================================================
 # MODEL-SPECIFIC PARAMETERS
@@ -51,8 +51,8 @@ ORIGINAL_HAVERLAND_DROPOUT_RATES = [0.25, 0.25, 0.25, 0.5]  # Fixed from noteboo
 # ==============================================================================
 
 # Image Parameters
-INPUT_WIDTH = 32
-INPUT_HEIGHT = 20
+INPUT_WIDTH = 20
+INPUT_HEIGHT = 32
 INPUT_CHANNELS =1  # 1 for grayscale, 3 for RGB
 INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
 USE_GRAYSCALE = (INPUT_CHANNELS == 1) 
@@ -106,7 +106,24 @@ DATA_SOURCES = [
         'path': 'datasets/meterdigits',
         'weight': 1.0,
     },
-    # Add more data sources as needed
+    {
+        'name': 'meterdigits_augmented',
+        'type': 'folder_structure',
+        'path': 'datasets/meterdigits_augmented',
+        'weight': 0.6,
+    },
+    # {
+        # 'name': 'MNIST',
+        # 'type': 'folder_structure',
+        # 'path': 'mnist_dataset_folders',
+        # 'weight': 0.15,
+    # },
+        # {
+        # 'name': 'MR-AMR Dataset',
+        # 'type': 'folder_structure',
+        # 'path': 'MR-AMR Dataset',
+        # 'weight': 0.15,
+    # },
 ]
 
 # ==============================================================================
@@ -153,3 +170,4 @@ SHUFFLE_SEED = 42
 
 # # Target model size for ESP32
 # TARGET_MODEL_SIZE_KB = 100  # Aim for <100KB quantized
+
