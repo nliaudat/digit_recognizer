@@ -5,7 +5,20 @@ Global parameters for Digit Recognition
 # ==============================================================================
 # MODEL SELECTION
 # ==============================================================================
-MODEL_ARCHITECTURE = "original_haverland"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready
+
+AVAILABLE_MODELS = [
+    "practical_tiny_depthwise",
+    "simple_cnn", 
+    "dig_class100_s2",
+    "original_haverland",
+    "esp_optimized_cnn",
+    "esp_ultra_light", 
+    "esp_high_capacity",
+    "esp_quantization_ready",
+    "esp_haverland_compatible"
+]
+
+MODEL_ARCHITECTURE = "simple_cnn"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
 
 # ==============================================================================
 # MODEL-SPECIFIC PARAMETERS
