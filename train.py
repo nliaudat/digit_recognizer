@@ -479,7 +479,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     
     return callbacks
 
-def create_representative_dataset(x_train, num_samples=QUANTIZE_NUM_SAMPLES):
+def create_representative_dataset(x_train, num_samples=params.QUANTIZE_NUM_SAMPLES):
     """Create representative dataset for quantization"""
     def representative_data_gen():
         for i in range(min(num_samples, len(x_train))):

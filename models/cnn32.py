@@ -2,7 +2,7 @@
 import tensorflow as tf
 import parameters as params
 
-def CNN_s2(input_shape=None, nb_classes=10, activation_top='softmax'):
+def CNN_s2(input_shape=None, nb_classes=params.NB_CLASSES, activation_top='softmax'):
     """
     Exact replica of the CNN_s2 model from Haverland's b2n.models.cnn32
     This matches the original implementation exactly.
