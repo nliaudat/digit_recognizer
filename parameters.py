@@ -106,17 +106,23 @@ DATA_SOURCES = [
         'path': 'datasets/meterdigits',
         'weight': 1.0,
     },
-    {
-        'name': 'meterdigits_augmented',
-        'type': 'folder_structure',
-        'path': 'datasets/meterdigits_augmented',
-        'weight': 0.6,
-    },
+    # {
+        # 'name': 'meterdigits_augmented',
+        # 'type': 'folder_structure',
+        # 'path': 'datasets/meterdigits_augmented',
+        # 'weight': 0.6,
+    # },
     # {
         # 'name': 'MNIST',
         # 'type': 'folder_structure',
         # 'path': 'mnist_dataset_folders',
-        # 'weight': 0.15,
+        # 'weight': 0.2,
+    # },
+    # {
+        # 'name': 'QMNIST',
+        # 'type': 'folder_structure',
+        # 'path': 'qmnist_dataset_folders',
+        # 'weight': 0.3,
     # },
         # {
         # 'name': 'MR-AMR Dataset',

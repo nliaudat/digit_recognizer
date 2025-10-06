@@ -514,7 +514,7 @@ def comprehensive_model_analysis(model_path, x_test, y_test, output_dir):
     print("🔍 Running comprehensive model analysis...")
     
     # Load model
-    if model_path.endswith('.h5'):
+    if model_path.endswith('.tflite'):
         model = tf.keras.models.load_model(model_path)
     else:
         # For TFLite models, we need to use the interpreter
