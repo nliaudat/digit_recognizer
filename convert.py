@@ -23,7 +23,7 @@ def convert_to_tflite_micro():
     print(f"Loading model from: {model_path}")
     model = tf.keras.models.load_model(model_path)
     
-    if params.QUANTIZE_MODEL:
+    if params.NORMALIZE_MODEL:
         # Convert to TFLite with quantization
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
@@ -64,8 +64,8 @@ def convert_to_tflite_micro():
     print(f"TFLite model saved: {output_path}")
     print(f"Model size: {model_size_kb:.1f} KB")
     print(f"Input shape: {params.INPUT_SHAPE}")
-    print(f"Quantized: {params.QUANTIZE_MODEL}")
-    if params.QUANTIZE_MODEL:
+    print(f"Quantized: {params.NORMALIZE_MODEL}")
+    if params.NORMALIZE_MODEL:
         print(f"ESP-DL Quantization: {params.ESP_DL_QUANTIZE}")
         print(f"Data type: {'int8 [-128,127]' if params.ESP_DL_QUANTIZE else 'uint8 [0,255]'}")
     

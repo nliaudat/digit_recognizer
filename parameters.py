@@ -143,8 +143,8 @@ MODEL_FILENAME = MODEL_ARCHITECTURE
 OUTPUT_DIR = "exported_models"
 
 # TFLite Conversion Parameters
-QUANTIZE_MODEL = True # from float to 0-1
-# ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
+NORMALIZE_MODEL = True # from float to [0, 1]
+# ESP-DL specific quantization (only applies if NORMALIZE_MODEL = True)
 ESP_DL_QUANTIZE = True  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
 QUANTIZE_NUM_SAMPLES=1000
