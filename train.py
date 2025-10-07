@@ -626,7 +626,7 @@ def train_model(debug=False):
     
     # Create output directory with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    training_dir = os.path.join(params.OUTPUT_DIR, f"training_{timestamp}")
+    training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_{timestamp}")
     os.makedirs(training_dir, exist_ok=True)
     
     print("🚀 Starting Digit Recognition Training")

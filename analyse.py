@@ -514,7 +514,7 @@ def comprehensive_model_analysis(model_path, x_test, y_test, output_dir):
     print("🔍 Running comprehensive model analysis...")
     
     # Load model
-    if model_path.endswith('.h5'):
+    if model_path.endswith('.tflite'):
         model = tf.keras.models.load_model(model_path)
     else:
         # For TFLite models, we need to use the interpreter
@@ -565,7 +565,7 @@ def main():
     # Run requested analyses
     if args.analyze_all or args.confusion_matrix:
         # Find the best model
-        model_files = [f for f in os.listdir(args.model_dir) if f.endswith('.h5')]
+        model_files = [f for f in os.listdir(args.model_dir) if f.endswith('.tflite')]
         if model_files:
             best_model_path = os.path.join(args.model_dir, model_files[0])
             model = tf.keras.models.load_model(best_model_path)
@@ -576,7 +576,7 @@ def main():
         analyze_training_history(training_log_path, args.model_dir)
     
     if args.analyze_all:
-        comprehensive_model_analysis(None, x_test, y_test, args.model_dir)
+        comprehensive_model_analysis(args.model_dir, x_test, y_test, args.model_dir)
 
 if __name__ == "__main__":
     main()
