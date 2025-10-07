@@ -131,7 +131,8 @@ def load_image_from_path(image_path):
 def find_model_path(model_name=None):
     """Find the model path based on model name or use default behavior"""
     # Look for training directories
-    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if d.startswith('training_')]
+    # training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if d.startswith('training_')]
+    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR)]
     if not training_dirs:
         print("No training directories found. Please run train.py first.")
         return None
