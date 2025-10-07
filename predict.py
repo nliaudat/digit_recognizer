@@ -132,7 +132,8 @@ def find_model_path(model_name=None):
     """Find the model path based on model name or use default behavior"""
     # Look for training directories
     # training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if d.startswith('training_')]
-    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR)]
+    # training_dirs = [d for d in os.listdir(params.OUTPUT_DIR)]
+    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
     if not training_dirs:
         print("No training directories found. Please run train.py first.")
         return None
@@ -198,7 +199,8 @@ def find_model_path(model_name=None):
 
 def list_available_models():
     """List all available models in training directories"""
-    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if d.startswith('training_')]
+    # training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if d.startswith('training_')]
+    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
     if not training_dirs:
         print("No training directories found.")
         return
