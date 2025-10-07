@@ -614,7 +614,7 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     print(f"  Epochs: {params.EPOCHS}")
     print(f"  Learning rate: {params.LEARNING_RATE}")
     print(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}")
-    print(f"  Quantization: {params.QUANTIZE_MODEL}")
+    print(f"  Quantization: {params.NORMALIZE_MODEL}")
     print(f"  ESP-DL Quantization: {params.ESP_DL_QUANTIZE}")
     print(f"  Debug mode: {'Enabled' if debug else 'Disabled'}")
 
@@ -865,8 +865,8 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         f.write(f"    Factor: {getattr(params, 'LR_SCHEDULER_FACTOR', 0.5)}\n")
         f.write(f"    Min LR: {getattr(params, 'LR_SCHEDULER_MIN_LR', 1e-7)}\n")
         
-        f.write(f"  Quantization: {params.QUANTIZE_MODEL}\n")
-        if params.QUANTIZE_MODEL:
+        f.write(f"  Quantization: {params.NORMALIZE_MODEL}\n")
+        if params.NORMALIZE_MODEL:
             f.write(f"    ESP-DL Quantization: {params.ESP_DL_QUANTIZE}\n")
             f.write(f"    Num samples: {params.QUANTIZE_NUM_SAMPLES}\n")
         
@@ -909,7 +909,7 @@ def save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
         f.write(f"lr_scheduler_monitor,{getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss')}\n")
         f.write(f"lr_scheduler_patience,{getattr(params, 'LR_SCHEDULER_PATIENCE', 3)}\n")
         f.write(f"lr_scheduler_factor,{getattr(params, 'LR_SCHEDULER_FACTOR', 0.5)}\n")
-        f.write(f"quantize_model,{params.QUANTIZE_MODEL}\n")
+        f.write(f"NORMALIZE_MODEL,{params.NORMALIZE_MODEL}\n")
         f.write(f"esp_dl_quantize,{params.ESP_DL_QUANTIZE}\n")
         f.write(f"quantize_num_samples,{params.QUANTIZE_NUM_SAMPLES}\n")
         f.write(f"use_gpu,{params.USE_GPU}\n")
