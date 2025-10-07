@@ -1,5 +1,8 @@
 /__pycache__
-/datasets
+/datasets/*
+!datasets/augmentation.py
+!datasets/mnist.py
+!datasets/qmnist.py
 /exported_models/*
 !exported_models/benchmark.py
 /models/__pycache__
