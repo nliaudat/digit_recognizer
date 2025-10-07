@@ -143,8 +143,8 @@ MODEL_FILENAME = MODEL_ARCHITECTURE
 OUTPUT_DIR = "exported_models"
 
 # TFLite Conversion Parameters
-NORMALIZE_MODEL = True # from float to [0, 1]
-# ESP-DL specific quantization (only applies if NORMALIZE_MODEL = True)
+QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
+# ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
 ESP_DL_QUANTIZE = True  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
 QUANTIZE_NUM_SAMPLES=1000
@@ -177,4 +177,18 @@ SHUFFLE_SEED = 42
 
 # # Target model size for ESP32
 # TARGET_MODEL_SIZE_KB = 100  # Aim for <100KB quantized
+
+
+def validate_quantization_parameters():
+    """Validate quantization parameters for consistency"""
+    if params.QUANTIZE_MODEL and not params.ESP_DL_QUANTIZE:
+        print("⚠️  Warning: Using UINT8 quantization. For ESP-DL, set ESP_DL_QUANTIZE = True")
+    
+    if params.ESP_DL_QUANTIZE and not params.QUANTIZE_MODEL:
+        print("❌ Error: ESP_DL_QUANTIZE requires QUANTIZE_MODEL = True")
+        params.ESP_DL_QUANTIZE = False
+    
+    # Validate input normalization
+    if params.ESP_DL_QUANTIZE:
+        print("💡 ESP-DL INT8 quantization: Inputs should be normalized to [-1, 1] range")
 
