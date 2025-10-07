@@ -816,7 +816,7 @@ def train_model(debug=False):
 
 def save_training_config(training_dir, quantized_size, float_size, tflite_manager, 
                         test_accuracy, tflite_accuracy, training_time, debug=False):
-    """Save training configuration and results to file"""
+    """Save training configuration and results to file with enhanced parameters"""
     config_path = os.path.join(training_dir, "training_config.txt")
     
     with open(config_path, 'w') as f:
@@ -849,10 +849,72 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         f.write(f"  Batch size: {params.BATCH_SIZE}\n")
         f.write(f"  Epochs: {params.EPOCHS}\n")
         f.write(f"  Learning rate: {params.LEARNING_RATE}\n")
+        f.write(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}\n")
+        if params.USE_EARLY_STOPPING:
+            f.write(f"    Monitor: {params.EARLY_STOPPING_MONITOR}\n")
+            f.write(f"    Patience: {params.EARLY_STOPPING_PATIENCE}\n")
+            f.write(f"    Min delta: {params.EARLY_STOPPING_MIN_DELTA}\n")
+        
+        f.write(f"  Learning rate scheduler:\n")
+        f.write(f"    Monitor: {getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss')}\n")
+        f.write(f"    Patience: {getattr(params, 'LR_SCHEDULER_PATIENCE', 3)}\n")
+        f.write(f"    Factor: {getattr(params, 'LR_SCHEDULER_FACTOR', 0.5)}\n")
+        f.write(f"    Min LR: {getattr(params, 'LR_SCHEDULER_MIN_LR', 1e-7)}\n")
+        
         f.write(f"  Quantization: {params.QUANTIZE_MODEL}\n")
+        if params.QUANTIZE_MODEL:
+            f.write(f"    ESP-DL Quantization: {params.ESP_DL_QUANTIZE}\n")
+            f.write(f"    Num samples: {params.QUANTIZE_NUM_SAMPLES}\n")
+        
         f.write(f"  Debug mode: {'Enabled' if debug else 'Disabled'}\n")
         
+        f.write(f"\nHARDWARE CONFIG:\n")
+        f.write(f"  GPU Usage: {'Enabled' if params.USE_GPU else 'Disabled'}\n")
+        if params.USE_GPU:
+            f.write(f"  Memory growth: {params.GPU_MEMORY_GROWTH}\n")
+            f.write(f"  Memory limit: {params.GPU_MEMORY_LIMIT} MB\n")
+        
         f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    
+    # Also save as CSV for benchmarking
+    save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
+                     test_accuracy, tflite_accuracy, training_time)
+
+def save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
+                     test_accuracy, tflite_accuracy, training_time):
+    """Save training results to CSV for benchmarking"""
+    csv_path = os.path.join(training_dir, "training_results.csv")
+    
+    # Extract data source information
+    data_sources_str = ";".join([f"{src['name']}({src.get('weight', 1.0)})" 
+                               for src in params.DATA_SOURCES])
+    
+    with open(csv_path, 'w') as f:
+        f.write("parameter,value\n")
+        f.write(f"timestamp,{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"model_architecture,{params.MODEL_ARCHITECTURE}\n")
+        f.write(f"input_shape,{params.INPUT_SHAPE}\n")
+        f.write(f"nb_classes,{params.NB_CLASSES}\n")
+        f.write(f"data_sources,{data_sources_str}\n")
+        f.write(f"batch_size,{params.BATCH_SIZE}\n")
+        f.write(f"epochs,{params.EPOCHS}\n")
+        f.write(f"learning_rate,{params.LEARNING_RATE}\n")
+        f.write(f"use_early_stopping,{params.USE_EARLY_STOPPING}\n")
+        f.write(f"early_stopping_monitor,{params.EARLY_STOPPING_MONITOR}\n")
+        f.write(f"early_stopping_patience,{params.EARLY_STOPPING_PATIENCE}\n")
+        f.write(f"lr_scheduler_monitor,{getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss')}\n")
+        f.write(f"lr_scheduler_patience,{getattr(params, 'LR_SCHEDULER_PATIENCE', 3)}\n")
+        f.write(f"lr_scheduler_factor,{getattr(params, 'LR_SCHEDULER_FACTOR', 0.5)}\n")
+        f.write(f"quantize_model,{params.QUANTIZE_MODEL}\n")
+        f.write(f"esp_dl_quantize,{params.ESP_DL_QUANTIZE}\n")
+        f.write(f"quantize_num_samples,{params.QUANTIZE_NUM_SAMPLES}\n")
+        f.write(f"use_gpu,{params.USE_GPU}\n")
+        f.write(f"keras_test_accuracy,{test_accuracy:.4f}\n")
+        f.write(f"tflite_test_accuracy,{tflite_accuracy:.4f}\n")
+        f.write(f"best_val_accuracy,{tflite_manager.best_accuracy:.4f}\n")
+        f.write(f"quantized_model_size_kb,{quantized_size:.1f}\n")
+        f.write(f"float_model_size_kb,{float_size:.1f}\n")
+        f.write(f"training_time,{training_time}\n")
 
 def test_all_models(x_train, y_train, x_val, y_val):
     """Test all available model architectures"""
