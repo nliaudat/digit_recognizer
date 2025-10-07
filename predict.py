@@ -1,3 +1,4 @@
+# predict.py
 import tensorflow as tf
 import numpy as np
 import cv2
@@ -26,6 +27,7 @@ class TFLiteDigitPredictor:
         print(f"Input shape: {self.input_details[0]['shape']}")
         print(f"Input type: {self.input_details[0]['dtype']}")
         print(f"Output type: {self.output_details[0]['dtype']}")
+        print(f"Output shape: {self.output_details[0]['shape']}")
         
         # Print quantization info
         if self.input_details[0]['quantization'][0] != 0:
@@ -40,17 +42,13 @@ class TFLiteDigitPredictor:
         # Add batch dimension
         input_data = np.expand_dims(processed_image, axis=0)
         
-        # Handle quantization if needed - FIXED VERSION
+        # Handle quantization if needed
         if self.input_details[0]['dtype'] == np.uint8:
-            # For uint8 models, we need to convert to uint8 without scaling
-            # Assuming preprocess_single_image returns values in [0, 255] range
             input_data = input_data.astype(np.uint8)
         elif self.input_details[0]['dtype'] == np.int8:
-            # For int8 models, apply quantization
             input_scale, input_zero_point = self.input_details[0]['quantization']
             input_data = (input_data / input_scale + input_zero_point).astype(np.int8)
         else:
-            # For float32 models
             input_data = input_data.astype(np.float32)
         
         # Set input tensor
@@ -67,10 +65,15 @@ class TFLiteDigitPredictor:
             output_scale, output_zero_point = self.output_details[0]['quantization']
             output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
         
+        # DEBUG: Print raw output to understand the distribution
+        print(f"Raw output: {output_data[0]}")
+        print(f"Output sum: {np.sum(output_data[0]):.6f}")
+        
+        # Get prediction and confidence
         prediction = np.argmax(output_data[0])
         confidence = np.max(output_data[0])
         
-        return prediction, confidence
+        return prediction, confidence, output_data[0]
 
 def load_random_image_from_dataset():
     """Load a random image from the first available data source"""
@@ -160,13 +163,41 @@ def find_model_path(model_name=None):
         
         return model_path
 
+def debug_model_output():
+    """Debug function to test model output interpretation"""
+    model_path = find_model_path()
+    if not model_path:
+        return
+    
+    predictor = TFLiteDigitPredictor(model_path)
+    
+    # Test with multiple random images
+    print("\n=== DEBUGGING MODEL OUTPUT ===")
+    for i in range(3):
+        print(f"\n--- Test {i+1} ---")
+        test_image = np.random.randint(0, 255, (params.INPUT_HEIGHT, params.INPUT_WIDTH), dtype=np.uint8)
+        prediction, confidence, raw_output = predictor.predict(test_image)
+        
+        print(f"Prediction: {prediction}")
+        print(f"Confidence: {confidence:.6f}")
+        print(f"All confidences: {[f'{x:.6f}' for x in raw_output]}")
+        
+        # Check if softmax properties hold
+        output_sum = np.sum(raw_output)
+        print(f"Softmax sum: {output_sum:.6f} (should be ~1.0)")
+
 def main():
     """Main function with command line arguments"""
     parser = argparse.ArgumentParser(description='Digit Recognition Prediction')
     parser.add_argument('--img', type=str, help='Path to input image for prediction')
     parser.add_argument('--model', type=str, help='Model name to use for prediction')
+    parser.add_argument('--debug', action='store_true', help='Debug model output interpretation')
     
     args = parser.parse_args()
+    
+    if args.debug:
+        debug_model_output()
+        return
     
     # Find model path
     model_path = find_model_path(args.model)
@@ -188,8 +219,11 @@ def main():
         return
     
     # Perform prediction
-    prediction, confidence = predictor.predict(image)
-    print(f"Prediction: {prediction}, Confidence: {confidence:.4f}")
+    prediction, confidence, raw_output = predictor.predict(image)
+    print(f"\n=== PREDICTION RESULT ===")
+    print(f"Predicted digit: {prediction}")
+    print(f"Confidence: {confidence:.4f}")
+    print(f"All probabilities: {[f'{x:.4f}' for x in raw_output]}")
 
 if __name__ == "__main__":
     main()

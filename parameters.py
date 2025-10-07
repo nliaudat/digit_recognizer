@@ -20,7 +20,7 @@ AVAILABLE_MODELS = [
     "esp_quantization_ready_v2_aggressive"
 ]
 
-MODEL_ARCHITECTURE = "esp_quantization_ready"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
+MODEL_ARCHITECTURE = "esp_haverland_compatible"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
 
 # ==============================================================================
 # MODEL-SPECIFIC PARAMETERS
@@ -144,7 +144,7 @@ OUTPUT_DIR = "exported_models"
 # TFLite Conversion Parameters
 QUANTIZE_MODEL = True
 # ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
-ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
+ESP_DL_QUANTIZE = True  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
 QUANTIZE_NUM_SAMPLES=1000
 TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
