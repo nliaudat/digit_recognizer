@@ -21,6 +21,10 @@ def parse_arguments():
                        help='Enable TensorFlow debug logs and verbose output')
     parser.add_argument('--test_all_models', action='store_true',
                        help='Test all available model architectures and compare performance')
+    parser.add_argument('--train', nargs='+', choices=params.AVAILABLE_MODELS,
+                       help='Train specific model architectures from AVAILABLE_MODELS')
+    parser.add_argument('--train_all', action='store_true',
+                       help='Train all available model architectures sequentially')
     return parser.parse_args()
     
 def set_all_seeds(seed=params.SHUFFLE_SEED):
@@ -816,7 +820,7 @@ def train_model(debug=False):
 
 def save_training_config(training_dir, quantized_size, float_size, tflite_manager, 
                         test_accuracy, tflite_accuracy, training_time, debug=False):
-    """Save training configuration and results to file"""
+    """Save training configuration and results to file with enhanced parameters"""
     config_path = os.path.join(training_dir, "training_config.txt")
     
     with open(config_path, 'w') as f:
@@ -849,21 +853,90 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         f.write(f"  Batch size: {params.BATCH_SIZE}\n")
         f.write(f"  Epochs: {params.EPOCHS}\n")
         f.write(f"  Learning rate: {params.LEARNING_RATE}\n")
+        f.write(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}\n")
+        if params.USE_EARLY_STOPPING:
+            f.write(f"    Monitor: {params.EARLY_STOPPING_MONITOR}\n")
+            f.write(f"    Patience: {params.EARLY_STOPPING_PATIENCE}\n")
+            f.write(f"    Min delta: {params.EARLY_STOPPING_MIN_DELTA}\n")
+        
+        f.write(f"  Learning rate scheduler:\n")
+        f.write(f"    Monitor: {getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss')}\n")
+        f.write(f"    Patience: {getattr(params, 'LR_SCHEDULER_PATIENCE', 3)}\n")
+        f.write(f"    Factor: {getattr(params, 'LR_SCHEDULER_FACTOR', 0.5)}\n")
+        f.write(f"    Min LR: {getattr(params, 'LR_SCHEDULER_MIN_LR', 1e-7)}\n")
+        
         f.write(f"  Quantization: {params.QUANTIZE_MODEL}\n")
+        if params.QUANTIZE_MODEL:
+            f.write(f"    ESP-DL Quantization: {params.ESP_DL_QUANTIZE}\n")
+            f.write(f"    Num samples: {params.QUANTIZE_NUM_SAMPLES}\n")
+        
         f.write(f"  Debug mode: {'Enabled' if debug else 'Disabled'}\n")
         
+        f.write(f"\nHARDWARE CONFIG:\n")
+        f.write(f"  GPU Usage: {'Enabled' if params.USE_GPU else 'Disabled'}\n")
+        if params.USE_GPU:
+            f.write(f"  Memory growth: {params.GPU_MEMORY_GROWTH}\n")
+            f.write(f"  Memory limit: {params.GPU_MEMORY_LIMIT} MB\n")
+        
         f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    
+    # Also save as CSV for benchmarking
+    save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
+                     test_accuracy, tflite_accuracy, training_time)
 
-def test_all_models(x_train, y_train, x_val, y_val):
-    """Test all available model architectures"""
+def save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
+                     test_accuracy, tflite_accuracy, training_time):
+    """Save training results to CSV for benchmarking"""
+    csv_path = os.path.join(training_dir, "training_results.csv")
+    
+    # Extract data source information
+    data_sources_str = ";".join([f"{src['name']}({src.get('weight', 1.0)})" 
+                               for src in params.DATA_SOURCES])
+    
+    with open(csv_path, 'w') as f:
+        f.write("parameter,value\n")
+        f.write(f"timestamp,{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"model_architecture,{params.MODEL_ARCHITECTURE}\n")
+        f.write(f"input_shape,{params.INPUT_SHAPE}\n")
+        f.write(f"nb_classes,{params.NB_CLASSES}\n")
+        f.write(f"data_sources,{data_sources_str}\n")
+        f.write(f"batch_size,{params.BATCH_SIZE}\n")
+        f.write(f"epochs,{params.EPOCHS}\n")
+        f.write(f"learning_rate,{params.LEARNING_RATE}\n")
+        f.write(f"use_early_stopping,{params.USE_EARLY_STOPPING}\n")
+        f.write(f"early_stopping_monitor,{params.EARLY_STOPPING_MONITOR}\n")
+        f.write(f"early_stopping_patience,{params.EARLY_STOPPING_PATIENCE}\n")
+        f.write(f"lr_scheduler_monitor,{getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss')}\n")
+        f.write(f"lr_scheduler_patience,{getattr(params, 'LR_SCHEDULER_PATIENCE', 3)}\n")
+        f.write(f"lr_scheduler_factor,{getattr(params, 'LR_SCHEDULER_FACTOR', 0.5)}\n")
+        f.write(f"quantize_model,{params.QUANTIZE_MODEL}\n")
+        f.write(f"esp_dl_quantize,{params.ESP_DL_QUANTIZE}\n")
+        f.write(f"quantize_num_samples,{params.QUANTIZE_NUM_SAMPLES}\n")
+        f.write(f"use_gpu,{params.USE_GPU}\n")
+        f.write(f"keras_test_accuracy,{test_accuracy:.4f}\n")
+        f.write(f"tflite_test_accuracy,{tflite_accuracy:.4f}\n")
+        f.write(f"best_val_accuracy,{tflite_manager.best_accuracy:.4f}\n")
+        f.write(f"quantized_model_size_kb,{quantized_size:.1f}\n")
+        f.write(f"float_model_size_kb,{float_size:.1f}\n")
+        f.write(f"training_time,{training_time}\n")
+
+def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=False):
+    """Test all available model architectures or specific models"""
     original_model = params.MODEL_ARCHITECTURE
     results = {}
     
-    test_models = ["practical_tiny_depthwise", "simple_cnn", "dig_class100_s2", "original_haverland"]
+    # Determine which models to test
+    if models_to_test is None:
+        test_models = params.AVAILABLE_MODELS
+    else:
+        test_models = models_to_test
+    
+    print(f"\n🧪 TESTING {len(test_models)} MODELS")
+    print("=" * 60)
     
     for model_name in test_models:
-        print(f"\n🧪 TESTING {model_name.upper()}")
-        print("=" * 50)
+        print(f"\n🔍 Testing: {model_name}")
+        print("-" * 40)
         
         # Temporarily change model architecture
         params.MODEL_ARCHITECTURE = model_name
@@ -871,36 +944,159 @@ def test_all_models(x_train, y_train, x_val, y_val):
         try:
             # Create and compile model
             model = create_model()
+            
+            # Determine appropriate loss function
+            if model_name == "original_haverland":
+                loss_fn = 'categorical_crossentropy'
+                # Convert labels to categorical for Haverland model
+                y_train_cat = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
+                y_val_cat = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES)
+            else:
+                loss_fn = 'sparse_categorical_crossentropy'
+                y_train_cat = y_train
+                y_val_cat = y_val
+            
             model.compile(
                 optimizer='adam',
-                loss='sparse_categorical_crossentropy',
+                loss=loss_fn,
                 metrics=['accuracy']
             )
             
+            # Use smaller dataset for quick testing
+            train_samples = min(1000, len(x_train))
+            val_samples = min(200, len(x_val))
+            
             # Train briefly
             history = model.fit(
-                x_train[:500], y_train[:500],
-                validation_data=(x_val[:100], y_val[:100]),
-                epochs=10,
+                x_train[:train_samples], y_train_cat[:train_samples],
+                validation_data=(x_val[:val_samples], y_val_cat[:val_samples]),
+                epochs=5,  # Reduced epochs for quick testing
                 batch_size=32,
-                verbose=0
+                verbose=1 if debug else 0
             )
             
             final_val_acc = history.history['val_accuracy'][-1]
-            results[model_name] = final_val_acc
-            print(f"✅ {model_name}: {final_val_acc:.3f} validation accuracy")
+            final_train_acc = history.history['accuracy'][-1]
+            results[model_name] = {
+                'val_accuracy': final_val_acc,
+                'train_accuracy': final_train_acc,
+                'params': model.count_params()
+            }
+            print(f"✅ {model_name}:")
+            print(f"   Train Accuracy: {final_train_acc:.4f}")
+            print(f"   Val Accuracy: {final_val_acc:.4f}")
+            print(f"   Parameters: {model.count_params():,}")
             
         except Exception as e:
             print(f"❌ {model_name} failed: {e}")
-            results[model_name] = 0.0
+            if debug:
+                import traceback
+                traceback.print_exc()
+            results[model_name] = {
+                'val_accuracy': 0.0,
+                'train_accuracy': 0.0,
+                'params': 0,
+                'error': str(e)
+            }
     
     # Restore original model
     params.MODEL_ARCHITECTURE = original_model
     
     # Print results
-    print("\n🏆 MODEL COMPARISON RESULTS:")
-    for model_name, accuracy in sorted(results.items(), key=lambda x: x[1], reverse=True):
-        print(f"   {model_name:25} -> {accuracy:.3f}")
+    print("\n" + "="*60)
+    print("🏆 MODEL COMPARISON RESULTS:")
+    print("="*60)
+    
+    # Sort by validation accuracy
+    sorted_results = sorted(results.items(), key=lambda x: x[1]['val_accuracy'], reverse=True)
+    
+    for i, (model_name, metrics) in enumerate(sorted_results, 1):
+        if 'error' in metrics:
+            print(f"{i:2d}. {model_name:35} -> ERROR: {metrics['error']}")
+        else:
+            print(f"{i:2d}. {model_name:35} -> Val: {metrics['val_accuracy']:.4f} | Train: {metrics['train_accuracy']:.4f} | Params: {metrics['params']:,}")
+    
+    return results
+    
+    
+def train_specific_models(models_to_train, debug=False):
+    """Train specific model architectures with full training"""
+    original_model = params.MODEL_ARCHITECTURE
+    results = {}
+    
+    print(f"\n🚀 TRAINING {len(models_to_train)} MODELS")
+    print("=" * 60)
+    
+    for model_name in models_to_train:
+        print(f"\n🎯 Training: {model_name}")
+        print("=" * 50)
+        
+        # Set current model
+        params.MODEL_ARCHITECTURE = model_name
+        
+        try:
+            # Train model with full configuration
+            model, history, output_dir = train_model(debug=debug)
+            
+            # Extract results
+            from analyse import evaluate_tflite_model
+            quantized_tflite_path = os.path.join(output_dir, params.TFLITE_FILENAME)
+            
+            # Load test data for evaluation
+            (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
+            x_test = preprocess_images(x_test)
+            
+            if model_name == "original_haverland":
+                y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+            
+            # Evaluate models
+            keras_test_accuracy = model.evaluate(x_test, y_test, verbose=0)[1]
+            
+            tflite_accuracy = 0.0
+            if os.path.exists(quantized_tflite_path):
+                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test)
+            
+            results[model_name] = {
+                'keras_test_accuracy': keras_test_accuracy,
+                'tflite_accuracy': tflite_accuracy,
+                'output_dir': output_dir,
+                'params': model.count_params(),
+                'model': model
+            }
+            
+            print(f"✅ {model_name} completed:")
+            print(f"   Keras Test Accuracy: {keras_test_accuracy:.4f}")
+            print(f"   TFLite Accuracy: {tflite_accuracy:.4f}")
+            print(f"   Output: {output_dir}")
+            
+        except Exception as e:
+            print(f"❌ {model_name} training failed: {e}")
+            if debug:
+                import traceback
+                traceback.print_exc()
+            results[model_name] = {
+                'keras_test_accuracy': 0.0,
+                'tflite_accuracy': 0.0,
+                'error': str(e)
+            }
+    
+    # Restore original model
+    params.MODEL_ARCHITECTURE = original_model
+    
+    # Print summary
+    print("\n" + "="*60)
+    print("🏁 ALL MODELS TRAINING COMPLETED")
+    print("="*60)
+    
+    successful_models = {k: v for k, v in results.items() if 'error' not in v}
+    if successful_models:
+        sorted_results = sorted(successful_models.items(), 
+                              key=lambda x: x[1]['keras_test_accuracy'], 
+                              reverse=True)
+        
+        print("📊 FINAL RANKINGS:")
+        for i, (model_name, metrics) in enumerate(sorted_results, 1):
+            print(f"{i:2d}. {model_name:35} -> Keras: {metrics['keras_test_accuracy']:.4f} | TFLite: {metrics['tflite_accuracy']:.4f} | Params: {metrics['params']:,}")
     
     return results
 
@@ -924,19 +1120,27 @@ def main():
     args = parse_arguments()
     
     try:
-        # Load data first for model testing
+        # Load data first for model testing/training
         (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
         
-        # Test all models if requested
+        # Handle different modes
         if args.test_all_models:
-            test_all_models(x_train, y_train, x_val, y_val)
-            return
-        
-        # Normal training
-        model, history, output_dir = train_model(debug=args.debug)
-        
-        print(f"\n✅ Training completed successfully!")
-        print(f"📁 Output directory: {output_dir}")
+            # Test all models with quick training
+            test_all_models(x_train, y_train, x_val, y_val, debug=args.debug)
+            
+        elif args.train:
+            # Train specific models
+            train_specific_models(args.train, debug=args.debug)
+            
+        elif args.train_all:
+            # Train all available models
+            train_specific_models(params.AVAILABLE_MODELS, debug=args.debug)
+            
+        else:
+            # Normal single model training
+            model, history, output_dir = train_model(debug=args.debug)
+            print(f"\n✅ Training completed successfully!")
+            print(f"📁 Output directory: {output_dir}")
         
     except KeyboardInterrupt:
         print("\n⚠️  Training interrupted by user")
