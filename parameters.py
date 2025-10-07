@@ -17,7 +17,8 @@ AVAILABLE_MODELS = [
     "esp_quantization_ready",
     "esp_haverland_compatible",
     "esp_quantization_ready_v2",
-    "esp_quantization_ready_v2_aggressive"
+    "esp_quantization_ready_v2_aggressive",
+    "esp_quantization_ready_v3",
 ]
 
 MODEL_ARCHITECTURE = "esp_haverland_compatible"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
@@ -89,7 +90,7 @@ POINTWISE_FILTERS_2 = 10
 # ==============================================================================
 # GPU CONFIGURATION
 # ==============================================================================
-USE_GPU = True  # Set to False to force CPU usage
+USE_GPU = False  # Set to False to force CPU usage (tensorflow cannot use gpu since version xxx)
 GPU_MEMORY_GROWTH = True  # Gradually allocate GPU memory instead of all at once
 GPU_MEMORY_LIMIT = None  # Set specific memory limit in MB, or None for no limit
 

@@ -131,37 +131,91 @@ def load_image_from_path(image_path):
 def find_model_path(model_name=None):
     """Find the model path based on model name or use default behavior"""
     # Look for training directories
-    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if d.startswith('training_')]
+    # training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if d.startswith('training_')]
+    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR)]
     if not training_dirs:
         print("No training directories found. Please run train.py first.")
         return None
     
     if model_name:
-        # Search for the specific model
+        # Search for the specific model in training directories
         for training_dir in sorted(training_dirs, reverse=True):
-            model_path = os.path.join(params.OUTPUT_DIR, training_dir, f"{model_name}.tflite")
-            if os.path.exists(model_path):
-                return model_path
-        
-        # If not found, try with the default TFLITE_FILENAME
-        for training_dir in sorted(training_dirs, reverse=True):
-            model_path = os.path.join(params.OUTPUT_DIR, training_dir, params.TFLITE_FILENAME)
-            if os.path.exists(model_path):
-                print(f"Specific model '{model_name}' not found, using default: {params.TFLITE_FILENAME}")
-                return model_path
+            # Try multiple possible model file locations and names
+            possible_paths = [
+                # Model with specific name in training directory
+                os.path.join(params.OUTPUT_DIR, training_dir, f"{model_name}.tflite"),
+                # Default TFLITE_FILENAME in training directory
+                os.path.join(params.OUTPUT_DIR, training_dir, params.TFLITE_FILENAME),
+                # Model in a subdirectory matching the model name
+                os.path.join(params.OUTPUT_DIR, training_dir, "models", f"{model_name}.tflite"),
+            ]
+            
+            for model_path in possible_paths:
+                if os.path.exists(model_path):
+                    print(f"Found model: {model_path}")
+                    return model_path
         
         print(f"Model '{model_name}' not found in any training directory")
+        print("Available training directories:")
+        for training_dir in training_dirs:
+            print(f"  - {training_dir}")
+            training_dir_path = os.path.join(params.OUTPUT_DIR, training_dir)
+            if os.path.exists(training_dir_path):
+                files = [f for f in os.listdir(training_dir_path) if f.endswith('.tflite')]
+                for file in files:
+                    print(f"    └── {file}")
         return None
     else:
         # Use default behavior - latest training directory with default TFLITE_FILENAME
         latest_training = sorted(training_dirs)[-1]
-        model_path = os.path.join(params.OUTPUT_DIR, latest_training, params.TFLITE_FILENAME)
         
-        if not os.path.exists(model_path):
-            print(f"TFLite model not found: {model_path}")
-            return None
+        # Try multiple possible model file locations
+        possible_paths = [
+            os.path.join(params.OUTPUT_DIR, latest_training, params.TFLITE_FILENAME),
+            os.path.join(params.OUTPUT_DIR, latest_training, "final_quantized.tflite"),
+            os.path.join(params.OUTPUT_DIR, latest_training, "final_float.tflite"),
+        ]
         
-        return model_path
+        for model_path in possible_paths:
+            if os.path.exists(model_path):
+                print(f"Using model: {model_path}")
+                return model_path
+        
+        # If no specific model found, look for any .tflite file in the latest directory
+        latest_dir_path = os.path.join(params.OUTPUT_DIR, latest_training)
+        tflite_files = [f for f in os.listdir(latest_dir_path) if f.endswith('.tflite')]
+        
+        if tflite_files:
+            model_path = os.path.join(latest_dir_path, tflite_files[0])
+            print(f"Using first available model: {model_path}")
+            return model_path
+        
+        print(f"No TFLite model found in: {latest_dir_path}")
+        print("Available files:")
+        for file in os.listdir(latest_dir_path):
+            print(f"  - {file}")
+        return None
+
+def list_available_models():
+    """List all available models in training directories"""
+    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if d.startswith('training_')]
+    if not training_dirs:
+        print("No training directories found.")
+        return
+    
+    print("Available models:")
+    print("-" * 50)
+    
+    for training_dir in sorted(training_dirs, reverse=True):
+        training_path = os.path.join(params.OUTPUT_DIR, training_dir)
+        tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+        
+        if tflite_files:
+            print(f"\n{training_dir}:")
+            for model_file in tflite_files:
+                model_path = os.path.join(training_path, model_file)
+                model_size = os.path.getsize(model_path) / 1024
+                print(f"  └── {model_file} ({model_size:.1f} KB)")
 
 def debug_model_output():
     """Debug function to test model output interpretation"""
@@ -192,8 +246,13 @@ def main():
     parser.add_argument('--img', type=str, help='Path to input image for prediction')
     parser.add_argument('--model', type=str, help='Model name to use for prediction')
     parser.add_argument('--debug', action='store_true', help='Debug model output interpretation')
+    parser.add_argument('--list', action='store_true', help='List all available models')
     
     args = parser.parse_args()
+    
+    if args.list:
+        list_available_models()
+        return
     
     if args.debug:
         debug_model_output()

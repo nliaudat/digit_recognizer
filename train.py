@@ -1,3 +1,4 @@
+# train.py
 import tensorflow as tf
 import numpy as np
 import os
@@ -610,6 +611,7 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     print(f"  Learning rate: {params.LEARNING_RATE}")
     print(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}")
     print(f"  Quantization: {params.QUANTIZE_MODEL}")
+    print(f"  ESP-DL Quantization: {params.ESP_DL_QUANTIZE}")
     print(f"  Debug mode: {'Enabled' if debug else 'Disabled'}")
 
 def train_model(debug=False):
