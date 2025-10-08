@@ -29,19 +29,19 @@ AUGMENTED_DATA_DIR = None      # Auto-generated: [input]_augmented
 
 # Enable/disable augmentation
 USE_DATA_AUGMENTATION = True
-AUGMENTATION_MULTIPLIER = 3  # How many augmented samples per original sample
+AUGMENTATION_MULTIPLIER = 2  # How many augmented samples per original sample
 
 # Basic Image Transformations
-AUG_ROTATION_RANGE = 15  # degrees (±15)
-AUG_ZOOM_RANGE = 0.2     # ±20% zoom
-AUG_WIDTH_SHIFT_RANGE = 0.1  # ±10% horizontal shift
-AUG_HEIGHT_SHIFT_RANGE = 0.1 # ±10% vertical shift
-AUG_SHEAR_RANGE = 0.2    # ±20% shear
+AUG_ROTATION_RANGE = 5    # Reduced from 15 (±5 degrees)
+AUG_ZOOM_RANGE = 0.1      # Reduced from 0.2 (±10% zoom)
+AUG_WIDTH_SHIFT_RANGE = 0.05  # Reduced from 0.1 (±5% shift)
+AUG_HEIGHT_SHIFT_RANGE = 0.05 # Reduced from 0.1 (±5% shift)
+AUG_SHEAR_RANGE = 0.1     # Reduced from 0.2 (±10% shear)
 
 # Color/Style Augmentations
-AUG_BRIGHTNESS_RANGE = [0.8, 1.2]  # 80% to 120% brightness
-AUG_CONTRAST_RANGE = [0.8, 1.2]    # 80% to 120% contrast
-AUG_COLOR_JITTER = 0.1             # 10% color variation
+AUG_BRIGHTNESS_RANGE = [0.9, 1.1]  # Reduced from [0.8, 1.2]
+AUG_CONTRAST_RANGE = [0.9, 1.1]    # Reduced from [0.8, 1.2]
+AUG_COLOR_JITTER = 0.05            # Reduced from 0.1
 AUG_GAUSSIAN_NOISE_STD = 0.05      # Standard deviation for Gaussian noise
 
 # Random Erasing/Cutout
@@ -58,7 +58,7 @@ AUG_PERSPECTIVE_TRANSFORM = True
 AUG_PERSPECTIVE_SCALE = 0.1        # 10% perspective distortion
 
 # Flashlight Disturbance Augmentation
-AUG_FLASHLIGHT_DISTURBANCE = True
+AUG_FLASHLIGHT_DISTURBANCE = False
 AUG_FLASHLIGHT_INTENSITY = 0.8           # Maximum brightness intensity (0.0 to 1.0)
 AUG_FLASHLIGHT_RADIUS_RANGE = [0.1, 0.3] # Radius as fraction of image size (10% to 30%)
 AUG_FLASHLIGHT_PROGRESSIVE = True        # Whether the effect is progressive (fades out)
@@ -484,56 +484,62 @@ class SingleShotAugmentor:
         return self.ensure_correct_shape(disturbed)
     
     def augment_single_image(self, image, label, original_path, augmentation_id):
-        """Apply comprehensive augmentation to a single image"""
+        """Apply conservative augmentation to a single image"""
         image = self.ensure_correct_shape(image)
         augmented = image.copy()
         
-        # Select augmentations to apply
-        augmentations_to_apply = [
-            self.apply_rotation,
-            self.apply_zoom,
-            self.apply_shift,
-            self.apply_shear
-        ]
-        
-        # Add color augmentations
-        color_augmentations = [
-            self.adjust_brightness,
-            self.adjust_contrast,
-            self.apply_color_jitter,
-            self.add_gaussian_noise
-        ]
-        augmentations_to_apply.extend(random.sample(color_augmentations, random.randint(1, 2)))
-        
-        # Add spatial augmentations (including flashlight disturbance)
+        # Apply only 1-2 spatial transformations (not all)
         spatial_augmentations = [
-            self.apply_random_erasing,
-            self.apply_random_crop,
-            self.apply_perspective_transform,
-            self.apply_flashlight_disturbance
+            (self.apply_rotation, 0.3),      # 30% chance
+            (self.apply_zoom, 0.3),          # 30% chance  
+            (self.apply_shift, 0.4),         # 40% chance
+            (self.apply_shear, 0.2),         # 20% chance (reduced)
         ]
-        if random.random() < 0.5:
-            augmentations_to_apply.append(random.choice(spatial_augmentations))
         
-        # Apply in random order
-        random.shuffle(augmentations_to_apply)
+        # Apply at most 2 spatial augmentations
+        applied_spatial = 0
+        for aug_func, probability in spatial_augmentations:
+            if applied_spatial < 2 and random.random() < probability:
+                try:
+                    augmented = aug_func(augmented)
+                    applied_spatial += 1
+                except Exception as e:
+                    continue
         
-        for augmentation in augmentations_to_apply:
+        # Apply at most 1 color augmentation
+        color_augmentations = [
+            (self.adjust_brightness, 0.3),
+            (self.adjust_contrast, 0.3),
+            (self.add_gaussian_noise, 0.2),  # Reduced probability
+        ]
+        
+        if random.random() < 0.5:  # 50% chance of any color augmentation
+            for aug_func, probability in color_augmentations:
+                if random.random() < probability:
+                    try:
+                        augmented = aug_func(augmented)
+                        break  # Only apply one color augmentation
+                    except Exception as e:
+                        continue
+        
+        # Rarely apply other augmentations (10% chance)
+        if random.random() < 0.1:
+            other_augmentations = [
+                self.apply_random_erasing,
+                self.apply_random_crop,
+            ]
+            aug_func = random.choice(other_augmentations)
             try:
-                if augmentation.__name__ in ['apply_color_jitter', 'add_gaussian_noise', 
-                                           'apply_random_erasing', 'apply_random_crop',
-                                           'apply_perspective_transform', 'apply_flashlight_disturbance']:
-                    augmented = augmentation(augmented)
-                else:
-                    augmented = augmentation(augmented)
+                augmented = aug_func(augmented)
             except Exception as e:
-                continue
+                pass
         
         augmented = np.clip(augmented, 0, 1)
         augmented = self.ensure_correct_shape(augmented)
         
         # Save augmented image
-        self.save_augmented_image(augmented, label, original_path, augmentation_id)
+        if SAVE_AUGMENTED_IMAGES:
+            self.save_augmented_image(augmented, label, original_path, augmentation_id)
         
         return augmented
     

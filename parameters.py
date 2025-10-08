@@ -94,6 +94,10 @@ USE_GPU = False  # Set to False to force CPU usage (tensorflow cannot use gpu si
 GPU_MEMORY_GROWTH = True  # Gradually allocate GPU memory instead of all at once
 GPU_MEMORY_LIMIT = None  # Set specific memory limit in MB, or None for no limit
 
+# Checkpoint settings
+SAVE_CHECKPOINTS = True
+CHECKPOINT_FREQUENCY = 5  # Save every 5 epochs
+SAVE_BEST_ONLY = False    # Save checkpoints regardless of accuracy improvement
 
 # ==============================================================================
 # DATA SOURCES
@@ -111,7 +115,7 @@ DATA_SOURCES = [
         # 'name': 'meterdigits_augmented',
         # 'type': 'folder_structure',
         # 'path': 'datasets/meterdigits_augmented',
-        # 'weight': 0.6,
+        # 'weight': 0.3,
     # },
     # {
         # 'name': 'MNIST',
