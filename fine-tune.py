@@ -27,8 +27,9 @@ import parameters as params
 class FineTuneManager:
     """Manager for fine-tuning pre-trained models"""
     
-    def __init__(self, debug=False):
+    def __init__(self, model_dir=None, debug=False):
         self.debug = debug
+        self.model_dir = model_dir or params.OUTPUT_DIR
         self.setup_logging()
         
     def setup_logging(self):
@@ -36,62 +37,108 @@ class FineTuneManager:
         setup_tensorflow_logging(self.debug)
         if self.debug:
             print("🔧 Fine-tuning debug mode enabled")
-    
-    def find_best_trainable_checkpoint(self, models_dir="exported_models"):
-        """Find the best trainable checkpoint (H5 or SavedModel)"""
-        if not os.path.exists(models_dir):
-            return None
+
+    def reconstruct_model_from_savedmodel(self, savedmodel_path):
+        """Reconstruct a trainable model from SavedModel directory"""
+        try:
+            # Method 1: Try to find a .keras file in the same directory
+            directory = os.path.dirname(savedmodel_path) if os.path.isdir(savedmodel_path) else savedmodel_path
+            keras_files = [f for f in os.listdir(directory) if f.endswith('.keras')]
             
-        # Look for all training directories
-        training_dirs = []
-        for item in os.listdir(models_dir):
-            item_path = os.path.join(models_dir, item)
-            if os.path.isdir(item_path) and any(x in item for x in ['training', 'fine_tune']):
-                training_dirs.append(item_path)
-        
-        if not training_dirs:
-            print("❌ No training directories found")
+            if keras_files:
+                # Load the .keras file instead
+                keras_path = os.path.join(directory, keras_files[0])
+                print(f"🔍 Found .keras file: {keras_files[0]}, loading that instead")
+                return tf.keras.models.load_model(keras_path)
+            
+            # Method 2: Create a new model with same architecture and load weights
+            print("🔧 Reconstructing model architecture and loading weights...")
+            
+            # Create a new instance of the same model architecture
+            from models import create_model
+            model = create_model()
+            
+            # Try to load weights if they exist
+            weights_path = os.path.join(savedmodel_path, "variables", "variables")
+            if os.path.exists(weights_path + ".index"):
+                model.load_weights(weights_path)
+                print("✅ Loaded weights from SavedModel")
+            else:
+                print("⚠️  No weights found in SavedModel, using initialized weights")
+            
+            return model
+            
+        except Exception as e:
+            print(f"❌ Failed to reconstruct from SavedModel: {e}")
+            raise ValueError("Could not load SavedModel. Please use .keras format for fine-tuning.")
+
+    def find_best_trainable_checkpoint(self):
+        """Find the best trainable checkpoint - prioritizing .keras format"""
+        if not os.path.exists(self.model_dir):
             return None
         
-        # Sort by modification time (newest first)
-        training_dirs.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-        latest_training_dir = training_dirs[0]
+        # Look for .keras files first (Keras 3 format)
+        keras_files = [f for f in os.listdir(self.model_dir) if f.endswith('.keras')]
         
-        print(f"🔍 Searching in: {latest_training_dir}")
+        if keras_files:
+            # Prioritize specific files in order
+            preferred_files = [
+                "best_model.keras",
+                "final_model.keras"
+            ]
+            
+            for preferred_file in preferred_files:
+                if preferred_file in keras_files:
+                    return os.path.join(self.model_dir, preferred_file)
+            
+            # Look for checkpoint files with highest accuracy
+            checkpoint_files = [f for f in keras_files if f.startswith('checkpoint_epoch_')]
+            if checkpoint_files:
+                # Sort by accuracy (extract accuracy from filename)
+                def extract_accuracy(filename):
+                    try:
+                        # Extract accuracy from filename like: checkpoint_epoch_050_acc_0.9500_143022.keras
+                        acc_part = filename.split('_acc_')[1].split('_')[0]
+                        return float(acc_part)
+                    except:
+                        return 0.0
+                
+                best_checkpoint = max(checkpoint_files, key=extract_accuracy)
+                return os.path.join(self.model_dir, best_checkpoint)
+            
+            # Return any .keras file as fallback
+            return os.path.join(self.model_dir, keras_files[0])
         
-        # Look for H5 checkpoints first
-        h5_files = [f for f in os.listdir(latest_training_dir) if f.endswith('.h5') and 'best_model' in f]
-        
+        # Fallback to H5 files (legacy)
+        h5_files = [f for f in os.listdir(self.model_dir) if f.endswith('.h5')]
         if h5_files:
-            # Sort by accuracy in filename
-            def extract_accuracy(filename):
-                match = re.search(r'acc_([\d.]+)', filename)
-                return float(match.group(1)) if match else 0.0
+            print("⚠️  Using legacy H5 format - consider retraining with .keras format")
+            # Similar logic as above for H5 files
+            preferred_files = ["best_model.h5", "final_model.h5"]
+            for preferred_file in preferred_files:
+                if preferred_file in h5_files:
+                    return os.path.join(self.model_dir, preferred_file)
             
-            h5_files.sort(key=extract_accuracy, reverse=True)
-            best_h5 = os.path.join(latest_training_dir, h5_files[0])
-            print(f"✅ Found H5 checkpoint: {best_h5}")
-            return best_h5
+            checkpoint_files = [f for f in h5_files if f.startswith('checkpoint_epoch_')]
+            if checkpoint_files:
+                best_checkpoint = max(checkpoint_files, key=lambda x: float(x.split('_acc_')[1].split('_')[0]))
+                return os.path.join(self.model_dir, best_checkpoint)
+            
+            return os.path.join(self.model_dir, h5_files[0])
         
-        # Look for SavedModel
-        savedmodel_dir = os.path.join(latest_training_dir, "best_model_savedmodel")
-        if os.path.exists(savedmodel_dir):
-            print(f"✅ Found SavedModel: {savedmodel_dir}")
-            return savedmodel_dir
+        # Look for SavedModel directories as last resort
+        savedmodel_dirs = [d for d in os.listdir(self.model_dir) 
+                          if os.path.isdir(os.path.join(self.model_dir, d)) and 'savedmodel' in d]
+        if savedmodel_dirs:
+            print("⚠️  Found SavedModel directories - attempting to reconstruct model...")
+            # Return the most recent SavedModel directory
+            savedmodel_dirs.sort(key=lambda x: os.path.getmtime(os.path.join(self.model_dir, x)), reverse=True)
+            return os.path.join(self.model_dir, savedmodel_dirs[0])
         
-        # Fallback: look for any H5 file
-        any_h5 = [f for f in os.listdir(latest_training_dir) if f.endswith('.h5')]
-        if any_h5:
-            any_h5.sort(key=lambda x: os.path.getmtime(os.path.join(latest_training_dir, x)), reverse=True)
-            fallback_h5 = os.path.join(latest_training_dir, any_h5[0])
-            print(f"⚠️ Using fallback H5: {fallback_h5}")
-            return fallback_h5
-        
-        print("❌ No trainable checkpoints found")
         return None
     
     def load_pretrained_model(self, model_path=None):
-        """Load a pre-trained model for fine-tuning"""
+        """Load a pre-trained model for fine-tuning - Keras 3 compatible"""
         if model_path is None:
             # Find the best trainable checkpoint
             model_path = self.find_best_trainable_checkpoint()
@@ -102,13 +149,21 @@ class FineTuneManager:
             print(f"📁 Loading model from: {model_path}")
         
         try:
-            # Load the model
-            if os.path.isdir(model_path):  # SavedModel format
+            # ✅ UPDATED: Keras 3 compatible model loading
+            if model_path.endswith('.keras'):
+                # Load .keras format (recommended for Keras 3)
                 model = tf.keras.models.load_model(model_path)
-                print("✅ Loaded SavedModel")
-            else:  # H5 format
+                print("✅ Loaded .keras model")
+            elif model_path.endswith('.h5'):
+                # Load H5 format (legacy support)
                 model = tf.keras.models.load_model(model_path)
                 print("✅ Loaded H5 model")
+            elif os.path.isdir(model_path):
+                # ✅ UPDATED: For SavedModel directories, use TFSMLayer for inference or load weights
+                print("⚠️  SavedModel format detected - attempting to reconstruct model...")
+                model = self.reconstruct_model_from_savedmodel(model_path)
+            else:
+                raise ValueError(f"Unsupported model format: {model_path}")
             
             # Ensure model is built
             if not model.built:
@@ -368,7 +423,7 @@ def fine_tune_model(
     print("=" * 60)
     
     # Initialize managers
-    ft_manager = FineTuneManager(debug)
+    ft_manager = FineTuneManager(model_path, debug)
     
     # Load pre-trained model
     print("📥 Loading pre-trained model...")
@@ -454,7 +509,7 @@ def fine_tune_model(
     )
     
     # Save trainable checkpoint
-    checkpoint_path = os.path.join(fine_tune_dir, f"fine_tuned_model_acc_{test_accuracy:.4f}.h5")
+    checkpoint_path = os.path.join(fine_tune_dir, f"fine_tuned_model_acc_{test_accuracy:.4f}.keras")
     model.save(checkpoint_path)
     print(f"💾 Saved trainable model: {checkpoint_path}")
     

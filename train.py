@@ -153,26 +153,16 @@ class TFLiteModelManager:
             return False
             
     def save_trainable_checkpoint(self, model, accuracy, epoch):
-        """Save model in trainable format (.keras or SavedModel)"""
+        """Save model in trainable format (.keras only for Keras 3 compatibility)"""
         # Always save when called, not just on best accuracy
         timestamp = datetime.now().strftime("%H%M%S")
         
-        # Save as .keras format (modern Keras format)
+        # ✅ UPDATED: Only save as .keras format (Keras 3 compatible)
         checkpoint_path = os.path.join(self.output_dir, f"checkpoint_epoch_{epoch:03d}_acc_{accuracy:.4f}_{timestamp}.keras")
         model.save(checkpoint_path)
         
-        # ✅ UPDATED: Save as SavedModel with comprehensive output suppression
-        savedmodel_path = os.path.join(self.output_dir, f"savedmodel_epoch_{epoch:03d}")
-        
-        # Use both suppression methods for maximum effect
-        with suppress_all_output(self.debug):
-            with suppress_keras_export_output():  # Add this if you created the targeted method
-                model.export(savedmodel_path)
-        
         if self.debug:
             print(f"💾 Saved trainable checkpoint: {checkpoint_path}")
-            # Only show SavedModel path in debug mode, not the export details
-            print(f"💾 Saved SavedModel: {savedmodel_path}")
         
         # Still track best accuracy for TFLite conversion
         if accuracy > self.best_accuracy:
@@ -180,17 +170,13 @@ class TFLiteModelManager:
             # Save best model separately
             best_checkpoint_path = os.path.join(self.output_dir, "best_model.keras")
             model.save(best_checkpoint_path)
-            # Also export best model as SavedModel
-            best_savedmodel_path = os.path.join(self.output_dir, "best_model_savedmodel")
-            with suppress_all_output(self.debug):
-                model.export(best_savedmodel_path)
             if self.debug:
                 print(f"🏆 New best model saved: {best_checkpoint_path}")
         
         return checkpoint_path
         
     def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
-        """Save model directly as TFLite with ESP-DL compatibility - Keras 3 FIXED VERSION"""
+        """Save model directly as TFLite with ESP-DL compatibility - Keras 3 compatible"""
         try:
             # CRITICAL FIX: Ensure model is built by running a forward pass
             if not model.built:
@@ -199,10 +185,10 @@ class TFLiteModelManager:
                 _ = model(dummy_input)
                 print("✅ Model built successfully")
             
-            # Keras 3 compatible conversion - use from_keras_model with explicit input spec
-            # print(f"🔧 Converting {filename} to TFLite (Keras 3 compatible)...")
+            # Keras 3 compatible conversion - use concrete functions only
+            # print(f"🔧 Converting {filename} to TFLite (Keras 3 concrete functions)...")
             
-            # Method 1: Use concrete function with explicit input spec
+            # Create concrete function with explicit input spec
             @tf.function
             def model_call(x):
                 return model(x)
@@ -1000,11 +986,6 @@ def train_model(debug=False):
     final_checkpoint_path = os.path.join(training_dir, "final_model.keras")
     model.save(final_checkpoint_path)
     print(f"✅ Final model saved: {final_checkpoint_path}")
-
-    # ✅ UPDATED: Also export as SavedModel using model.export()
-    final_savedmodel_path = os.path.join(training_dir, "final_model_savedmodel")
-    model.export(final_savedmodel_path)  # Use export() for SavedModel
-    print(f"✅ Final model exported as SavedModel: {final_savedmodel_path}")
     
     return model, history, training_dir
 
