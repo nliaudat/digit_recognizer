@@ -185,8 +185,7 @@ def validate_quantization_parameters():
         print("⚠️  Warning: Using UINT8 quantization. For ESP-DL, set ESP_DL_QUANTIZE = True")
     
     if params.ESP_DL_QUANTIZE and not params.QUANTIZE_MODEL:
-        print("❌ Error: ESP_DL_QUANTIZE requires QUANTIZE_MODEL = True")
-        params.ESP_DL_QUANTIZE = False
+        raise ValueError("❌ Error: ESP_DL_QUANTIZE requires QUANTIZE_MODEL = True")
     
     # Validate input normalization
     if params.ESP_DL_QUANTIZE:

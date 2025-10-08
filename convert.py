@@ -2,8 +2,9 @@ import tensorflow as tf
 import numpy as np
 import os
 from utils.dataset import load_digit_dataset
-from utils.preprocess import preprocess_images
+# from utils.preprocess import preprocess_images
 import parameters as params
+from utils.preprocess import preprocess_images, preprocess_images_esp_dl
 
 def representative_dataset():
     """Generate enhanced representative dataset for better quantization"""
@@ -27,7 +28,7 @@ def representative_dataset():
 def convert_to_tflite_micro():
     """Main conversion function with enhanced quantization"""
     if params.QUANTIZE_MODEL:
-        converter.representative_dataset = representative_dataset_enhanced
+        converter.representative_dataset = representative_dataset
     
     model_path = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_FILENAME}.h5")
     output_path = os.path.join(params.OUTPUT_DIR, params.TFLITE_FILENAME)
@@ -158,8 +159,10 @@ def check_esp_dl_compatibility(tflite_model_path):
             if op['op_name'] not in supported_ops:
                 issues.append(f"Unsupported op: {op['op_name']}")
                 compatible = False
-    except:
-        pass
+                
+    except Exception as e:
+        issues.append(f"Unsupported op check failed: {e}")
+        compatible = False
     
     return compatible, issues
 
