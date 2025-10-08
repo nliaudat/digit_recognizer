@@ -128,40 +128,91 @@ class TFLiteModelManager:
         self.best_accuracy = 0.0
         self.debug = debug
         
+    def verify_model_for_conversion(self, model):
+        """Verify model is compatible with TFLite conversion"""
+        try:
+            # Test forward pass
+            test_input = tf.random.normal([1] + list(params.INPUT_SHAPE))
+            test_output = model(test_input)
+            
+            # Verify output shape
+            expected_output_shape = (1, params.NB_CLASSES)
+            if test_output.shape != expected_output_shape:
+                print(f"⚠️  Output shape mismatch: {test_output.shape} vs {expected_output_shape}")
+            
+            # Verify no NaN values
+            if tf.reduce_any(tf.math.is_nan(test_output)):
+                print("❌ Model output contains NaN values")
+                return False
+                
+            # print("✅ Model verification passed")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Model verification failed: {e}")
+            return False
+            
+    def save_trainable_checkpoint(self, model, accuracy, epoch):
+        """Save model in trainable format (.keras or SavedModel)"""
+        # Always save when called, not just on best accuracy
+        timestamp = datetime.now().strftime("%H%M%S")
+        
+        # Save as .keras format (modern Keras format)
+        checkpoint_path = os.path.join(self.output_dir, f"checkpoint_epoch_{epoch:03d}_acc_{accuracy:.4f}_{timestamp}.keras")
+        model.save(checkpoint_path)
+        
+        # ✅ UPDATED: Save as SavedModel with comprehensive output suppression
+        savedmodel_path = os.path.join(self.output_dir, f"savedmodel_epoch_{epoch:03d}")
+        
+        # Use both suppression methods for maximum effect
+        with suppress_all_output(self.debug):
+            with suppress_keras_export_output():  # Add this if you created the targeted method
+                model.export(savedmodel_path)
+        
+        if self.debug:
+            print(f"💾 Saved trainable checkpoint: {checkpoint_path}")
+            # Only show SavedModel path in debug mode, not the export details
+            print(f"💾 Saved SavedModel: {savedmodel_path}")
+        
+        # Still track best accuracy for TFLite conversion
+        if accuracy > self.best_accuracy:
+            self.best_accuracy = accuracy
+            # Save best model separately
+            best_checkpoint_path = os.path.join(self.output_dir, "best_model.keras")
+            model.save(best_checkpoint_path)
+            # Also export best model as SavedModel
+            best_savedmodel_path = os.path.join(self.output_dir, "best_model_savedmodel")
+            with suppress_all_output(self.debug):
+                model.export(best_savedmodel_path)
+            if self.debug:
+                print(f"🏆 New best model saved: {best_checkpoint_path}")
+        
+        return checkpoint_path
+        
     def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
-        """Save model directly as TFLite with ESP-DL compatibility - FIXED VERSION"""
+        """Save model directly as TFLite with ESP-DL compatibility - Keras 3 FIXED VERSION"""
         try:
             # CRITICAL FIX: Ensure model is built by running a forward pass
             if not model.built:
                 print("🔄 Building model by running forward pass...")
-                # Create a dummy input with the correct shape
                 dummy_input = tf.zeros([1] + list(params.INPUT_SHAPE))
-                _ = model(dummy_input)  # This builds the model
+                _ = model(dummy_input)
                 print("✅ Model built successfully")
             
-            # Alternative approach: Use the functional API conversion
-            # print(f"🔧 Converting {filename} to TFLite...")
+            # Keras 3 compatible conversion - use from_keras_model with explicit input spec
+            # print(f"🔧 Converting {filename} to TFLite (Keras 3 compatible)...")
             
-            # Method 1: Try concrete function approach first
-            try:
-                @tf.function
-                def model_call(x):
-                    return model(x)
-                
-                # Create concrete function
-                concrete_func = model_call.get_concrete_function(
-                    tf.TensorSpec([1] + list(params.INPUT_SHAPE), tf.float32)
-                )
-                
-                converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func], model_call)
-                
-            except Exception as e:
-                print(f"⚠️  Concrete function approach failed, trying saved model: {e}")
-                # Method 2: Save as SavedModel then convert
-                import tempfile
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    model.save(temp_dir, save_format='tf')
-                    converter = tf.lite.TFLiteConverter.from_saved_model(temp_dir)
+            # Method 1: Use concrete function with explicit input spec
+            @tf.function
+            def model_call(x):
+                return model(x)
+            
+            # Create concrete function with proper input shape
+            concrete_func = model_call.get_concrete_function(
+                tf.TensorSpec([None] + list(params.INPUT_SHAPE), tf.float32, name='input_tensor')
+            )
+            
+            converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func], model_call)
             
             # Configure quantization if needed
             if quantize:
@@ -208,11 +259,12 @@ class TFLiteModelManager:
             
         except Exception as e:
             print(f"❌ TFLite conversion failed: {e}")
-            # Final fallback: try the simple approach
+            # Fallback to simple method
             return self.save_as_tflite_simple(model, filename, quantize, representative_data)
 
+
     def save_as_tflite_simple(self, model, filename, quantize=False, representative_data=None):
-        """Simple fallback conversion method"""
+        """Simple fallback conversion method for Keras 3"""
         try:
             print(f"🔄 Trying simple conversion for {filename}...")
             
@@ -221,8 +273,17 @@ class TFLiteModelManager:
                 dummy_input = tf.zeros([1] + list(params.INPUT_SHAPE))
                 _ = model(dummy_input)
             
-            # Use Keras model conversion
-            converter = tf.lite.TFLiteConverter.from_keras_model(model)
+            # Keras 3 compatible: Use concrete function approach
+            @tf.function
+            def serve(x):
+                return model(x)
+            
+            # Create concrete function
+            concrete_serving = serve.get_concrete_function(
+                tf.TensorSpec(shape=[None] + list(params.INPUT_SHAPE), dtype=tf.float32)
+            )
+            
+            converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_serving], serve)
             
             if quantize:
                 converter.optimizations = [tf.lite.Optimize.DEFAULT]
@@ -243,16 +304,81 @@ class TFLiteModelManager:
             
         except Exception as e:
             print(f"❌ Simple conversion also failed: {e}")
+            # Final fallback: manual SavedModel export
+            return self.save_as_tflite_manual(model, filename, quantize, representative_data)
+            
+    def save_as_tflite_manual(self, model, filename, quantize=False, representative_data=None):
+        """Manual conversion method as last resort"""
+        try:
+            print(f"🔄 Trying manual conversion for {filename}...")
+            
+            # Manual SavedModel creation
+            import tempfile
+            import shutil
+            
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Create SavedModel structure manually
+                model_dir = os.path.join(temp_dir, "saved_model")
+                os.makedirs(model_dir)
+                
+                # Save model weights and architecture separately
+                model.save(os.path.join(model_dir, "model.keras"))
+                
+                # Create a simple serving function
+                @tf.function
+                def serve(inputs):
+                    return model(inputs)
+                
+                # Get concrete function
+                concrete_serve = serve.get_concrete_function(
+                    tf.TensorSpec(shape=[None] + list(params.INPUT_SHAPE), dtype=tf.float32, name='inputs')
+                )
+                
+                # Save using tf.saved_model.save
+                tf.saved_model.save(
+                    model,
+                    model_dir,
+                    signatures={
+                        'serving_default': concrete_serve,
+                        'serve': concrete_serve
+                    }
+                )
+                
+                # Convert from SavedModel
+                converter = tf.lite.TFLiteConverter.from_saved_model(model_dir)
+                
+                if quantize:
+                    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+                    if representative_data is not None:
+                        converter.representative_dataset = representative_data
+                    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+                    converter.inference_input_type = tf.int8
+                    converter.inference_output_type = tf.int8
+                
+                with suppress_all_output(self.debug):
+                    tflite_model = converter.convert()
+                
+                model_path = os.path.join(self.output_dir, filename)
+                with open(model_path, 'wb') as f:
+                    f.write(tflite_model)
+                
+                model_size_kb = len(tflite_model) / 1024
+                print(f"💾 Saved {filename} (manual): {model_size_kb:.1f} KB")
+                
+                return tflite_model, model_size_kb
+                
+        except Exception as e:
+            print(f"❌ Manual conversion failed: {e}")
             raise
     
     def save_as_tflite_fallback(self, model, filename, quantize=False, representative_data=None):
-        """Fallback conversion method"""
+        """Fallback conversion method for Keras 3"""
         try:
-            # Alternative approach: save to SavedModel then convert
+            # Alternative approach: export to SavedModel then convert
             import tempfile
             with tempfile.TemporaryDirectory() as temp_dir:
-                # Save as SavedModel first
-                tf.saved_model.save(model, temp_dir)
+                # Export as SavedModel first (Keras 3)
+                model.export(temp_dir)  # ✅ UPDATED: Use export() instead of save()
                 
                 # Convert from SavedModel
                 converter = tf.lite.TFLiteConverter.from_saved_model(temp_dir)
@@ -285,39 +411,46 @@ class TFLiteModelManager:
             raise
     
     def save_best_model(self, model, accuracy, representative_data=None):
-        """Save model if it's the best so far - completely silent in non-debug mode"""
+        """Save model if it's the best so far"""
         if accuracy > self.best_accuracy:
             self.best_accuracy = accuracy
             
-            # Only show messages in debug mode
+            # Verify model before conversion
+            if not self.verify_model_for_conversion(model):
+                print("⚠️  Skipping TFLite conversion due to model issues")
+                return None
+                
             if self.debug:
                 print(f"🎯 New best accuracy: {accuracy:.4f}, saving TFLite model...")
             
             # Save quantized model (for ESP-DL)
-            tflite_model, size_kb = self.save_as_tflite(
-                model, 
-                params.TFLITE_FILENAME, 
-                quantize=True, 
-                representative_data=representative_data
-            )
-            
-            # Also save float model for comparison
-            self.save_as_tflite(
-                model, 
-                params.FLOAT_TFLITE_FILENAME, 
-                quantize=False
-            )
-            
-            # Only show model sizes in debug mode
-            if self.debug:
-                quantized_path = os.path.join(self.output_dir, params.TFLITE_FILENAME)
-                float_path = os.path.join(self.output_dir, params.FLOAT_TFLITE_FILENAME)
-                if os.path.exists(quantized_path):
-                    quantized_size = os.path.getsize(quantized_path) / 1024
-                    float_size = os.path.getsize(float_path) / 1024
-                    print(f"💾 Models saved - Quantized: {quantized_size:.1f} KB, Float: {float_size:.1f} KB")
-            
-            return size_kb
+            try:
+                tflite_model, size_kb = self.save_as_tflite(
+                    model, 
+                    params.TFLITE_FILENAME, 
+                    quantize=True, 
+                    representative_data=representative_data
+                )
+                
+                # Also save float model for comparison
+                self.save_as_tflite(
+                    model, 
+                    params.FLOAT_TFLITE_FILENAME, 
+                    quantize=False
+                )
+                
+                if self.debug:
+                    quantized_path = os.path.join(self.output_dir, params.TFLITE_FILENAME)
+                    float_path = os.path.join(self.output_dir, params.FLOAT_TFLITE_FILENAME)
+                    if os.path.exists(quantized_path):
+                        quantized_size = os.path.getsize(quantized_path) / 1024
+                        float_size = os.path.getsize(float_path) / 1024
+                        print(f"💾 Models saved - Quantized: {quantized_size:.1f} KB, Float: {float_size:.1f} KB")
+                
+                return size_kb
+            except Exception as e:
+                print(f"❌ TFLite conversion failed: {e}")
+                return None
         return None
 
 class TrainingMonitor:
@@ -394,18 +527,39 @@ class TrainingMonitor:
         print(f"📊 Training plots saved to: {plot_path}")
 
 class TFLiteCheckpoint(tf.keras.callbacks.Callback):
-    def __init__(self, tflite_manager, representative_data):
+    def __init__(self, tflite_manager, representative_data, save_frequency=10):  # Reduced frequency
         super().__init__()
         self.tflite_manager = tflite_manager
         self.representative_data = representative_data
+        self.save_frequency = save_frequency
+        self.last_save_epoch = -1
         
     def on_epoch_end(self, epoch, logs=None):
         val_accuracy = logs.get('val_accuracy', 0)
-        self.tflite_manager.save_best_model(
-            self.model, 
-            val_accuracy, 
-            self.representative_data
-        )
+        
+        # Only save TFLite on best accuracy or every N epochs to avoid conversion issues
+        if val_accuracy > getattr(self.tflite_manager, 'best_accuracy', 0):
+            try:
+                # Save TFLite for inference only when we have new best accuracy
+                self.tflite_manager.save_best_model(
+                    self.model, 
+                    val_accuracy, 
+                    self.representative_data
+                )
+            except Exception as e:
+                if self.tflite_manager.debug:
+                    print(f"⚠️  TFLite save failed (will retry next epoch): {e}")
+        
+        # Save trainable checkpoint less frequently
+        if epoch % self.save_frequency == 0 and epoch != self.last_save_epoch:
+            try:
+                checkpoint_path = self.tflite_manager.save_trainable_checkpoint(self.model, val_accuracy, epoch)
+                if checkpoint_path and self.tflite_manager.debug:
+                    print(f"💾 Saved checkpoint: {checkpoint_path}")
+                self.last_save_epoch = epoch
+            except Exception as e:
+                if self.tflite_manager.debug:
+                    print(f"⚠️  Checkpoint save failed: {e}")
 
 class TQDMProgressBar(tf.keras.callbacks.Callback):
     def __init__(self, total_epochs, monitor, tflite_manager, debug=False):
@@ -458,7 +612,7 @@ class TQDMProgressBar(tf.keras.callbacks.Callback):
             self.pbar.close()
 
 def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False):
-    """Create training callbacks"""
+    """Create training callbacks for Keras 3"""
     
     callbacks = []
     
@@ -481,7 +635,28 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
             )
         )
     
-    # Learning rate scheduler with configurable parameters
+    # Regular checkpoint every epoch
+    callbacks.append(
+        tf.keras.callbacks.ModelCheckpoint(
+            filepath=os.path.join(output_dir, "checkpoints", "epoch_{epoch:03d}.keras"),
+            save_freq='epoch',
+            save_best_only=False,
+            verbose=1 if debug else 0
+        )
+    )
+    
+    # Best model checkpoint
+    callbacks.append(
+        tf.keras.callbacks.ModelCheckpoint(
+            filepath=os.path.join(output_dir, "best_model.keras"),
+            monitor='val_accuracy',
+            save_best_only=True,
+            mode='max',
+            verbose=1 if debug else 0
+        )
+    )
+    
+    # Learning rate scheduler
     callbacks.extend([
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor=getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss'),
@@ -505,7 +680,11 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         )
     ])
     
+    # Create checkpoints directory
+    os.makedirs(os.path.join(output_dir, "checkpoints"), exist_ok=True)
+    
     return callbacks
+
 
 def create_representative_dataset(x_train, num_samples=params.QUANTIZE_NUM_SAMPLES):
     """Create representative dataset for quantization"""
@@ -696,7 +875,7 @@ def train_model(debug=False):
         model = create_model()
         model = compile_model(model)
 
-    # CRITICAL: Explicitly build the model by specifying input shape
+    # Explicitly build the model by specifying input shape
     print("🔧 Building model with explicit input shape...")
     model.build(input_shape=(None,) + params.INPUT_SHAPE)
     print(f"✅ Model built with input shape: {model.input_shape}")
@@ -815,6 +994,17 @@ def train_model(debug=False):
     # Save training configuration
     save_training_config(training_dir, quantized_size, float_size, tflite_manager,
                         test_accuracy, tflite_accuracy, training_time, debug)
+                        
+    # Save final model checkpoint
+    print("💾 Saving final model checkpoint...")
+    final_checkpoint_path = os.path.join(training_dir, "final_model.keras")
+    model.save(final_checkpoint_path)
+    print(f"✅ Final model saved: {final_checkpoint_path}")
+
+    # ✅ UPDATED: Also export as SavedModel using model.export()
+    final_savedmodel_path = os.path.join(training_dir, "final_model_savedmodel")
+    model.export(final_savedmodel_path)  # Use export() for SavedModel
+    print(f"✅ Final model exported as SavedModel: {final_savedmodel_path}")
     
     return model, history, training_dir
 
