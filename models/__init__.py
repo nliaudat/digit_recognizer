@@ -29,5 +29,7 @@ __all__ = [
     'create_simple_cnn',
     'create_dig_class100_s2',
     'create_original_haverland',
-    'CNN_s2'
+    'CNN_s2',
+    'mnist_quantization',
+    'digit_recognizer_v1',
 ]

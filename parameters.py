@@ -21,6 +21,8 @@ AVAILABLE_MODELS = [
     "esp_quantization_ready_v2",
     "esp_quantization_ready_v2_aggressive",
     "esp_quantization_ready_v3",
+    "mnist_quantization",
+    "digit_recognizer_v1",
 ]
 
 MODEL_ARCHITECTURE = "esp_quantization_ready"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
@@ -113,12 +115,12 @@ DATA_SOURCES = [
         'path': 'datasets/meterdigits',
         'weight': 1.0,
     },
-    # {
-        # 'name': 'meterdigits_augmented',
-        # 'type': 'folder_structure',
-        # 'path': 'datasets/meterdigits_augmented',
-        # 'weight': 0.3,
-    # },
+    {
+        'name': 'meterdigits_augmented',
+        'type': 'folder_structure',
+        'path': 'datasets/meterdigits_augmented',
+        'weight': 0.3,
+    },
     # {
         # 'name': 'MNIST',
         # 'type': 'folder_structure',
