@@ -321,22 +321,31 @@ def verify_model_predictions(model, x_sample, y_sample):
     
     return sample_accuracy
 
-def debug_model_architecture(model, x_sample):
-    """Debug model architecture and layer outputs"""
-    print("\n🏗️  Debugging model architecture...")
+def debug_model_architecture(model, sample_data=None):
+    """Debug model architecture with better error handling"""
     
-    # Create a model that outputs intermediate layers
-    layer_outputs = [layer.output for layer in model.layers if hasattr(layer, 'output')]
-    activation_model = tf.keras.models.Model(inputs=model.input, outputs=layer_outputs)
+    # Build the model if it hasn't been built
+    if not model.built:
+        if sample_data is not None:
+            # Build by running a forward pass
+            _ = model(sample_data)
+        else:
+            # Build with input shape
+            try:
+                model.build(input_shape=(None,) + params.INPUT_SHAPE)
+            except:
+                print("⚠️ Warning: Could not build model automatically")
+                return
     
-    # Get activations for sample
-    activations = activation_model.predict(x_sample, verbose=0)
-    
-    print("📈 Layer-wise analysis:")
-    for i, (layer, activation) in enumerate(zip(model.layers, activations)):
-        if hasattr(layer, 'output'):
-            print(f"   {i:2d}. {layer.name:20} -> {str(activation.shape):15} "
-                  f"range: [{activation.min():.3f}, {activation.max():.3f}]")
+    # Now the model should have defined inputs
+    try:
+        activation_model = tf.keras.models.Model(
+            inputs=model.input, 
+            outputs=[layer.output for layer in model.layers]
+        )
+        # Rest of your debugging code...
+    except Exception as e:
+        print(f"❌ Debugging failed: {e}")
 
 def analyze_confusion_matrix(model, x_test, y_test, save_path=None):
     """Generate and analyze confusion matrix"""

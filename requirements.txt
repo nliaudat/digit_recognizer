@@ -1,8 +1,9 @@
-tensorflow==2.20.0
-numpy==2.3.3
-scikit-learn==1.7.2
-matplotlib==3.10.7
-seaborn==0.13.2
-tqdm==4.67.1
-absl-py
-opencv-python # for cv2
+tensorflow==2.15.0
+tensorflow-model-optimization==0.7.5
+tf-keras==2.15.1
+opencv-python==4.9.0.80
+numpy==1.26.4
+Pillow==10.2.0
+matplotlib==3.8.3
+tqdm==4.66.2
+scikit-learn==1.4.1.post1

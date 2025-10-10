@@ -12,6 +12,17 @@ from contextlib import contextmanager
 from models import create_model, compile_model, model_summary
 from utils import get_data_splits, preprocess_images
 import parameters as params
+<<<<<<< Updated upstream
+=======
+
+# QAT imports
+try:
+    import tensorflow_model_optimization as tfmot
+    QAT_AVAILABLE = True
+except ImportError:
+    print("⚠️  tensorflow-model-optimization not available. Install with: pip install tensorflow-model-optimization")
+    QAT_AVAILABLE = False
+>>>>>>> Stashed changes
 
 
 # Parse command line arguments
@@ -25,10 +36,20 @@ def parse_arguments():
                        help='Train specific model architectures from AVAILABLE_MODELS')
     parser.add_argument('--train_all', action='store_true',
                        help='Train all available model architectures sequentially')
+<<<<<<< Updated upstream
+=======
+    parser.add_argument('--use_tuner', action='store_true',
+                       help='Enable hyperparameter tuning before training')
+    parser.add_argument('--advanced', action='store_true',
+                       help='Enable advanced training features')
+    parser.add_argument('--num_trials', type=int, default=5,
+                       help='Number of tuning trials (default: 5)')
+>>>>>>> Stashed changes
     return parser.parse_args()
     
 def set_all_seeds(seed=params.SHUFFLE_SEED):
     """Set all random seeds for complete reproducibility"""
+<<<<<<< Updated upstream
     # Python built-in random
     import random
     random.seed(seed)
@@ -48,19 +69,26 @@ def set_all_seeds(seed=params.SHUFFLE_SEED):
     tf.config.experimental.enable_op_determinism()
 
 # Set TensorFlow logging level based on debug flag
+=======
+    import random
+    random.seed(seed)
+    np.random.seed(seed)
+    tf.random.set_seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    os.environ['TF_DETERMINISTIC_OPS'] = '1'
+    os.environ['TF_CUDNN_DETERMINISTIC'] = '1'
+    tf.config.experimental.enable_op_determinism()
+
+>>>>>>> Stashed changes
 def setup_tensorflow_logging(debug=False):
     if debug:
-        # Enable all TensorFlow logs
         tf.get_logger().setLevel('INFO')
         tf.autograph.set_verbosity(3)
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
     else:
-        # Suppress TensorFlow info and warning messages
         tf.get_logger().setLevel('ERROR')
         tf.autograph.set_verbosity(0)
-        # Also suppress other noisy libraries
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-        # Suppress absl logging
         import absl.logging
         absl.logging.set_verbosity(absl.logging.ERROR)
 
@@ -68,6 +96,7 @@ def setup_tensorflow_logging(debug=False):
 def suppress_all_output(debug=False):
     """Completely suppress all output during TFLite conversion"""
     if debug:
+<<<<<<< Updated upstream
         # Don't suppress anything in debug mode
         yield
         return
@@ -77,16 +106,28 @@ def suppress_all_output(debug=False):
     original_stderr = sys.stderr
     
     # Open null devices for stdout and stderr
+=======
+        yield
+        return
+    
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    
+>>>>>>> Stashed changes
     with open(os.devnull, 'w') as fnull:
         sys.stdout = fnull
         sys.stderr = fnull
         
+<<<<<<< Updated upstream
         # Also suppress C-level stdout/stderr
         original_stdout_fd = None
         original_stderr_fd = None
         
         try:
             # For Unix-like systems
+=======
+        try:
+>>>>>>> Stashed changes
             if hasattr(sys, '__stdout__'):
                 original_stdout_fd = os.dup(sys.__stdout__.fileno())
                 original_stderr_fd = os.dup(sys.__stderr__.fileno())
@@ -96,15 +137,21 @@ def suppress_all_output(debug=False):
                 os.dup2(devnull_fd, sys.__stderr__.fileno())
                 os.close(devnull_fd)
         except (AttributeError, OSError):
+<<<<<<< Updated upstream
             # Fallback for Windows or if above fails
             pass
         
         # Suppress all Python logging
+=======
+            pass
+        
+>>>>>>> Stashed changes
         logging.disable(logging.CRITICAL)
         
         try:
             yield
         finally:
+<<<<<<< Updated upstream
             # Restore everything
             logging.disable(logging.NOTSET)
             
@@ -112,6 +159,12 @@ def suppress_all_output(debug=False):
             sys.stderr = original_stderr
             
             # Restore C-level stdout/stderr
+=======
+            logging.disable(logging.NOTSET)
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
+            
+>>>>>>> Stashed changes
             try:
                 if original_stdout_fd is not None and original_stderr_fd is not None:
                     os.dup2(original_stdout_fd, sys.__stdout__.fileno())
@@ -121,7 +174,40 @@ def suppress_all_output(debug=False):
             except (AttributeError, OSError):
                 pass
 
+<<<<<<< Updated upstream
         
+=======
+def apply_qat(model):
+    """Apply Quantization Aware Training using modern TF API"""
+    if not QAT_AVAILABLE:
+        print("❌ QAT not available - install tensorflow-model-optimization")
+        return model
+    
+    try:
+        print("🎯 Applying Quantization Aware Training...")
+        qat_model = tfmot.quantization.keras.quantize_model(model)
+        print("✅ QAT applied successfully")
+        return qat_model
+    except Exception as e:
+        print(f"❌ QAT failed: {e}")
+        return model
+
+def create_qat_model():
+    """Create a model with Quantization Aware Training from scratch"""
+    if not QAT_AVAILABLE:
+        return create_model()
+    
+    try:
+        print("🎯 Building model with Quantization Aware Training...")
+        model = create_model()
+        qat_model = tfmot.quantization.keras.quantize_model(model)
+        print("✅ QAT model created successfully")
+        return qat_model
+    except Exception as e:
+        print(f"❌ QAT model creation failed: {e}")
+        return create_model()
+
+>>>>>>> Stashed changes
 class TFLiteModelManager:
     def __init__(self, output_dir, debug=False):
         self.output_dir = output_dir
@@ -131,21 +217,33 @@ class TFLiteModelManager:
     def verify_model_for_conversion(self, model):
         """Verify model is compatible with TFLite conversion"""
         try:
+<<<<<<< Updated upstream
             # Test forward pass
             test_input = tf.random.normal([1] + list(params.INPUT_SHAPE))
             test_output = model(test_input)
             
             # Verify output shape
+=======
+            test_input = tf.random.normal([1] + list(params.INPUT_SHAPE))
+            test_output = model(test_input)
+            
+>>>>>>> Stashed changes
             expected_output_shape = (1, params.NB_CLASSES)
             if test_output.shape != expected_output_shape:
                 print(f"⚠️  Output shape mismatch: {test_output.shape} vs {expected_output_shape}")
             
+<<<<<<< Updated upstream
             # Verify no NaN values
+=======
+>>>>>>> Stashed changes
             if tf.reduce_any(tf.math.is_nan(test_output)):
                 print("❌ Model output contains NaN values")
                 return False
                 
+<<<<<<< Updated upstream
             # print("✅ Model verification passed")
+=======
+>>>>>>> Stashed changes
             return True
             
         except Exception as e:
@@ -153,21 +251,31 @@ class TFLiteModelManager:
             return False
             
     def save_trainable_checkpoint(self, model, accuracy, epoch):
+<<<<<<< Updated upstream
         """Save model in trainable format (.keras only for Keras 3 compatibility)"""
         # Always save when called, not just on best accuracy
         timestamp = datetime.now().strftime("%H%M%S")
         
         # ✅ UPDATED: Only save as .keras format (Keras 3 compatible)
+=======
+        """Save model in trainable format"""
+        timestamp = datetime.now().strftime("%H%M%S")
+>>>>>>> Stashed changes
         checkpoint_path = os.path.join(self.output_dir, f"checkpoint_epoch_{epoch:03d}_acc_{accuracy:.4f}_{timestamp}.keras")
         model.save(checkpoint_path)
         
         if self.debug:
             print(f"💾 Saved trainable checkpoint: {checkpoint_path}")
         
+<<<<<<< Updated upstream
         # Still track best accuracy for TFLite conversion
         if accuracy > self.best_accuracy:
             self.best_accuracy = accuracy
             # Save best model separately
+=======
+        if accuracy > self.best_accuracy:
+            self.best_accuracy = accuracy
+>>>>>>> Stashed changes
             best_checkpoint_path = os.path.join(self.output_dir, "best_model.keras")
             model.save(best_checkpoint_path)
             if self.debug:
@@ -175,6 +283,7 @@ class TFLiteModelManager:
         
         return checkpoint_path
         
+<<<<<<< Updated upstream
     def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
         """Save model directly as TFLite with ESP-DL compatibility - Keras 3 compatible"""
         try:
@@ -331,19 +440,130 @@ class TFLiteModelManager:
                 )
                 
                 # Convert from SavedModel
+=======
+    def _is_qat_model(self, model):
+        """Check if model is a QAT model"""
+        for layer in model.layers:
+            if hasattr(layer, 'quantize_config') or 'quant' in layer.name.lower():
+                return True
+        return False
+
+    def _convert_qat_model(self, model, filename, representative_data=None):
+        """Convert QAT model to TFLite with proper representative dataset"""
+        try:
+            converter = tf.lite.TFLiteConverter.from_keras_model(model)
+            converter.optimizations = [tf.lite.Optimize.DEFAULT]
+            
+            # CRITICAL: Provide representative dataset for full integer quantization
+            if representative_data is None:
+                print("⚠️  No representative dataset provided for QAT conversion")
+                # Create a simple representative dataset from the model input shape
+                def default_representative_dataset():
+                    for _ in range(100):
+                        data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
+                        yield [data]
+                converter.representative_dataset = default_representative_dataset
+            else:
+                converter.representative_dataset = representative_data
+            
+            if params.ESP_DL_QUANTIZE:
+                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+                converter.inference_input_type = tf.int8
+                converter.inference_output_type = tf.int8
+            else:
+                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+                converter.inference_input_type = tf.uint8
+                converter.inference_output_type = tf.uint8
+            
+            with suppress_all_output(self.debug):
+                tflite_model = converter.convert()
+            
+            return self._save_tflite_file(tflite_model, filename, True)
+            
+        except Exception as e:
+            print(f"❌ QAT conversion failed: {e}")
+            # Fallback: try without full integer quantization
+            return self._convert_qat_model_fallback(model, filename)
+            
+    def _convert_qat_model_fallback(self, model, filename):
+        """Fallback conversion for QAT model without full integer quantization"""
+        try:
+            print("🔄 Trying fallback QAT conversion (dynamic range quantization)...")
+            converter = tf.lite.TFLiteConverter.from_keras_model(model)
+            converter.optimizations = [tf.lite.Optimize.DEFAULT]
+            # Don't set representative dataset - use dynamic range quantization
+            
+            with suppress_all_output(self.debug):
+                tflite_model = converter.convert()
+            
+            return self._save_tflite_file(tflite_model, filename, True)
+            
+        except Exception as e:
+            print(f"❌ Fallback QAT conversion failed: {e}")
+            raise          
+            
+            
+    def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
+        """Save model as TFLite with proper QAT handling"""
+        try:
+            if not model.built:
+                dummy_input = tf.zeros([1] + list(params.INPUT_SHAPE), dtype=tf.float32)
+                _ = model(dummy_input)
+            
+            if quantize and self._is_qat_model(model):
+                # print("🎯 Converting QAT model to quantized TFLite...")
+                return self._convert_qat_model(model, filename, representative_data)
+            
+            # print(f"🔧 Converting {filename} to TFLite...")
+            return self.save_as_tflite_savedmodel(model, filename, quantize, representative_data)
+            
+        except Exception as e:
+            print(f"❌ TFLite conversion failed: {e}")
+            return self.save_as_tflite_savedmodel(model, filename, quantize, representative_data)
+
+    def save_as_tflite_savedmodel(self, model, filename, quantize=False, representative_data=None):
+        """Use SavedModel approach for conversion"""
+        try:
+            import tempfile
+            
+            with tempfile.TemporaryDirectory() as temp_dir:
+                model_dir = os.path.join(temp_dir, "saved_model")
+                model.save(model_dir, save_format='tf')
+                
+>>>>>>> Stashed changes
                 converter = tf.lite.TFLiteConverter.from_saved_model(model_dir)
                 
                 if quantize:
                     converter.optimizations = [tf.lite.Optimize.DEFAULT]
                     if representative_data is not None:
                         converter.representative_dataset = representative_data
+<<<<<<< Updated upstream
                     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                     converter.inference_input_type = tf.int8
                     converter.inference_output_type = tf.int8
+=======
+                    else:
+                        # Create default representative dataset if none provided
+                        def default_representative_dataset():
+                            for _ in range(100):
+                                data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
+                                yield [data]
+                        converter.representative_dataset = default_representative_dataset
+                    
+                    if params.ESP_DL_QUANTIZE:
+                        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+                        converter.inference_input_type = tf.int8
+                        converter.inference_output_type = tf.int8
+                    else:
+                        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+                        converter.inference_input_type = tf.uint8
+                        converter.inference_output_type = tf.uint8
+>>>>>>> Stashed changes
                 
                 with suppress_all_output(self.debug):
                     tflite_model = converter.convert()
                 
+<<<<<<< Updated upstream
                 model_path = os.path.join(self.output_dir, filename)
                 with open(model_path, 'wb') as f:
                     f.write(tflite_model)
@@ -395,13 +615,36 @@ class TFLiteModelManager:
             if self.debug:
                 print(f"❌ Fallback conversion also failed: {e}")
             raise
+=======
+                return self._save_tflite_file(tflite_model, filename, quantize)
+                    
+        except Exception as e:
+            print(f"❌ SavedModel conversion failed: {e}")
+            raise
+
+    def _save_tflite_file(self, tflite_model, filename, quantize):
+        """Save TFLite model to file"""
+        model_path = os.path.join(self.output_dir, filename)
+        with open(model_path, 'wb') as f:
+            f.write(tflite_model)
+        
+        model_size_kb = len(tflite_model) / 1024
+        if self.debug:
+            quant_type = "INT8" if (quantize and params.ESP_DL_QUANTIZE) else "UINT8" if quantize else "Float32"
+            print(f"💾 Saved {filename} ({quant_type}): {model_size_kb:.1f} KB")
+        
+        return tflite_model, model_size_kb
+>>>>>>> Stashed changes
     
     def save_best_model(self, model, accuracy, representative_data=None):
         """Save model if it's the best so far"""
         if accuracy > self.best_accuracy:
             self.best_accuracy = accuracy
             
+<<<<<<< Updated upstream
             # Verify model before conversion
+=======
+>>>>>>> Stashed changes
             if not self.verify_model_for_conversion(model):
                 print("⚠️  Skipping TFLite conversion due to model issues")
                 return None
@@ -409,7 +652,10 @@ class TFLiteModelManager:
             if self.debug:
                 print(f"🎯 New best accuracy: {accuracy:.4f}, saving TFLite model...")
             
+<<<<<<< Updated upstream
             # Save quantized model (for ESP-DL)
+=======
+>>>>>>> Stashed changes
             try:
                 tflite_model, size_kb = self.save_as_tflite(
                     model, 
@@ -418,7 +664,10 @@ class TFLiteModelManager:
                     representative_data=representative_data
                 )
                 
+<<<<<<< Updated upstream
                 # Also save float model for comparison
+=======
+>>>>>>> Stashed changes
                 self.save_as_tflite(
                     model, 
                     params.FLOAT_TFLITE_FILENAME, 
@@ -456,11 +705,17 @@ class TrainingMonitor:
         self.train_acc.append(logs.get('accuracy', 0))
         self.val_acc.append(logs.get('val_accuracy', 0))
         
+<<<<<<< Updated upstream
         # FIX: Use learning_rate instead of lr for TF 2.13+
         try:
             current_lr = float(tf.keras.backend.get_value(self.model.optimizer.learning_rate))
         except AttributeError:
             # Fallback for older TF versions
+=======
+        try:
+            current_lr = float(tf.keras.backend.get_value(self.model.optimizer.learning_rate))
+        except AttributeError:
+>>>>>>> Stashed changes
             current_lr = float(tf.keras.backend.get_value(self.model.optimizer.lr))
         
         self.lr_history.append(current_lr)
@@ -475,10 +730,15 @@ class TrainingMonitor:
             
         epochs = range(1, len(self.train_loss) + 1)
         
+<<<<<<< Updated upstream
         # Create subplots
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
         
         # Plot loss
+=======
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+        
+>>>>>>> Stashed changes
         ax1.plot(epochs, self.train_loss, 'b-', label='Training Loss', alpha=0.7)
         ax1.plot(epochs, self.val_loss, 'r-', label='Validation Loss', alpha=0.7)
         ax1.set_title('Training and Validation Loss')
@@ -487,7 +747,10 @@ class TrainingMonitor:
         ax1.legend()
         ax1.grid(True, alpha=0.3)
         
+<<<<<<< Updated upstream
         # Plot accuracy
+=======
+>>>>>>> Stashed changes
         ax2.plot(epochs, self.train_acc, 'b-', label='Training Accuracy', alpha=0.7)
         ax2.plot(epochs, self.val_acc, 'r-', label='Validation Accuracy', alpha=0.7)
         ax2.set_title('Training and Validation Accuracy')
@@ -496,7 +759,10 @@ class TrainingMonitor:
         ax2.legend()
         ax2.grid(True, alpha=0.3)
         
+<<<<<<< Updated upstream
         # Plot learning rate
+=======
+>>>>>>> Stashed changes
         ax3.plot(epochs, self.lr_history, 'g-', label='Learning Rate', alpha=0.7)
         ax3.set_title('Learning Rate Schedule')
         ax3.set_xlabel('Epochs')
@@ -513,7 +779,11 @@ class TrainingMonitor:
         print(f"📊 Training plots saved to: {plot_path}")
 
 class TFLiteCheckpoint(tf.keras.callbacks.Callback):
+<<<<<<< Updated upstream
     def __init__(self, tflite_manager, representative_data, save_frequency=10):  # Reduced frequency
+=======
+    def __init__(self, tflite_manager, representative_data, save_frequency=10):
+>>>>>>> Stashed changes
         super().__init__()
         self.tflite_manager = tflite_manager
         self.representative_data = representative_data
@@ -523,10 +793,15 @@ class TFLiteCheckpoint(tf.keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         val_accuracy = logs.get('val_accuracy', 0)
         
+<<<<<<< Updated upstream
         # Only save TFLite on best accuracy or every N epochs to avoid conversion issues
         if val_accuracy > getattr(self.tflite_manager, 'best_accuracy', 0):
             try:
                 # Save TFLite for inference only when we have new best accuracy
+=======
+        if val_accuracy > getattr(self.tflite_manager, 'best_accuracy', 0):
+            try:
+>>>>>>> Stashed changes
                 self.tflite_manager.save_best_model(
                     self.model, 
                     val_accuracy, 
@@ -534,9 +809,14 @@ class TFLiteCheckpoint(tf.keras.callbacks.Callback):
                 )
             except Exception as e:
                 if self.tflite_manager.debug:
+<<<<<<< Updated upstream
                     print(f"⚠️  TFLite save failed (will retry next epoch): {e}")
         
         # Save trainable checkpoint less frequently
+=======
+                    print(f"⚠️  TFLite save failed: {e}")
+        
+>>>>>>> Stashed changes
         if epoch % self.save_frequency == 0 and epoch != self.last_save_epoch:
             try:
                 checkpoint_path = self.tflite_manager.save_trainable_checkpoint(self.model, val_accuracy, epoch)
@@ -558,7 +838,10 @@ class TQDMProgressBar(tf.keras.callbacks.Callback):
         self.pbar = None
         
     def on_train_begin(self, logs=None):
+<<<<<<< Updated upstream
         # Initialize tqdm progress bar
+=======
+>>>>>>> Stashed changes
         self.pbar = tqdm(total=self.total_epochs, desc='Training', unit='epoch',
                         bar_format='{l_bar}{bar:20}{r_bar}{bar:-20b}',
                         position=0, leave=True)
@@ -571,20 +854,31 @@ class TQDMProgressBar(tf.keras.callbacks.Callback):
         self.epoch_times.append(epoch_time)
         avg_time = np.mean(self.epoch_times) if self.epoch_times else epoch_time
         
+<<<<<<< Updated upstream
         # Call the monitor to record metrics
         self.monitor.on_epoch_end(epoch, logs)
         
         # Get current metrics
+=======
+        self.monitor.on_epoch_end(epoch, logs)
+        
+>>>>>>> Stashed changes
         train_loss = logs.get('loss', 0)
         train_acc = logs.get('accuracy', 0)
         val_loss = logs.get('val_loss', 0)
         val_acc = logs.get('val_accuracy', 0)
         
+<<<<<<< Updated upstream
         # Calculate remaining time
         remaining_epochs = self.total_epochs - epoch - 1
         remaining_time = avg_time * remaining_epochs
         
         # Update progress bar description with current metrics
+=======
+        remaining_epochs = self.total_epochs - epoch - 1
+        remaining_time = avg_time * remaining_epochs
+        
+>>>>>>> Stashed changes
         desc = (f"Epoch {epoch+1}/{self.total_epochs} | "
                 f"loss: {train_loss:.4f} | acc: {train_acc:.4f} | "
                 f"val_loss: {val_loss:.4f} | val_acc: {val_acc:.4f} | "
@@ -602,7 +896,10 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     
     callbacks = []
     
+<<<<<<< Updated upstream
     # Early stopping
+=======
+>>>>>>> Stashed changes
     if params.USE_EARLY_STOPPING:
         mode = 'auto'
         if 'accuracy' in params.EARLY_STOPPING_MONITOR:
@@ -621,7 +918,10 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
             )
         )
     
+<<<<<<< Updated upstream
     # Regular checkpoint every epoch
+=======
+>>>>>>> Stashed changes
     callbacks.append(
         tf.keras.callbacks.ModelCheckpoint(
             filepath=os.path.join(output_dir, "checkpoints", "epoch_{epoch:03d}.keras"),
@@ -631,7 +931,10 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         )
     )
     
+<<<<<<< Updated upstream
     # Best model checkpoint
+=======
+>>>>>>> Stashed changes
     callbacks.append(
         tf.keras.callbacks.ModelCheckpoint(
             filepath=os.path.join(output_dir, "best_model.keras"),
@@ -642,7 +945,10 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         )
     )
     
+<<<<<<< Updated upstream
     # Learning rate scheduler
+=======
+>>>>>>> Stashed changes
     callbacks.extend([
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor=getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss'),
@@ -652,6 +958,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
             verbose=1 if debug else 0
         ),
         
+<<<<<<< Updated upstream
         # TFLite model checkpoint
         TFLiteCheckpoint(tflite_manager, representative_data),
         
@@ -659,6 +966,12 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         TQDMProgressBar(total_epochs, monitor, tflite_manager, debug),
         
         # CSV logger
+=======
+        TFLiteCheckpoint(tflite_manager, representative_data),
+        
+        TQDMProgressBar(total_epochs, monitor, tflite_manager, debug),
+        
+>>>>>>> Stashed changes
         tf.keras.callbacks.CSVLogger(
             os.path.join(output_dir, 'training_log.csv'),
             separator=',',
@@ -666,11 +979,15 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         )
     ])
     
+<<<<<<< Updated upstream
     # Create checkpoints directory
+=======
+>>>>>>> Stashed changes
     os.makedirs(os.path.join(output_dir, "checkpoints"), exist_ok=True)
     
     return callbacks
 
+<<<<<<< Updated upstream
 
 def create_representative_dataset(x_train, num_samples=params.QUANTIZE_NUM_SAMPLES):
     """Create representative dataset for quantization"""
@@ -684,6 +1001,20 @@ def setup_gpu():
     print("🔧 Configuring hardware...")
     
     # First, let's see what's available
+=======
+def create_qat_representative_dataset(x_train, num_samples=100):
+    """Create representative dataset for QAT model conversion"""
+    def representative_dataset():
+        # Use actual training data for better calibration
+        for i in range(min(num_samples, len(x_train))):
+            yield [x_train[i:i+1].astype(np.float32)]
+    return representative_dataset
+    
+def setup_gpu():
+    """Comprehensive GPU configuration"""
+    print("🔧 Configuring hardware...")
+    
+>>>>>>> Stashed changes
     gpus = tf.config.experimental.list_physical_devices('GPU')
     cpus = tf.config.experimental.list_physical_devices('CPU')
     
@@ -701,17 +1032,23 @@ def setup_gpu():
     
     if not gpus:
         print("❌ No GPUs detected by TensorFlow")
+<<<<<<< Updated upstream
         print("💡 Troubleshooting tips:")
         print("   1. Check if tensorflow-gpu is installed: pip list | grep tensorflow")
         print("   2. Verify CUDA/cuDNN installation")
         print("   3. Check nvidia-smi output")
         print("   4. Try: pip install tensorflow-gpu")
+=======
+>>>>>>> Stashed changes
         return None
     
     try:
         print(f"🎮 Configuring {len(gpus)} GPU(s)...")
         
+<<<<<<< Updated upstream
         # Configure memory settings
+=======
+>>>>>>> Stashed changes
         for gpu in gpus:
             if params.GPU_MEMORY_GROWTH:
                 tf.config.experimental.set_memory_growth(gpu, True)
@@ -726,7 +1063,10 @@ def setup_gpu():
                 )
                 print(f"   ✅ Memory limit set to {params.GPU_MEMORY_LIMIT} MB")
         
+<<<<<<< Updated upstream
         # Test GPU functionality
+=======
+>>>>>>> Stashed changes
         print("   🧪 Testing GPU functionality...")
         with tf.device('/GPU:0'):
             test_tensor = tf.constant([1.0, 2.0, 3.0])
@@ -752,7 +1092,10 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     print("TRAINING SUMMARY")
     print("="*60)
     
+<<<<<<< Updated upstream
     # GPU Information
+=======
+>>>>>>> Stashed changes
     gpus = tf.config.experimental.list_physical_devices('GPU')
     print(f"Hardware:")
     print(f"  GPU: {'Available' if gpus else 'Not available'}")
@@ -780,10 +1123,15 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     print(f"  Learning rate: {params.LEARNING_RATE}")
     print(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}")
     print(f"  Quantization: {params.QUANTIZE_MODEL}")
+<<<<<<< Updated upstream
+=======
+    print(f"  QAT: {'Enabled' if (params.QUANTIZE_MODEL and getattr(params, 'USE_QAT', False)) else 'Disabled'}")
+>>>>>>> Stashed changes
     print(f"  ESP-DL Quantization: {params.ESP_DL_QUANTIZE}")
     print(f"  Debug mode: {'Enabled' if debug else 'Disabled'}")
 
 def train_model(debug=False):
+<<<<<<< Updated upstream
     """Main training function"""
     # Set up TensorFlow logging based on debug flag
     setup_tensorflow_logging(debug)
@@ -796,6 +1144,15 @@ def train_model(debug=False):
     strategy = setup_gpu()
     
     # Create output directory with timestamp
+=======
+    """Main training function with proper QAT workflow"""
+    setup_tensorflow_logging(debug)
+    set_all_seeds(params.SHUFFLE_SEED)
+    
+    print("🔧 Configuring hardware...")
+    strategy = setup_gpu()
+    
+>>>>>>> Stashed changes
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_{timestamp}")
     os.makedirs(training_dir, exist_ok=True)
@@ -805,6 +1162,7 @@ def train_model(debug=False):
         print("🔍 DEBUG MODE ENABLED - Verbose logging active")
     print("="*60)
     
+<<<<<<< Updated upstream
     # Load and preprocess data from multiple sources
     print("📊 Loading dataset from multiple sources...")
     (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
@@ -812,10 +1170,24 @@ def train_model(debug=False):
     if params.MODEL_ARCHITECTURE != "original_haverland":
         # FIX: Convert ALL models to use categorical labels for consistency
         print("Converting labels to categorical format...")
+=======
+    print("📊 Loading dataset from multiple sources...")
+    (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
+    
+    print("🔄 Preprocessing images...")
+    x_train = preprocess_images(x_train, for_training=True)
+    x_val = preprocess_images(x_val, for_training=True)  
+    x_test = preprocess_images(x_test, for_training=True)
+    
+    print(f"✅ Preprocessing complete - range: [{x_train.min():.3f}, {x_train.max():.3f}]")
+    
+    if params.MODEL_ARCHITECTURE != "original_haverland":
+>>>>>>> Stashed changes
         y_train = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
         y_val = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES) 
         y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
     
+<<<<<<< Updated upstream
     # Ensure data is properly normalized
     print("🔍 Checking data normalization...")
     print(f"   Data range before preprocessing: [{x_train.min():.3f}, {x_train.max():.3f}]")
@@ -868,6 +1240,33 @@ def train_model(debug=False):
         
 
     # Verify model is built and can forward pass
+=======
+    representative_data = create_qat_representative_dataset(x_train)
+    
+    use_qat = params.QUANTIZE_MODEL and getattr(params, 'USE_QAT', False) and QAT_AVAILABLE
+    
+    if use_qat:
+        if strategy:
+            with strategy.scope():
+                model = create_qat_model()
+                model = compile_model(model)
+        else:
+            model = create_qat_model()
+            model = compile_model(model)
+    else:
+        if strategy:
+            with strategy.scope():
+                model = create_model()
+                model = compile_model(model)
+        else:
+            model = create_model()
+            model = compile_model(model)
+    
+    print("🔧 Building model with explicit input shape...")
+    model.build(input_shape=(None,) + params.INPUT_SHAPE)
+    print(f"✅ Model built with input shape: {model.input_shape}")
+
+>>>>>>> Stashed changes
     print("🔍 Verifying model can forward pass...")
     try:
         test_input = tf.random.normal([1] + list(params.INPUT_SHAPE))
@@ -877,6 +1276,7 @@ def train_model(debug=False):
         print(f"❌ Model verification failed: {e}")
         raise
     
+<<<<<<< Updated upstream
     # Initialize TFLite manager with debug flag
     tflite_manager = TFLiteModelManager(training_dir, debug)
     
@@ -892,24 +1292,43 @@ def train_model(debug=False):
     callbacks = create_callbacks(training_dir, tflite_manager, representative_data, params.EPOCHS, monitor, debug)
     
     # Train model
+=======
+    tflite_manager = TFLiteModelManager(training_dir, debug)
+    monitor = TrainingMonitor(training_dir, debug)
+    monitor.set_model(model)
+    
+    print_training_summary(model, x_train, x_val, x_test, debug)
+    model_summary(model)
+    
+    callbacks = create_callbacks(training_dir, tflite_manager, representative_data, params.EPOCHS, monitor, debug)
+    
+>>>>>>> Stashed changes
     print("\n🎯 Starting training...")
     print("-" * 60)
     
     start_time = datetime.now()
     
+<<<<<<< Updated upstream
     # Use the original training approach to maintain accuracy
+=======
+>>>>>>> Stashed changes
     history = model.fit(
         x_train, y_train,
         batch_size=params.BATCH_SIZE,
         epochs=params.EPOCHS,
         validation_data=(x_val, y_val),
         callbacks=callbacks,
+<<<<<<< Updated upstream
         verbose=0,  # We handle progress with tqdm
+=======
+        verbose=0,
+>>>>>>> Stashed changes
         shuffle=True
     )
     
     training_time = datetime.now() - start_time
     
+<<<<<<< Updated upstream
     # Save final TFLite models (silently in non-debug mode)
     if debug:
         print("\n💾 Saving final TFLite models...")
@@ -959,6 +1378,71 @@ def train_model(debug=False):
         debug_model_architecture(model, x_train[:10])
     
     # Print final results
+=======
+    if debug:
+        print("\n💾 Saving final TFLite models...")
+    
+    try:
+        final_quantized, quantized_size = tflite_manager.save_as_tflite(
+            model, "final_quantized.tflite", quantize=True, representative_data=representative_data
+        )
+    except Exception as e:
+        print(f"❌ Quantized TFLite save failed: {e}")
+        quantized_size = 0
+    
+    try:
+        final_float, float_size = tflite_manager.save_as_tflite(
+            model, "final_float.tflite", quantize=False
+        )
+    except Exception as e:
+        print(f"❌ Float TFLite save failed: {e}")
+        float_size = 0
+    
+    print("\n📈 Evaluating models...")
+    
+    try:
+        from analyse import evaluate_tflite_model, analyze_quantization_impact, debug_tflite_model
+    except ImportError:
+        print("⚠️  Analysis module not available")
+        evaluate_tflite_model = lambda *args: 0.0
+        analyze_quantization_impact = lambda *args: None
+        debug_tflite_model = lambda *args: None
+    
+    if debug:
+        quantized_tflite_path = os.path.join(training_dir, params.TFLITE_FILENAME)
+        if os.path.exists(quantized_tflite_path):
+            debug_tflite_model(quantized_tflite_path, x_test[:1])
+    
+    try:
+        train_accuracy = model.evaluate(x_train, y_train, verbose=0)[1]
+        val_accuracy = model.evaluate(x_val, y_val, verbose=0)[1]
+        test_accuracy = model.evaluate(x_test, y_test, verbose=0)[1]
+    except Exception as e:
+        print(f"❌ Keras model evaluation failed: {e}")
+        train_accuracy = val_accuracy = test_accuracy = 0.0
+    
+    tflite_accuracy = 0.0
+    quantized_tflite_path = os.path.join(training_dir, params.TFLITE_FILENAME)
+    if os.path.exists(quantized_tflite_path):
+        try:
+            tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test)
+            analyze_quantization_impact(model, x_test, y_test, quantized_tflite_path)
+        except Exception as e:
+            print(f"❌ TFLite evaluation failed: {e}")
+    
+    monitor.save_training_plots()
+    
+    try:
+        from analyse import training_diagnostics, verify_model_predictions, debug_model_architecture
+        training_diagnostics(model, x_train, y_train, x_val, y_val, debug=debug)
+        verify_model_predictions(model, x_train[:100], y_train[:100])
+        
+        if debug:
+            debug_model_architecture(model, x_train[:10])
+    except Exception as e:
+        print(f"⚠️  Diagnostics failed: {e}")
+    
+>>>>>>> Stashed changes
     print("\n" + "="*60)
     print("🏁 TRAINING COMPLETED")
     print("="*60)
@@ -977,6 +1461,7 @@ def train_model(debug=False):
     print(f"   Training log: training_log.csv")
     print(f"   Training plot: training_history.png")
     
+<<<<<<< Updated upstream
     # Save training configuration
     save_training_config(training_dir, quantized_size, float_size, tflite_manager,
                         test_accuracy, tflite_accuracy, training_time, debug)
@@ -986,12 +1471,28 @@ def train_model(debug=False):
     final_checkpoint_path = os.path.join(training_dir, "final_model.keras")
     model.save(final_checkpoint_path)
     print(f"✅ Final model saved: {final_checkpoint_path}")
+=======
+    save_training_config(training_dir, quantized_size, float_size, tflite_manager,
+                        test_accuracy, tflite_accuracy, training_time, debug)
+                        
+    print("💾 Saving final model checkpoint...")
+    final_checkpoint_path = os.path.join(training_dir, "final_model.keras")
+    try:
+        model.save(final_checkpoint_path)
+        print(f"✅ Final model saved: {final_checkpoint_path}")
+    except Exception as e:
+        print(f"❌ Final model save failed: {e}")
+>>>>>>> Stashed changes
     
     return model, history, training_dir
 
 def save_training_config(training_dir, quantized_size, float_size, tflite_manager, 
                         test_accuracy, tflite_accuracy, training_time, debug=False):
+<<<<<<< Updated upstream
     """Save training configuration and results to file with enhanced parameters"""
+=======
+    """Save training configuration and results to file"""
+>>>>>>> Stashed changes
     config_path = os.path.join(training_dir, "training_config.txt")
     
     with open(config_path, 'w') as f:
@@ -1006,6 +1507,7 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         f.write(f"  Float Model Size: {float_size:.1f} KB\n")
         f.write(f"  Training Time: {training_time}\n\n")
         
+<<<<<<< Updated upstream
         f.write("MODEL OUTPUT:\n")
         f.write(f"  Quantized TFLite: {quantized_size:.1f} KB\n")
         f.write(f"  Float TFLite: {float_size:.1f} KB\n")
@@ -1016,6 +1518,9 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
             f.write(f"  {i+1}. {source['name']} ({source['type']}) - weight: {source.get('weight', 1.0)}\n")
         
         f.write(f"\nMODEL ARCHITECTURE:\n")
+=======
+        f.write("MODEL ARCHITECTURE:\n")
+>>>>>>> Stashed changes
         f.write(f"  Model: {params.MODEL_ARCHITECTURE}\n")
         f.write(f"  Input shape: {params.INPUT_SHAPE}\n")
         f.write(f"  Classes: {params.NB_CLASSES}\n")
@@ -1025,6 +1530,7 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         f.write(f"  Epochs: {params.EPOCHS}\n")
         f.write(f"  Learning rate: {params.LEARNING_RATE}\n")
         f.write(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}\n")
+<<<<<<< Updated upstream
         if params.USE_EARLY_STOPPING:
             f.write(f"    Monitor: {params.EARLY_STOPPING_MONITOR}\n")
             f.write(f"    Patience: {params.EARLY_STOPPING_PATIENCE}\n")
@@ -1090,13 +1596,23 @@ def save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
         f.write(f"quantized_model_size_kb,{quantized_size:.1f}\n")
         f.write(f"float_model_size_kb,{float_size:.1f}\n")
         f.write(f"training_time,{training_time}\n")
+=======
+        f.write(f"  Quantization: {params.QUANTIZE_MODEL}\n")
+        f.write(f"  QAT: {'Enabled' if (params.QUANTIZE_MODEL and getattr(params, 'USE_QAT', False)) else 'Disabled'}\n")
+        f.write(f"  ESP-DL Quantization: {params.ESP_DL_QUANTIZE}\n")
+        
+        f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+>>>>>>> Stashed changes
 
 def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=False):
     """Test all available model architectures or specific models"""
     original_model = params.MODEL_ARCHITECTURE
     results = {}
     
+<<<<<<< Updated upstream
     # Determine which models to test
+=======
+>>>>>>> Stashed changes
     if models_to_test is None:
         test_models = params.AVAILABLE_MODELS
     else:
@@ -1109,6 +1625,7 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
         print(f"\n🔍 Testing: {model_name}")
         print("-" * 40)
         
+<<<<<<< Updated upstream
         # Temporarily change model architecture
         params.MODEL_ARCHITECTURE = model_name
         
@@ -1120,6 +1637,15 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
             if model_name == "original_haverland":
                 loss_fn = 'categorical_crossentropy'
                 # Convert labels to categorical for Haverland model
+=======
+        params.MODEL_ARCHITECTURE = model_name
+        
+        try:
+            model = create_model()
+            
+            if model_name == "original_haverland":
+                loss_fn = 'categorical_crossentropy'
+>>>>>>> Stashed changes
                 y_train_cat = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
                 y_val_cat = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES)
             else:
@@ -1133,6 +1659,7 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
                 metrics=['accuracy']
             )
             
+<<<<<<< Updated upstream
             # Use smaller dataset for quick testing
             train_samples = min(1000, len(x_train))
             val_samples = min(200, len(x_val))
@@ -1142,6 +1669,15 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
                 x_train[:train_samples], y_train_cat[:train_samples],
                 validation_data=(x_val[:val_samples], y_val_cat[:val_samples]),
                 epochs=5,  # Reduced epochs for quick testing
+=======
+            train_samples = min(1000, len(x_train))
+            val_samples = min(200, len(x_val))
+            
+            history = model.fit(
+                x_train[:train_samples], y_train_cat[:train_samples],
+                validation_data=(x_val[:val_samples], y_val_cat[:val_samples]),
+                epochs=5,
+>>>>>>> Stashed changes
                 batch_size=32,
                 verbose=1 if debug else 0
             )
@@ -1170,15 +1706,23 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
                 'error': str(e)
             }
     
+<<<<<<< Updated upstream
     # Restore original model
     params.MODEL_ARCHITECTURE = original_model
     
     # Print results
+=======
+    params.MODEL_ARCHITECTURE = original_model
+    
+>>>>>>> Stashed changes
     print("\n" + "="*60)
     print("🏆 MODEL COMPARISON RESULTS:")
     print("="*60)
     
+<<<<<<< Updated upstream
     # Sort by validation accuracy
+=======
+>>>>>>> Stashed changes
     sorted_results = sorted(results.items(), key=lambda x: x[1]['val_accuracy'], reverse=True)
     
     for i, (model_name, metrics) in enumerate(sorted_results, 1):
@@ -1188,6 +1732,7 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
             print(f"{i:2d}. {model_name:35} -> Val: {metrics['val_accuracy']:.4f} | Train: {metrics['train_accuracy']:.4f} | Params: {metrics['params']:,}")
     
     return results
+<<<<<<< Updated upstream
     
     
 def train_specific_models(models_to_train, debug=False):
@@ -1285,19 +1830,26 @@ def get_gpu_memory_usage():
         return used, total
     except:
         return None, None
+=======
+>>>>>>> Stashed changes
 
 def main():
     """Main entry point"""
     args = parse_arguments()
     
     try:
+<<<<<<< Updated upstream
         # Load data first for model testing/training
         (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
         
         # Handle different modes
+=======
+        (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
+        
+>>>>>>> Stashed changes
         if args.test_all_models:
-            # Test all models with quick training
             test_all_models(x_train, y_train, x_val, y_val, debug=args.debug)
+<<<<<<< Updated upstream
             
         elif args.train:
             # Train specific models
@@ -1307,8 +1859,9 @@ def main():
             # Train all available models
             train_specific_models(params.AVAILABLE_MODELS, debug=args.debug)
             
+=======
+>>>>>>> Stashed changes
         else:
-            # Normal single model training
             model, history, output_dir = train_model(debug=args.debug)
             print(f"\n✅ Training completed successfully!")
             print(f"📁 Output directory: {output_dir}")

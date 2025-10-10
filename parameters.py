@@ -2,6 +2,8 @@
 Global parameters for Digit Recognition
 """
 
+import tensorflow as tf
+
 # ==============================================================================
 # MODEL SELECTION
 # ==============================================================================
@@ -137,20 +139,27 @@ DATA_SOURCES = [
     # },
 ]
 
-# ==============================================================================
-# others
-# ==============================================================================
 
-
-# File Paths
-MODEL_FILENAME = MODEL_ARCHITECTURE
-OUTPUT_DIR = "exported_models"
+# ==============================================================================
+# MODEL GENERAL PARAMETERS
+# ==============================================================================
 
 # TFLite Conversion Parameters
 QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
 # ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
 ESP_DL_QUANTIZE = True  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
+                         
+# Quantization Aware Training
+USE_QAT = True  # Enable Quantization Aware Training
+QAT_QUANTIZE_ALL = True  # Quantize all layers
+QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
+                         
+# File Paths
+MODEL_FILENAME = MODEL_ARCHITECTURE
+OUTPUT_DIR = "exported_models"
+
+
 QUANTIZE_NUM_SAMPLES=1000
 TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
 FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
@@ -159,6 +168,43 @@ FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
 VERBOSE = 1
 SAVE_TRAINING_PLOTS = True
 SHUFFLE_SEED = 42
+
+# ==============================================================================
+# MODEL TRAINING PARAMETERS
+# ==============================================================================
+
+# HYPERPARAMETER TUNING
+USE_KERAS_TUNER = True
+TUNER_PROJECT_NAME = "digit_recognizer_tuning"
+TUNER_MAX_TRIALS = 50
+TUNER_EXECUTIONS_PER_TRIAL = 2
+TUNER_OBJECTIVE = "val_accuracy"
+
+# TF.DATA CONFIGURATION
+USE_TF_DATA = True
+TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
+TF_DATA_SHUFFLE_BUFFER = 1000
+TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
+
+# ADVANCED TRAINING
+USE_MIXED_PRECISION = False
+USE_GRADIENT_ACCUMULATION = False
+ACCUMULATION_STEPS = 4
+
+# ADVANCED CALLBACKS
+USE_TENSORBOARD = True
+USE_LEARNING_RATE_FINDER = False
+USE_STOCHASTIC_WEIGHT_AVERAGING = False
+USE_CYCLICAL_LEARNING_RATE = False
+
+# MODEL ENSEMBLING
+USE_MODEL_ENSEMBLE = False
+ENSEMBLE_MODEL_COUNT = 3
+
+# ==============================================================================
+# others
+# ==============================================================================
+
 
 
 # ESP-DL specific parameters
