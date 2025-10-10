@@ -3,9 +3,13 @@ import numpy as np
 import tensorflow as tf
 import parameters as params
 
-def preprocess_images(images, target_size=None, grayscale=None):
+def preprocess_images(images, target_size=None, grayscale=None, for_training=True):
     """
-    Preprocess images for ESP-DL compatibility
+    Preprocess images following QAT requirements
+    
+    Args:
+        for_training: If True, normalize to [0,1] for training
+                     If False, use the same for conversion (TFLite handles quantization)
     """
     if target_size is None:
         target_size = (params.INPUT_WIDTH, params.INPUT_HEIGHT)
@@ -30,8 +34,12 @@ def preprocess_images(images, target_size=None, grayscale=None):
         
         processed_images.append(image)
     
-    # Convert to numpy array and normalize
-    processed_images = np.array(processed_images, dtype=np.float32) / 255.0
+    # Convert to numpy array as float32
+    processed_images = np.array(processed_images, dtype=np.float32)
+    
+    # For QAT: Always normalize to [0, 1] range during training AND conversion
+    # TFLite converter will handle the quantization scaling
+    processed_images = processed_images / 255.0
     
     # Ensure correct shape
     if grayscale and processed_images.shape[-1] != 1:
@@ -40,54 +48,3 @@ def preprocess_images(images, target_size=None, grayscale=None):
     
     return processed_images
 
-def preprocess_single_image(image):
-    """
-    Preprocess a single image for inference
-    """
-    return preprocess_images([image])[0]
-    
-def preprocess_images_esp_dl(images, target_size=None):
-    """Preprocess images specifically for ESP-DL INT8 quantization"""
-    if target_size is None:
-        target_size = (params.INPUT_WIDTH, params.INPUT_HEIGHT)
-    
-    processed_images = []
-    
-    for image in images:
-        # Resize
-        image = cv2.resize(image, target_size)
-        
-        # Convert to grayscale if needed
-        if len(image.shape) == 3:
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        
-        # Add channel dimension
-        if len(image.shape) == 2:
-            image = np.expand_dims(image, axis=-1)
-        
-        processed_images.append(image)
-    
-    # Convert to numpy array
-    processed_images = np.array(processed_images, dtype=np.float32)
-    
-    # Normalize to [-1, 1] range for better INT8 quantization
-    processed_images = (processed_images / 127.5) - 1.0
-    
-    return processed_images
-
-def get_quantization_parameters():
-    """Get quantization parameters for ESP-DL compatibility"""
-    if params.ESP_DL_QUANTIZE:
-        return {
-            'input_scale': 1/127.5,
-            'input_zero_point': -128,
-            'output_scale': 1/127.5,  # This will be calibrated during conversion
-            'output_zero_point': -128
-        }
-    else:
-        return {
-            'input_scale': 1/255.0,
-            'input_zero_point': 0,
-            'output_scale': 1/255.0,
-            'output_zero_point': 0
-        }
