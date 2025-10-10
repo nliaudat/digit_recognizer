@@ -4,7 +4,7 @@ import numpy as np
 import cv2
 import os
 import argparse
-from utils.preprocess import preprocess_single_image
+from utils.preprocess import predict_single_image
 import parameters as params
 
 class TFLiteDigitPredictor:
@@ -37,7 +37,7 @@ class TFLiteDigitPredictor:
     def predict(self, image):
         """Predict digit from image using TFLite"""
         # Preprocess image
-        processed_image = preprocess_single_image(image)
+        processed_image = predict_single_image(image)
         
         # Add batch dimension
         input_data = np.expand_dims(processed_image, axis=0)

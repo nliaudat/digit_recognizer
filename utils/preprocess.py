@@ -47,4 +47,10 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
         processed_images = processed_images.mean(axis=-1, keepdims=True)
     
     return processed_images
+    
+def predict_single_image(image):
+    """
+    Preprocess a single image for inference
+    """
+    return preprocess_images([image])[0]
 
