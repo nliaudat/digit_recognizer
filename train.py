@@ -28,15 +28,18 @@ def parse_arguments():
     parser.add_argument('--test_all_models', action='store_true',
                        help='Test all available model architectures and compare performance')
     parser.add_argument('--train', nargs='+', choices=params.AVAILABLE_MODELS,
-                       help='Train specific model architectures from AVAILABLE_MODELS')
-    parser.add_argument('--train_all', action='store_true',
-                       help='Train all available model architectures sequentially')
+                       help='Train specific model architectures from AVAILABLE_MODELS')      
     parser.add_argument('--use_tuner', action='store_true',
                        help='Enable hyperparameter tuning before training')
-    parser.add_argument('--advanced', action='store_true',
-                       help='Enable advanced training features')
-    parser.add_argument('--num_trials', type=int, default=5,
-                       help='Number of tuning trials (default: 5)')
+                       
+    # parser.add_argument('--train_all', action='store_true',
+                       # help='Train all available model architectures sequentially')
+    # parser.add_argument('--use_tuner', action='store_true',
+                       # help='Enable hyperparameter tuning before training')
+    # parser.add_argument('--advanced', action='store_true',
+                       # help='Enable advanced training features')
+    # parser.add_argument('--num_trials', type=int, default=5,
+                       # help='Number of tuning trials (default: 5)')
     return parser.parse_args()
     
 def set_all_seeds(seed=params.SHUFFLE_SEED):
@@ -69,10 +72,6 @@ def suppress_all_output(debug=False):
         yield
         return
     
-    # ADD DATASET SUPPRESSION AT THE START
-    original_tf_log_level = os.environ.get('TF_CPP_MIN_LOG_LEVEL', '')
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-    
     original_stdout = sys.stdout
     original_stderr = sys.stderr
     
@@ -94,32 +93,21 @@ def suppress_all_output(debug=False):
         
         logging.disable(logging.CRITICAL)
         
-        # ADD WARNING SUPPRESSION
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+        try:
+            yield
+        finally:
+            logging.disable(logging.NOTSET)
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
             
             try:
-                yield
-            finally:
-                logging.disable(logging.NOTSET)
-                sys.stdout = original_stdout
-                sys.stderr = original_stderr
-                
-                try:
-                    if original_stdout_fd is not None and original_stderr_fd is not None:
-                        os.dup2(original_stdout_fd, sys.__stdout__.fileno())
-                        os.dup2(original_stderr_fd, sys.__stderr__.fileno())
-                        os.close(original_stdout_fd)
-                        os.close(original_stderr_fd)
-                except (AttributeError, OSError):
-                    pass
-                
-                # RESTORE TF LOG LEVEL
-                if original_tf_log_level:
-                    os.environ['TF_CPP_MIN_LOG_LEVEL'] = original_tf_log_level
-                else:
-                    os.environ.pop('TF_CPP_MIN_LOG_LEVEL', None)
+                if original_stdout_fd is not None and original_stderr_fd is not None:
+                    os.dup2(original_stdout_fd, sys.__stdout__.fileno())
+                    os.dup2(original_stderr_fd, sys.__stderr__.fileno())
+                    os.close(original_stdout_fd)
+                    os.close(original_stderr_fd)
+            except (AttributeError, OSError):
+                pass
 
 def apply_qat(model):
     """Apply Quantization Aware Training using modern TF API"""
@@ -512,12 +500,15 @@ class TQDMProgressBar(tf.keras.callbacks.Callback):
     def on_train_end(self, logs=None):
         if self.pbar:
             self.pbar.close()
+### end class TQDMProgressBa           
+            
 
 def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False):
-    """Create training callbacks for Keras 3"""
+    """Create training callbacks with robust CSV logging"""
     
     callbacks = []
     
+    # Early stopping
     if params.USE_EARLY_STOPPING:
         mode = 'auto'
         if 'accuracy' in params.EARLY_STOPPING_MONITOR:
@@ -536,6 +527,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
             )
         )
     
+    # Regular checkpoint every epoch
     callbacks.append(
         tf.keras.callbacks.ModelCheckpoint(
             filepath=os.path.join(output_dir, "checkpoints", "epoch_{epoch:03d}.keras"),
@@ -545,6 +537,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         )
     )
     
+    # Best model checkpoint
     callbacks.append(
         tf.keras.callbacks.ModelCheckpoint(
             filepath=os.path.join(output_dir, "best_model.keras"),
@@ -555,27 +548,65 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         )
     )
     
-    callbacks.extend([
+    # Learning rate scheduler
+    callbacks.append(
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor=getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss'),
             factor=getattr(params, 'LR_SCHEDULER_FACTOR', 0.5),
             patience=getattr(params, 'LR_SCHEDULER_PATIENCE', 3),
             min_lr=getattr(params, 'LR_SCHEDULER_MIN_LR', 1e-7),
             verbose=1 if debug else 0
-        ),
-        
-        TFLiteCheckpoint(tflite_manager, representative_data),
-        
-        TQDMProgressBar(total_epochs, monitor, tflite_manager, debug),
-        
-        tf.keras.callbacks.CSVLogger(
-            os.path.join(output_dir, 'training_log.csv'),
-            separator=',',
-            append=False
         )
-    ])
+    )
     
+    # TFLite model checkpoint
+    callbacks.append(
+        TFLiteCheckpoint(tflite_manager, representative_data)
+    )
+    
+    # TQDM progress bar
+    callbacks.append(
+        TQDMProgressBar(total_epochs, monitor, tflite_manager, debug)
+    )
+    
+    # ROBUST CSV Logger with proper error handling
+    csv_path = os.path.join(output_dir, 'training_log.csv')
+    print(f"📄 CSV Logger will save to: {csv_path}")
+    
+    # Ensure directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Test if we can write to the directory
+    try:
+        test_file = os.path.join(output_dir, 'test_write.tmp')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+        print("✅ Output directory is writable")
+    except Exception as e:
+        print(f"❌ Output directory not writable: {e}")
+        # Try to create CSV in current directory as fallback
+        csv_path = 'training_log_fallback.csv'
+        print(f"🔄 Using fallback path: {csv_path}")
+    
+    # Create CSV logger with explicit configuration
+    csv_logger = tf.keras.callbacks.CSVLogger(
+        filename=csv_path,
+        separator=',',
+        append=False
+    )
+    callbacks.append(csv_logger)
+    
+    # Create checkpoints directory
     os.makedirs(os.path.join(output_dir, "checkpoints"), exist_ok=True)
+    
+    # Debug: Print all callbacks
+    if debug:
+        print("🔍 Callbacks created:")
+        for i, callback in enumerate(callbacks):
+            print(f"   {i+1}. {callback.__class__.__name__}")
+            if hasattr(callback, 'filename'):
+                print(f"      File: {getattr(callback, 'filename', 'N/A')}")
     
     return callbacks
 
@@ -871,7 +902,7 @@ def train_model(debug=False):
 
 def save_training_config(training_dir, quantized_size, float_size, tflite_manager, 
                         test_accuracy, tflite_accuracy, training_time, debug=False):
-    """Save training configuration and results to file"""
+    """Save training configuration and results to file with enhanced parameters"""
     config_path = os.path.join(training_dir, "training_config.txt")
     
     with open(config_path, 'w') as f:
@@ -886,7 +917,16 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         f.write(f"  Float Model Size: {float_size:.1f} KB\n")
         f.write(f"  Training Time: {training_time}\n\n")
         
-        f.write("MODEL ARCHITECTURE:\n")
+        f.write("MODEL OUTPUT:\n")
+        f.write(f"  Quantized TFLite: {quantized_size:.1f} KB\n")
+        f.write(f"  Float TFLite: {float_size:.1f} KB\n")
+        f.write(f"  Best accuracy: {tflite_manager.best_accuracy:.4f}\n\n")
+        
+        f.write("DATA SOURCES:\n")
+        for i, source in enumerate(params.DATA_SOURCES):
+            f.write(f"  {i+1}. {source['name']} ({source['type']}) - weight: {source.get('weight', 1.0)}\n")
+        
+        f.write(f"\nMODEL ARCHITECTURE:\n")
         f.write(f"  Model: {params.MODEL_ARCHITECTURE}\n")
         f.write(f"  Input shape: {params.INPUT_SHAPE}\n")
         f.write(f"  Classes: {params.NB_CLASSES}\n")
@@ -896,11 +936,71 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         f.write(f"  Epochs: {params.EPOCHS}\n")
         f.write(f"  Learning rate: {params.LEARNING_RATE}\n")
         f.write(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}\n")
+        if params.USE_EARLY_STOPPING:
+            f.write(f"    Monitor: {params.EARLY_STOPPING_MONITOR}\n")
+            f.write(f"    Patience: {params.EARLY_STOPPING_PATIENCE}\n")
+            f.write(f"    Min delta: {params.EARLY_STOPPING_MIN_DELTA}\n")
+        
+        f.write(f"  Learning rate scheduler:\n")
+        f.write(f"    Monitor: {getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss')}\n")
+        f.write(f"    Patience: {getattr(params, 'LR_SCHEDULER_PATIENCE', 3)}\n")
+        f.write(f"    Factor: {getattr(params, 'LR_SCHEDULER_FACTOR', 0.5)}\n")
+        f.write(f"    Min LR: {getattr(params, 'LR_SCHEDULER_MIN_LR', 1e-7)}\n")
+        
         f.write(f"  Quantization: {params.QUANTIZE_MODEL}\n")
-        f.write(f"  QAT: {'Enabled' if (params.QUANTIZE_MODEL and getattr(params, 'USE_QAT', False)) else 'Disabled'}\n")
-        f.write(f"  ESP-DL Quantization: {params.ESP_DL_QUANTIZE}\n")
+        if params.QUANTIZE_MODEL:
+            f.write(f"    ESP-DL Quantization: {params.ESP_DL_QUANTIZE}\n")
+            f.write(f"    Num samples: {params.QUANTIZE_NUM_SAMPLES}\n")
+        
+        f.write(f"  Debug mode: {'Enabled' if debug else 'Disabled'}\n")
+        
+        f.write(f"\nHARDWARE CONFIG:\n")
+        f.write(f"  GPU Usage: {'Enabled' if params.USE_GPU else 'Disabled'}\n")
+        if params.USE_GPU:
+            f.write(f"  Memory growth: {params.GPU_MEMORY_GROWTH}\n")
+            f.write(f"  Memory limit: {params.GPU_MEMORY_LIMIT} MB\n")
         
         f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    
+    # Also save as CSV for benchmarking
+    save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
+                     test_accuracy, tflite_accuracy, training_time)
+
+def save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
+                     test_accuracy, tflite_accuracy, training_time):
+    """Save training results to CSV for benchmarking"""
+    csv_path = os.path.join(training_dir, "training_results.csv")
+    
+    # Extract data source information
+    data_sources_str = ";".join([f"{src['name']}({src.get('weight', 1.0)})" 
+                               for src in params.DATA_SOURCES])
+    
+    with open(csv_path, 'w') as f:
+        f.write("parameter,value\n")
+        f.write(f"timestamp,{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"model_architecture,{params.MODEL_ARCHITECTURE}\n")
+        f.write(f"input_shape,{params.INPUT_SHAPE}\n")
+        f.write(f"nb_classes,{params.NB_CLASSES}\n")
+        f.write(f"data_sources,{data_sources_str}\n")
+        f.write(f"batch_size,{params.BATCH_SIZE}\n")
+        f.write(f"epochs,{params.EPOCHS}\n")
+        f.write(f"learning_rate,{params.LEARNING_RATE}\n")
+        f.write(f"use_early_stopping,{params.USE_EARLY_STOPPING}\n")
+        f.write(f"early_stopping_monitor,{params.EARLY_STOPPING_MONITOR}\n")
+        f.write(f"early_stopping_patience,{params.EARLY_STOPPING_PATIENCE}\n")
+        f.write(f"lr_scheduler_monitor,{getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss')}\n")
+        f.write(f"lr_scheduler_patience,{getattr(params, 'LR_SCHEDULER_PATIENCE', 3)}\n")
+        f.write(f"lr_scheduler_factor,{getattr(params, 'LR_SCHEDULER_FACTOR', 0.5)}\n")
+        f.write(f"QUANTIZE_MODEL,{params.QUANTIZE_MODEL}\n")
+        f.write(f"esp_dl_quantize,{params.ESP_DL_QUANTIZE}\n")
+        f.write(f"quantize_num_samples,{params.QUANTIZE_NUM_SAMPLES}\n")
+        f.write(f"use_gpu,{params.USE_GPU}\n")
+        f.write(f"keras_test_accuracy,{test_accuracy:.4f}\n")
+        f.write(f"tflite_test_accuracy,{tflite_accuracy:.4f}\n")
+        f.write(f"best_val_accuracy,{tflite_manager.best_accuracy:.4f}\n")
+        f.write(f"quantized_model_size_kb,{quantized_size:.1f}\n")
+        f.write(f"float_model_size_kb,{float_size:.1f}\n")
+        f.write(f"training_time,{training_time}\n")
 
 def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=False):
     """Test all available model architectures or specific models"""
@@ -990,27 +1090,197 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
     
     return results
 
+
 def main():
     """Main entry point"""
     args = parse_arguments()
     
     try:
+        # Load data first for all operations
+        print("📊 Loading dataset from multiple sources...")
         (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
         
-        if args.test_all_models:
+        # Preprocess data for training/tuning operations
+        if any([getattr(args, 'use_tuner', False), 
+                getattr(args, 'test_all_models', False),
+                getattr(args, 'train', None) is not None,
+                getattr(args, 'train_all', False)]):
+            
+            print("🔄 Preprocessing images...")
+            x_train = preprocess_images(x_train, for_training=True)
+            x_val = preprocess_images(x_val, for_training=True)
+            x_test = preprocess_images(x_test, for_training=True)
+            
+            # Handle label conversion for models that need it
+            if any([getattr(args, 'use_tuner', False),
+                    getattr(args, 'train_all', False),
+                    getattr(args, 'train', None) is not None]):
+                
+                # For test_all_models, conversion happens inside the function
+                if params.MODEL_ARCHITECTURE == "original_haverland":
+                    y_train = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
+                    y_val = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES)
+                    y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+        
+        # DEBUG: Print arguments
+        if args.debug:
+            print("🔍 Command line arguments:")
+            print(f"   debug: {args.debug}")
+            print(f"   use_tuner: {getattr(args, 'use_tuner', False)}")
+            print(f"   num_trials: {getattr(args, 'num_trials', 5)}")
+            print(f"   advanced: {getattr(args, 'advanced', False)}")
+            print(f"   test_all_models: {args.test_all_models}")
+            print(f"   train: {getattr(args, 'train', None)}")
+            print(f"   train_all: {getattr(args, 'train_all', False)}")
+            print(f"   Current MODEL_ARCHITECTURE: {params.MODEL_ARCHITECTURE}")
+        
+        # Handle different operation modes
+        if getattr(args, 'use_tuner', False):
+            # HYPERPARAMETER TUNING MODE
+            print("🚀 Starting training with hyperparameter tuning...")
+            
+            try:
+                from tuner import run_architecture_tuning
+                
+                best_model, best_hps, history, tuner = run_architecture_tuning(
+                    x_train, y_train, x_val, y_val,
+                    num_trials=getattr(args, 'num_trials', 5),
+                    debug=args.debug
+                )
+                
+                if best_model and best_hps:
+                    # Update parameters with best values
+                    best_lr = best_hps.get('learning_rate')
+                    best_batch_size = best_hps.get('batch_size')
+                    
+                    params.LEARNING_RATE = best_lr
+                    params.BATCH_SIZE = best_batch_size
+                    
+                    print(f"\n🎯 Updated with optimized hyperparameters:")
+                    print(f"   Learning Rate: {best_lr}")
+                    print(f"   Batch Size: {best_batch_size}")
+                    print(f"   Architecture: {params.MODEL_ARCHITECTURE} (fixed)")
+                    
+                    if getattr(args, 'advanced', False):
+                        # Use the tuned model directly
+                        print("🏁 Using tuned model directly (advanced mode)")
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_tuned_{timestamp}")
+                        os.makedirs(training_dir, exist_ok=True)
+                        
+                        # Save the tuned model
+                        best_model.save(os.path.join(training_dir, "tuned_model.keras"))
+                        
+                        # Also save tuning configuration
+                        config_path = os.path.join(training_dir, "tuning_config.txt")
+                        with open(config_path, 'w') as f:
+                            f.write(f"Tuned Model Configuration\n")
+                            f.write("=" * 40 + "\n")
+                            f.write(f"Model: {params.MODEL_ARCHITECTURE}\n")
+                            f.write(f"Learning Rate: {best_lr}\n")
+                            f.write(f"Batch Size: {best_batch_size}\n")
+                            f.write(f"Final Val Accuracy: {history.history['val_accuracy'][-1]:.4f}\n")
+                        
+                        print(f"💾 Tuned model saved to: {training_dir}")
+                    else:
+                        # Continue with normal training using best hyperparameters
+                        print("🔄 Retraining from scratch with optimized hyperparameters...")
+                        model, history, output_dir = train_model(debug=args.debug)
+                        print(f"\n✅ Training completed successfully!")
+                        print(f"📁 Output directory: {output_dir}")
+                else:
+                    print("❌ Hyperparameter tuning failed, falling back to normal training")
+                    model, history, output_dir = train_model(debug=args.debug)
+                    print(f"\n✅ Training completed successfully!")
+                    print(f"📁 Output directory: {output_dir}")
+                    
+            except ImportError as e:
+                print(f"❌ Keras Tuner not available: {e}")
+                print("💡 Install with: pip install keras-tuner")
+                print("🔄 Falling back to normal training...")
+                model, history, output_dir = train_model(debug=args.debug)
+                print(f"\n✅ Training completed successfully!")
+                print(f"📁 Output directory: {output_dir}")
+                
+        elif args.test_all_models:
+            # TEST ALL MODELS MODE
+            print("🧪 Testing all available models...")
             test_all_models(x_train, y_train, x_val, y_val, debug=args.debug)
+            
+        elif getattr(args, 'train', None) is not None:
+            # TRAIN SPECIFIC MODELS MODE
+            models_to_train = args.train
+            print(f"🚀 Training specific models: {models_to_train}")
+            results = train_specific_models(models_to_train, debug=args.debug)
+            
+            # Print summary
+            successful_models = {k: v for k, v in results.items() if 'error' not in v}
+            if successful_models:
+                print(f"\n🏁 Successfully trained {len(successful_models)} models")
+                for model_name, metrics in successful_models.items():
+                    print(f"   {model_name}: {metrics.get('keras_test_accuracy', 0):.4f}")
+            
+        elif getattr(args, 'train_all', False):
+            # TRAIN ALL MODELS MODE
+            print(f"🚀 Training all available models: {params.AVAILABLE_MODELS}")
+            results = train_specific_models(params.AVAILABLE_MODELS, debug=args.debug)
+            
+            # Print summary
+            successful_models = {k: v for k, v in results.items() if 'error' not in v}
+            if successful_models:
+                print(f"\n🏁 Successfully trained {len(successful_models)} models")
+                sorted_results = sorted(successful_models.items(), 
+                                      key=lambda x: x[1].get('keras_test_accuracy', 0), 
+                                      reverse=True)
+                for i, (model_name, metrics) in enumerate(sorted_results, 1):
+                    print(f"   {i}. {model_name}: {metrics.get('keras_test_accuracy', 0):.4f}")
+        
         else:
+            # NORMAL SINGLE MODEL TRAINING MODE
+            print(f"🚀 Training single model: {params.MODEL_ARCHITECTURE}")
             model, history, output_dir = train_model(debug=args.debug)
             print(f"\n✅ Training completed successfully!")
             print(f"📁 Output directory: {output_dir}")
+            
+            # Display final results
+            if hasattr(history, 'history') and history.history:
+                final_val_acc = history.history['val_accuracy'][-1] if 'val_accuracy' in history.history else 0
+                final_train_acc = history.history['accuracy'][-1] if 'accuracy' in history.history else 0
+                print(f"📊 Final metrics - Train: {final_train_acc:.4f}, Val: {final_val_acc:.4f}")
         
     except KeyboardInterrupt:
-        print("\n⚠️  Training interrupted by user")
+        print("\n⚠️  Operation interrupted by user")
+        
     except Exception as e:
-        print(f"\n❌ Training failed: {e}")
+        print(f"\n❌ Operation failed: {e}")
         if args.debug:
             import traceback
             traceback.print_exc()
+        
+        # Provide helpful error information
+        if "CUDA" in str(e) or "GPU" in str(e):
+            print("\n💡 GPU-related error detected. Try:")
+            print("   - Setting USE_GPU = False in parameters.py")
+            print("   - Checking CUDA/cuDNN installation")
+            print("   - Reducing batch size")
+        
+        elif "memory" in str(e).lower():
+            print("\n💡 Memory error detected. Try:")
+            print("   - Reducing batch size")
+            print("   - Setting GPU_MEMORY_LIMIT in parameters.py")
+            print("   - Using a smaller model architecture")
+        
+        elif "shape" in str(e).lower():
+            print("\n💡 Shape mismatch error. Check:")
+            print("   - Input shape in parameters.py matches your data")
+            print("   - Model architecture compatibility")
+            print("   - Data preprocessing steps")
+    
+    finally:
+        # Cleanup and final message
+        print("\n" + "="*60)
+        print("🏁 Program finished")
+        print("="*60)
 
 if __name__ == "__main__":
     main()
