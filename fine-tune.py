@@ -450,7 +450,8 @@ def fine_tune_model(
     monitor.set_model(model)
     
     # Use fewer epochs for fine-tuning
-    fine_tune_epochs = max(20, params.EPOCHS // 2)
+    # fine_tune_epochs = max(20, params.EPOCHS // 2)
+    fine_tune_epochs = max(20, params.EPOCHS *2)
     
     callbacks = create_callbacks(
         fine_tune_dir, tflite_manager, representative_data, 
@@ -542,7 +543,7 @@ def main():
                        help='Ratio of augmented data to use (default: 0.9)')
     parser.add_argument('--model_path', type=str, default=None,
                        help='Path to pre-trained model directory')
-    parser.add_argument('--learning_rate_multiplier', type=float, default=0.1,
+    parser.add_argument('--learning_rate_multiplier', type=float, default=0.5,
                        help='Learning rate multiplier for fine-tuning (default: 0.1)')
     parser.add_argument('--debug', action='store_true',
                        help='Enable debug mode')
