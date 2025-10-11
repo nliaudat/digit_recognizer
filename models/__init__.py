@@ -6,8 +6,12 @@ from .model_factory import (
     model_summary, 
     get_available_models, 
     get_model_info,
-    get_model_creators,
-    MODEL_CREATORS
+    get_hyperparameter_summary,
+    print_hyperparameter_summary,
+    create_learning_rate_scheduler,
+    get_initializer,
+    get_regularizer,
+    get_training_callbacks
 )
 
 # Import core models that are always available
@@ -23,13 +27,15 @@ __all__ = [
     'model_summary',
     'get_available_models',
     'get_model_info',
-    'get_model_creators',
-    'MODEL_CREATORS',
+    'get_hyperparameter_summary',
+    'print_hyperparameter_summary',
+    'create_learning_rate_scheduler',
+    'get_initializer',
+    'get_regularizer',
+    'get_training_callbacks',
     'create_practical_tiny_depthwise',
     'create_simple_cnn',
     'create_dig_class100_s2',
     'create_original_haverland',
     'CNN_s2',
-    'mnist_quantization',
-    'digit_recognizer_v1',
 ]
