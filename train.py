@@ -13,8 +13,14 @@ from models import create_model, compile_model, model_summary
 from utils import get_data_splits, preprocess_images
 import parameters as params
 
+# QAT imports
+try:
+    import tensorflow_model_optimization as tfmot
+    QAT_AVAILABLE = True
+except ImportError:
+    print("⚠️  tensorflow-model-optimization not available. Install with: pip install tensorflow-model-optimization")
+    QAT_AVAILABLE = False
 
-# Parse command line arguments
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Digit Recognition Training')
     parser.add_argument('--debug', action='store_true', 
@@ -22,45 +28,40 @@ def parse_arguments():
     parser.add_argument('--test_all_models', action='store_true',
                        help='Test all available model architectures and compare performance')
     parser.add_argument('--train', nargs='+', choices=params.AVAILABLE_MODELS,
-                       help='Train specific model architectures from AVAILABLE_MODELS')
-    parser.add_argument('--train_all', action='store_true',
-                       help='Train all available model architectures sequentially')
+                       help='Train specific model architectures from AVAILABLE_MODELS')      
+    parser.add_argument('--use_tuner', action='store_true',
+                       help='Enable hyperparameter tuning before training')
+                       
+    # parser.add_argument('--train_all', action='store_true',
+                       # help='Train all available model architectures sequentially')
+    # parser.add_argument('--use_tuner', action='store_true',
+                       # help='Enable hyperparameter tuning before training')
+    # parser.add_argument('--advanced', action='store_true',
+                       # help='Enable advanced training features')
+    # parser.add_argument('--num_trials', type=int, default=5,
+                       # help='Number of tuning trials (default: 5)')
     return parser.parse_args()
     
 def set_all_seeds(seed=params.SHUFFLE_SEED):
     """Set all random seeds for complete reproducibility"""
-    # Python built-in random
     import random
     random.seed(seed)
-    
-    # NumPy
     np.random.seed(seed)
-    
-    # TensorFlow
     tf.random.set_seed(seed)
-    
-    # Set environment variables for CUDA (if using GPU)
     os.environ['PYTHONHASHSEED'] = str(seed)
     os.environ['TF_DETERMINISTIC_OPS'] = '1'
     os.environ['TF_CUDNN_DETERMINISTIC'] = '1'
-    
-    # Configure TensorFlow for deterministic operations
     tf.config.experimental.enable_op_determinism()
 
-# Set TensorFlow logging level based on debug flag
 def setup_tensorflow_logging(debug=False):
     if debug:
-        # Enable all TensorFlow logs
         tf.get_logger().setLevel('INFO')
         tf.autograph.set_verbosity(3)
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
     else:
-        # Suppress TensorFlow info and warning messages
         tf.get_logger().setLevel('ERROR')
         tf.autograph.set_verbosity(0)
-        # Also suppress other noisy libraries
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-        # Suppress absl logging
         import absl.logging
         absl.logging.set_verbosity(absl.logging.ERROR)
 
@@ -68,25 +69,17 @@ def setup_tensorflow_logging(debug=False):
 def suppress_all_output(debug=False):
     """Completely suppress all output during TFLite conversion"""
     if debug:
-        # Don't suppress anything in debug mode
         yield
         return
     
-    # Redirect all possible output streams
     original_stdout = sys.stdout
     original_stderr = sys.stderr
     
-    # Open null devices for stdout and stderr
     with open(os.devnull, 'w') as fnull:
         sys.stdout = fnull
         sys.stderr = fnull
         
-        # Also suppress C-level stdout/stderr
-        original_stdout_fd = None
-        original_stderr_fd = None
-        
         try:
-            # For Unix-like systems
             if hasattr(sys, '__stdout__'):
                 original_stdout_fd = os.dup(sys.__stdout__.fileno())
                 original_stderr_fd = os.dup(sys.__stderr__.fileno())
@@ -96,22 +89,17 @@ def suppress_all_output(debug=False):
                 os.dup2(devnull_fd, sys.__stderr__.fileno())
                 os.close(devnull_fd)
         except (AttributeError, OSError):
-            # Fallback for Windows or if above fails
             pass
         
-        # Suppress all Python logging
         logging.disable(logging.CRITICAL)
         
         try:
             yield
         finally:
-            # Restore everything
             logging.disable(logging.NOTSET)
-            
             sys.stdout = original_stdout
             sys.stderr = original_stderr
             
-            # Restore C-level stdout/stderr
             try:
                 if original_stdout_fd is not None and original_stderr_fd is not None:
                     os.dup2(original_stdout_fd, sys.__stdout__.fileno())
@@ -121,7 +109,36 @@ def suppress_all_output(debug=False):
             except (AttributeError, OSError):
                 pass
 
-        
+def apply_qat(model):
+    """Apply Quantization Aware Training using modern TF API"""
+    if not QAT_AVAILABLE:
+        print("❌ QAT not available - install tensorflow-model-optimization")
+        return model
+    
+    try:
+        print("🎯 Applying Quantization Aware Training...")
+        qat_model = tfmot.quantization.keras.quantize_model(model)
+        print("✅ QAT applied successfully")
+        return qat_model
+    except Exception as e:
+        print(f"❌ QAT failed: {e}")
+        return model
+
+def create_qat_model():
+    """Create a model with Quantization Aware Training from scratch"""
+    if not QAT_AVAILABLE:
+        return create_model()
+    
+    try:
+        print("🎯 Building model with Quantization Aware Training...")
+        model = create_model()
+        qat_model = tfmot.quantization.keras.quantize_model(model)
+        print("✅ QAT model created successfully")
+        return qat_model
+    except Exception as e:
+        print(f"❌ QAT model creation failed: {e}")
+        return create_model()
+
 class TFLiteModelManager:
     def __init__(self, output_dir, debug=False):
         self.output_dir = output_dir
@@ -131,21 +148,17 @@ class TFLiteModelManager:
     def verify_model_for_conversion(self, model):
         """Verify model is compatible with TFLite conversion"""
         try:
-            # Test forward pass
             test_input = tf.random.normal([1] + list(params.INPUT_SHAPE))
             test_output = model(test_input)
             
-            # Verify output shape
             expected_output_shape = (1, params.NB_CLASSES)
             if test_output.shape != expected_output_shape:
                 print(f"⚠️  Output shape mismatch: {test_output.shape} vs {expected_output_shape}")
             
-            # Verify no NaN values
             if tf.reduce_any(tf.math.is_nan(test_output)):
                 print("❌ Model output contains NaN values")
                 return False
                 
-            # print("✅ Model verification passed")
             return True
             
         except Exception as e:
@@ -153,21 +166,16 @@ class TFLiteModelManager:
             return False
             
     def save_trainable_checkpoint(self, model, accuracy, epoch):
-        """Save model in trainable format (.keras only for Keras 3 compatibility)"""
-        # Always save when called, not just on best accuracy
+        """Save model in trainable format"""
         timestamp = datetime.now().strftime("%H%M%S")
-        
-        # ✅ UPDATED: Only save as .keras format (Keras 3 compatible)
         checkpoint_path = os.path.join(self.output_dir, f"checkpoint_epoch_{epoch:03d}_acc_{accuracy:.4f}_{timestamp}.keras")
         model.save(checkpoint_path)
         
         if self.debug:
             print(f"💾 Saved trainable checkpoint: {checkpoint_path}")
         
-        # Still track best accuracy for TFLite conversion
         if accuracy > self.best_accuracy:
             self.best_accuracy = accuracy
-            # Save best model separately
             best_checkpoint_path = os.path.join(self.output_dir, "best_model.keras")
             model.save(best_checkpoint_path)
             if self.debug:
@@ -175,233 +183,145 @@ class TFLiteModelManager:
         
         return checkpoint_path
         
-    def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
-        """Save model directly as TFLite with ESP-DL compatibility - Keras 3 compatible"""
+    def _is_qat_model(self, model):
+        """Check if model is a QAT model"""
+        for layer in model.layers:
+            if hasattr(layer, 'quantize_config') or 'quant' in layer.name.lower():
+                return True
+        return False
+
+    def _convert_qat_model(self, model, filename, representative_data=None):
+        """Convert QAT model to TFLite with proper representative dataset"""
         try:
-            # CRITICAL FIX: Ensure model is built by running a forward pass
-            if not model.built:
-                print("🔄 Building model by running forward pass...")
-                dummy_input = tf.zeros([1] + list(params.INPUT_SHAPE))
-                _ = model(dummy_input)
-                print("✅ Model built successfully")
+            converter = tf.lite.TFLiteConverter.from_keras_model(model)
+            converter.optimizations = [tf.lite.Optimize.DEFAULT]
             
-            # Keras 3 compatible conversion - use concrete functions only
-            # print(f"🔧 Converting {filename} to TFLite (Keras 3 concrete functions)...")
-            
-            # Create concrete function with explicit input spec
-            @tf.function
-            def model_call(x):
-                return model(x)
-            
-            # Create concrete function with proper input shape
-            concrete_func = model_call.get_concrete_function(
-                tf.TensorSpec([None] + list(params.INPUT_SHAPE), tf.float32, name='input_tensor')
-            )
-            
-            converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func], model_call)
-            
-            # Configure quantization if needed
-            if quantize:
-                converter.optimizations = [tf.lite.Optimize.DEFAULT]
-                if representative_data is not None:
-                    converter.representative_dataset = representative_data
-                
-                # ESP-DL specific quantization
-                if params.ESP_DL_QUANTIZE:
-                    if self.debug:
-                        print(f"🔧 Using INT8 quantization for ESP-DL...")
-                    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-                    converter.inference_input_type = tf.int8
-                    converter.inference_output_type = tf.int8
-                else:
-                    if self.debug:
-                        print(f"🔧 Using UINT8 quantization...")
-                    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
-                    converter.inference_input_type = tf.uint8
-                    converter.inference_output_type = tf.uint8
-                
-                converter.allow_custom_ops = False
-                converter.experimental_new_quantizer = True
-                
+            # CRITICAL: Provide representative dataset for full integer quantization
+            if representative_data is None:
+                print("⚠️  No representative dataset provided for QAT conversion")
+                # Create a simple representative dataset from the model input shape
+                def default_representative_dataset():
+                    for _ in range(100):
+                        data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
+                        yield [data]
+                converter.representative_dataset = default_representative_dataset
             else:
-                if self.debug:
-                    print(f"🔧 Converting as float32...")
+                converter.representative_dataset = representative_data
             
-            # Convert with suppression
+            if params.ESP_DL_QUANTIZE:
+                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+                converter.inference_input_type = tf.int8
+                converter.inference_output_type = tf.int8
+            else:
+                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+                converter.inference_input_type = tf.uint8
+                converter.inference_output_type = tf.uint8
+            
             with suppress_all_output(self.debug):
                 tflite_model = converter.convert()
             
-            # Save the model
-            model_path = os.path.join(self.output_dir, filename)
-            with open(model_path, 'wb') as f:
-                f.write(tflite_model)
+            return self._save_tflite_file(tflite_model, filename, True)
             
-            model_size_kb = len(tflite_model) / 1024
-            if self.debug:
-                quant_type = "INT8" if (quantize and params.ESP_DL_QUANTIZE) else "UINT8" if quantize else "Float32"
-                print(f"💾 Saved {filename} ({quant_type}): {model_size_kb:.1f} KB")
+        except Exception as e:
+            print(f"❌ QAT conversion failed: {e}")
+            # Fallback: try without full integer quantization
+            return self._convert_qat_model_fallback(model, filename)
             
-            return tflite_model, model_size_kb
+    def _convert_qat_model_fallback(self, model, filename):
+        """Fallback conversion for QAT model without full integer quantization"""
+        try:
+            print("🔄 Trying fallback QAT conversion (dynamic range quantization)...")
+            converter = tf.lite.TFLiteConverter.from_keras_model(model)
+            converter.optimizations = [tf.lite.Optimize.DEFAULT]
+            # Don't set representative dataset - use dynamic range quantization
+            
+            with suppress_all_output(self.debug):
+                tflite_model = converter.convert()
+            
+            return self._save_tflite_file(tflite_model, filename, True)
+            
+        except Exception as e:
+            print(f"❌ Fallback QAT conversion failed: {e}")
+            raise          
+            
+            
+    def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
+        """Save model as TFLite with proper QAT handling"""
+        try:
+            if not model.built:
+                dummy_input = tf.zeros([1] + list(params.INPUT_SHAPE), dtype=tf.float32)
+                _ = model(dummy_input)
+            
+            if quantize and self._is_qat_model(model):
+                # print("🎯 Converting QAT model to quantized TFLite...")
+                return self._convert_qat_model(model, filename, representative_data)
+            
+            # print(f"🔧 Converting {filename} to TFLite...")
+            return self.save_as_tflite_savedmodel(model, filename, quantize, representative_data)
             
         except Exception as e:
             print(f"❌ TFLite conversion failed: {e}")
-            # Fallback to simple method
-            return self.save_as_tflite_simple(model, filename, quantize, representative_data)
+            return self.save_as_tflite_savedmodel(model, filename, quantize, representative_data)
 
-
-    def save_as_tflite_simple(self, model, filename, quantize=False, representative_data=None):
-        """Simple fallback conversion method for Keras 3"""
+    def save_as_tflite_savedmodel(self, model, filename, quantize=False, representative_data=None):
+        """Use SavedModel approach for conversion"""
         try:
-            print(f"🔄 Trying simple conversion for {filename}...")
-            
-            # Ensure model is built
-            if not model.built:
-                dummy_input = tf.zeros([1] + list(params.INPUT_SHAPE))
-                _ = model(dummy_input)
-            
-            # Keras 3 compatible: Use concrete function approach
-            @tf.function
-            def serve(x):
-                return model(x)
-            
-            # Create concrete function
-            concrete_serving = serve.get_concrete_function(
-                tf.TensorSpec(shape=[None] + list(params.INPUT_SHAPE), dtype=tf.float32)
-            )
-            
-            converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_serving], serve)
-            
-            if quantize:
-                converter.optimizations = [tf.lite.Optimize.DEFAULT]
-                if representative_data is not None:
-                    converter.representative_dataset = representative_data
-            
-            with suppress_all_output(self.debug):
-                tflite_model = converter.convert()
-            
-            model_path = os.path.join(self.output_dir, filename)
-            with open(model_path, 'wb') as f:
-                f.write(tflite_model)
-            
-            model_size_kb = len(tflite_model) / 1024
-            print(f"💾 Saved {filename} (simple): {model_size_kb:.1f} KB")
-            
-            return tflite_model, model_size_kb
-            
-        except Exception as e:
-            print(f"❌ Simple conversion also failed: {e}")
-            # Final fallback: manual SavedModel export
-            return self.save_as_tflite_manual(model, filename, quantize, representative_data)
-            
-    def save_as_tflite_manual(self, model, filename, quantize=False, representative_data=None):
-        """Manual conversion method as last resort"""
-        try:
-            print(f"🔄 Trying manual conversion for {filename}...")
-            
-            # Manual SavedModel creation
             import tempfile
-            import shutil
             
             with tempfile.TemporaryDirectory() as temp_dir:
-                # Create SavedModel structure manually
                 model_dir = os.path.join(temp_dir, "saved_model")
-                os.makedirs(model_dir)
+                model.save(model_dir, save_format='tf')
                 
-                # Save model weights and architecture separately
-                model.save(os.path.join(model_dir, "model.keras"))
-                
-                # Create a simple serving function
-                @tf.function
-                def serve(inputs):
-                    return model(inputs)
-                
-                # Get concrete function
-                concrete_serve = serve.get_concrete_function(
-                    tf.TensorSpec(shape=[None] + list(params.INPUT_SHAPE), dtype=tf.float32, name='inputs')
-                )
-                
-                # Save using tf.saved_model.save
-                tf.saved_model.save(
-                    model,
-                    model_dir,
-                    signatures={
-                        'serving_default': concrete_serve,
-                        'serve': concrete_serve
-                    }
-                )
-                
-                # Convert from SavedModel
                 converter = tf.lite.TFLiteConverter.from_saved_model(model_dir)
                 
                 if quantize:
                     converter.optimizations = [tf.lite.Optimize.DEFAULT]
                     if representative_data is not None:
                         converter.representative_dataset = representative_data
-                    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-                    converter.inference_input_type = tf.int8
-                    converter.inference_output_type = tf.int8
+                    else:
+                        # Create default representative dataset if none provided
+                        def default_representative_dataset():
+                            for _ in range(100):
+                                data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
+                                yield [data]
+                        converter.representative_dataset = default_representative_dataset
+                    
+                    if params.ESP_DL_QUANTIZE:
+                        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+                        converter.inference_input_type = tf.int8
+                        converter.inference_output_type = tf.int8
+                    else:
+                        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+                        converter.inference_input_type = tf.uint8
+                        converter.inference_output_type = tf.uint8
                 
                 with suppress_all_output(self.debug):
                     tflite_model = converter.convert()
                 
-                model_path = os.path.join(self.output_dir, filename)
-                with open(model_path, 'wb') as f:
-                    f.write(tflite_model)
-                
-                model_size_kb = len(tflite_model) / 1024
-                print(f"💾 Saved {filename} (manual): {model_size_kb:.1f} KB")
-                
-                return tflite_model, model_size_kb
-                
+                return self._save_tflite_file(tflite_model, filename, quantize)
+                    
         except Exception as e:
-            print(f"❌ Manual conversion failed: {e}")
+            print(f"❌ SavedModel conversion failed: {e}")
             raise
-    
-    def save_as_tflite_fallback(self, model, filename, quantize=False, representative_data=None):
-        """Fallback conversion method for Keras 3"""
-        try:
-            # Alternative approach: export to SavedModel then convert
-            import tempfile
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Export as SavedModel first (Keras 3)
-                model.export(temp_dir)  # ✅ UPDATED: Use export() instead of save()
-                
-                # Convert from SavedModel
-                converter = tf.lite.TFLiteConverter.from_saved_model(temp_dir)
-                
-                if quantize:
-                    converter.optimizations = [tf.lite.Optimize.DEFAULT]
-                    if representative_data is not None:
-                        converter.representative_dataset = representative_data
-                    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-                    converter.inference_input_type = tf.int8
-                    converter.inference_output_type = tf.int8
-                
-                # Use comprehensive suppression context manager
-                with suppress_all_output(self.debug):
-                    tflite_model = converter.convert()
-                
-                model_path = os.path.join(self.output_dir, filename)
-                with open(model_path, 'wb') as f:
-                    f.write(tflite_model)
-                
-                model_size_kb = len(tflite_model) / 1024
-                if self.debug:
-                    print(f"💾 Saved {filename} (fallback): {model_size_kb:.1f} KB")
-                
-                return tflite_model, model_size_kb
-                
-        except Exception as e:
-            if self.debug:
-                print(f"❌ Fallback conversion also failed: {e}")
-            raise
+
+    def _save_tflite_file(self, tflite_model, filename, quantize):
+        """Save TFLite model to file"""
+        model_path = os.path.join(self.output_dir, filename)
+        with open(model_path, 'wb') as f:
+            f.write(tflite_model)
+        
+        model_size_kb = len(tflite_model) / 1024
+        if self.debug:
+            quant_type = "INT8" if (quantize and params.ESP_DL_QUANTIZE) else "UINT8" if quantize else "Float32"
+            print(f"💾 Saved {filename} ({quant_type}): {model_size_kb:.1f} KB")
+        
+        return tflite_model, model_size_kb
     
     def save_best_model(self, model, accuracy, representative_data=None):
         """Save model if it's the best so far"""
         if accuracy > self.best_accuracy:
             self.best_accuracy = accuracy
             
-            # Verify model before conversion
             if not self.verify_model_for_conversion(model):
                 print("⚠️  Skipping TFLite conversion due to model issues")
                 return None
@@ -409,7 +329,6 @@ class TFLiteModelManager:
             if self.debug:
                 print(f"🎯 New best accuracy: {accuracy:.4f}, saving TFLite model...")
             
-            # Save quantized model (for ESP-DL)
             try:
                 tflite_model, size_kb = self.save_as_tflite(
                     model, 
@@ -418,7 +337,6 @@ class TFLiteModelManager:
                     representative_data=representative_data
                 )
                 
-                # Also save float model for comparison
                 self.save_as_tflite(
                     model, 
                     params.FLOAT_TFLITE_FILENAME, 
@@ -456,11 +374,9 @@ class TrainingMonitor:
         self.train_acc.append(logs.get('accuracy', 0))
         self.val_acc.append(logs.get('val_accuracy', 0))
         
-        # FIX: Use learning_rate instead of lr for TF 2.13+
         try:
             current_lr = float(tf.keras.backend.get_value(self.model.optimizer.learning_rate))
         except AttributeError:
-            # Fallback for older TF versions
             current_lr = float(tf.keras.backend.get_value(self.model.optimizer.lr))
         
         self.lr_history.append(current_lr)
@@ -475,10 +391,8 @@ class TrainingMonitor:
             
         epochs = range(1, len(self.train_loss) + 1)
         
-        # Create subplots
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
         
-        # Plot loss
         ax1.plot(epochs, self.train_loss, 'b-', label='Training Loss', alpha=0.7)
         ax1.plot(epochs, self.val_loss, 'r-', label='Validation Loss', alpha=0.7)
         ax1.set_title('Training and Validation Loss')
@@ -487,7 +401,6 @@ class TrainingMonitor:
         ax1.legend()
         ax1.grid(True, alpha=0.3)
         
-        # Plot accuracy
         ax2.plot(epochs, self.train_acc, 'b-', label='Training Accuracy', alpha=0.7)
         ax2.plot(epochs, self.val_acc, 'r-', label='Validation Accuracy', alpha=0.7)
         ax2.set_title('Training and Validation Accuracy')
@@ -496,7 +409,6 @@ class TrainingMonitor:
         ax2.legend()
         ax2.grid(True, alpha=0.3)
         
-        # Plot learning rate
         ax3.plot(epochs, self.lr_history, 'g-', label='Learning Rate', alpha=0.7)
         ax3.set_title('Learning Rate Schedule')
         ax3.set_xlabel('Epochs')
@@ -513,7 +425,7 @@ class TrainingMonitor:
         print(f"📊 Training plots saved to: {plot_path}")
 
 class TFLiteCheckpoint(tf.keras.callbacks.Callback):
-    def __init__(self, tflite_manager, representative_data, save_frequency=10):  # Reduced frequency
+    def __init__(self, tflite_manager, representative_data, save_frequency=10):
         super().__init__()
         self.tflite_manager = tflite_manager
         self.representative_data = representative_data
@@ -523,10 +435,8 @@ class TFLiteCheckpoint(tf.keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         val_accuracy = logs.get('val_accuracy', 0)
         
-        # Only save TFLite on best accuracy or every N epochs to avoid conversion issues
         if val_accuracy > getattr(self.tflite_manager, 'best_accuracy', 0):
             try:
-                # Save TFLite for inference only when we have new best accuracy
                 self.tflite_manager.save_best_model(
                     self.model, 
                     val_accuracy, 
@@ -534,9 +444,8 @@ class TFLiteCheckpoint(tf.keras.callbacks.Callback):
                 )
             except Exception as e:
                 if self.tflite_manager.debug:
-                    print(f"⚠️  TFLite save failed (will retry next epoch): {e}")
+                    print(f"⚠️  TFLite save failed: {e}")
         
-        # Save trainable checkpoint less frequently
         if epoch % self.save_frequency == 0 and epoch != self.last_save_epoch:
             try:
                 checkpoint_path = self.tflite_manager.save_trainable_checkpoint(self.model, val_accuracy, epoch)
@@ -558,7 +467,6 @@ class TQDMProgressBar(tf.keras.callbacks.Callback):
         self.pbar = None
         
     def on_train_begin(self, logs=None):
-        # Initialize tqdm progress bar
         self.pbar = tqdm(total=self.total_epochs, desc='Training', unit='epoch',
                         bar_format='{l_bar}{bar:20}{r_bar}{bar:-20b}',
                         position=0, leave=True)
@@ -571,20 +479,16 @@ class TQDMProgressBar(tf.keras.callbacks.Callback):
         self.epoch_times.append(epoch_time)
         avg_time = np.mean(self.epoch_times) if self.epoch_times else epoch_time
         
-        # Call the monitor to record metrics
         self.monitor.on_epoch_end(epoch, logs)
         
-        # Get current metrics
         train_loss = logs.get('loss', 0)
         train_acc = logs.get('accuracy', 0)
         val_loss = logs.get('val_loss', 0)
         val_acc = logs.get('val_accuracy', 0)
         
-        # Calculate remaining time
         remaining_epochs = self.total_epochs - epoch - 1
         remaining_time = avg_time * remaining_epochs
         
-        # Update progress bar description with current metrics
         desc = (f"Epoch {epoch+1}/{self.total_epochs} | "
                 f"loss: {train_loss:.4f} | acc: {train_acc:.4f} | "
                 f"val_loss: {val_loss:.4f} | val_acc: {val_acc:.4f} | "
@@ -596,9 +500,11 @@ class TQDMProgressBar(tf.keras.callbacks.Callback):
     def on_train_end(self, logs=None):
         if self.pbar:
             self.pbar.close()
+### end class TQDMProgressBa           
+            
 
 def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False):
-    """Create training callbacks for Keras 3"""
+    """Create training callbacks with robust CSV logging"""
     
     callbacks = []
     
@@ -643,47 +549,79 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     )
     
     # Learning rate scheduler
-    callbacks.extend([
+    callbacks.append(
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor=getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss'),
             factor=getattr(params, 'LR_SCHEDULER_FACTOR', 0.5),
             patience=getattr(params, 'LR_SCHEDULER_PATIENCE', 3),
             min_lr=getattr(params, 'LR_SCHEDULER_MIN_LR', 1e-7),
             verbose=1 if debug else 0
-        ),
-        
-        # TFLite model checkpoint
-        TFLiteCheckpoint(tflite_manager, representative_data),
-        
-        # TQDM progress bar
-        TQDMProgressBar(total_epochs, monitor, tflite_manager, debug),
-        
-        # CSV logger
-        tf.keras.callbacks.CSVLogger(
-            os.path.join(output_dir, 'training_log.csv'),
-            separator=',',
-            append=False
         )
-    ])
+    )
+    
+    # TFLite model checkpoint
+    callbacks.append(
+        TFLiteCheckpoint(tflite_manager, representative_data)
+    )
+    
+    # TQDM progress bar
+    callbacks.append(
+        TQDMProgressBar(total_epochs, monitor, tflite_manager, debug)
+    )
+    
+    # ROBUST CSV Logger with proper error handling
+    csv_path = os.path.join(output_dir, 'training_log.csv')
+    print(f"📄 CSV Logger will save to: {csv_path}")
+    
+    # Ensure directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Test if we can write to the directory
+    try:
+        test_file = os.path.join(output_dir, 'test_write.tmp')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+        print("✅ Output directory is writable")
+    except Exception as e:
+        print(f"❌ Output directory not writable: {e}")
+        # Try to create CSV in current directory as fallback
+        csv_path = 'training_log_fallback.csv'
+        print(f"🔄 Using fallback path: {csv_path}")
+    
+    # Create CSV logger with explicit configuration
+    csv_logger = tf.keras.callbacks.CSVLogger(
+        filename=csv_path,
+        separator=',',
+        append=False
+    )
+    callbacks.append(csv_logger)
     
     # Create checkpoints directory
     os.makedirs(os.path.join(output_dir, "checkpoints"), exist_ok=True)
     
+    # Debug: Print all callbacks
+    if debug:
+        print("🔍 Callbacks created:")
+        for i, callback in enumerate(callbacks):
+            print(f"   {i+1}. {callback.__class__.__name__}")
+            if hasattr(callback, 'filename'):
+                print(f"      File: {getattr(callback, 'filename', 'N/A')}")
+    
     return callbacks
 
-
-def create_representative_dataset(x_train, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    """Create representative dataset for quantization"""
-    def representative_data_gen():
+def create_qat_representative_dataset(x_train, num_samples=100):
+    """Create representative dataset for QAT model conversion"""
+    def representative_dataset():
+        # Use actual training data for better calibration
         for i in range(min(num_samples, len(x_train))):
-            yield [x_train[i:i+1]]
-    return representative_data_gen
+            yield [x_train[i:i+1].astype(np.float32)]
+    return representative_dataset
     
 def setup_gpu():
-    """Comprehensive GPU configuration with better error reporting"""
+    """Comprehensive GPU configuration"""
     print("🔧 Configuring hardware...")
     
-    # First, let's see what's available
     gpus = tf.config.experimental.list_physical_devices('GPU')
     cpus = tf.config.experimental.list_physical_devices('CPU')
     
@@ -701,17 +639,11 @@ def setup_gpu():
     
     if not gpus:
         print("❌ No GPUs detected by TensorFlow")
-        print("💡 Troubleshooting tips:")
-        print("   1. Check if tensorflow-gpu is installed: pip list | grep tensorflow")
-        print("   2. Verify CUDA/cuDNN installation")
-        print("   3. Check nvidia-smi output")
-        print("   4. Try: pip install tensorflow-gpu")
         return None
     
     try:
         print(f"🎮 Configuring {len(gpus)} GPU(s)...")
         
-        # Configure memory settings
         for gpu in gpus:
             if params.GPU_MEMORY_GROWTH:
                 tf.config.experimental.set_memory_growth(gpu, True)
@@ -726,7 +658,6 @@ def setup_gpu():
                 )
                 print(f"   ✅ Memory limit set to {params.GPU_MEMORY_LIMIT} MB")
         
-        # Test GPU functionality
         print("   🧪 Testing GPU functionality...")
         with tf.device('/GPU:0'):
             test_tensor = tf.constant([1.0, 2.0, 3.0])
@@ -752,7 +683,6 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     print("TRAINING SUMMARY")
     print("="*60)
     
-    # GPU Information
     gpus = tf.config.experimental.list_physical_devices('GPU')
     print(f"Hardware:")
     print(f"  GPU: {'Available' if gpus else 'Not available'}")
@@ -780,22 +710,18 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     print(f"  Learning rate: {params.LEARNING_RATE}")
     print(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}")
     print(f"  Quantization: {params.QUANTIZE_MODEL}")
+    print(f"  QAT: {'Enabled' if (params.QUANTIZE_MODEL and getattr(params, 'USE_QAT', False)) else 'Disabled'}")
     print(f"  ESP-DL Quantization: {params.ESP_DL_QUANTIZE}")
     print(f"  Debug mode: {'Enabled' if debug else 'Disabled'}")
 
 def train_model(debug=False):
-    """Main training function"""
-    # Set up TensorFlow logging based on debug flag
+    """Main training function with proper QAT workflow"""
     setup_tensorflow_logging(debug)
-    
-    # Set all random seeds for reproducibility
     set_all_seeds(params.SHUFFLE_SEED)
     
-    # Set up GPU
     print("🔧 Configuring hardware...")
     strategy = setup_gpu()
     
-    # Create output directory with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_{timestamp}")
     os.makedirs(training_dir, exist_ok=True)
@@ -805,69 +731,46 @@ def train_model(debug=False):
         print("🔍 DEBUG MODE ENABLED - Verbose logging active")
     print("="*60)
     
-    # Load and preprocess data from multiple sources
     print("📊 Loading dataset from multiple sources...")
     (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
     
+    print("🔄 Preprocessing images...")
+    x_train = preprocess_images(x_train, for_training=True)
+    x_val = preprocess_images(x_val, for_training=True)  
+    x_test = preprocess_images(x_test, for_training=True)
+    
+    print(f"✅ Preprocessing complete - range: [{x_train.min():.3f}, {x_train.max():.3f}]")
+    
     if params.MODEL_ARCHITECTURE != "original_haverland":
-        # FIX: Convert ALL models to use categorical labels for consistency
-        print("Converting labels to categorical format...")
         y_train = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
         y_val = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES) 
         y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
     
-    # Ensure data is properly normalized
-    print("🔍 Checking data normalization...")
-    print(f"   Data range before preprocessing: [{x_train.min():.3f}, {x_train.max():.3f}]")
+    representative_data = create_qat_representative_dataset(x_train)
     
-    print("🔄 Preprocessing images...")
-    x_train = preprocess_images(x_train)
-    x_val = preprocess_images(x_val) 
-    x_test = preprocess_images(x_test)
+    use_qat = params.QUANTIZE_MODEL and getattr(params, 'USE_QAT', False) and QAT_AVAILABLE
     
-    print(f"✅ Preprocessing complete:")
-    print(f"   x_train: {x_train.shape}")
-    print(f"   x_val: {x_val.shape}")
-    print(f"   x_test: {x_test.shape}")
-    
-    print(f"   Data range after preprocessing: [{x_train.min():.3f}, {x_train.max():.3f}]")
-    
-    # If data isn't normalized to reasonable range, force it
-    if x_train.max() > 5.0 or x_train.min() < -5.0:
-        print("⚠️  Data range too large - applying normalization...")
-        x_train = (x_train - x_train.mean()) / (x_train.std() + 1e-8)
-        x_val = (x_val - x_val.mean()) / (x_val.std() + 1e-8)
-        x_test = (x_test - x_test.mean()) / (x_test.std() + 1e-8)
-        print(f"   Data range after normalization: [{x_train.min():.3f}, {x_train.max():.3f}]")
-    
-    # Convert labels for Haverland model (categorical instead of sparse)
-    if params.MODEL_ARCHITECTURE == "original_haverland":
-        y_train = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
-        y_val = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES)
-        y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
-        print("🔧 Using categorical crossentropy for Haverland model")
-    
-    # Create representative dataset for quantization
-    representative_data = create_representative_dataset(x_train)
-    
-    # Create and compile model with GPU strategy if available
-    if strategy:
-        print(f"🧠 Creating {params.MODEL_ARCHITECTURE} model with multi-GPU strategy...")
-        with strategy.scope():
-            model = create_model()
+    if use_qat:
+        if strategy:
+            with strategy.scope():
+                model = create_qat_model()
+                model = compile_model(model)
+        else:
+            model = create_qat_model()
             model = compile_model(model)
     else:
-        print(f"🧠 Creating {params.MODEL_ARCHITECTURE} model...")
-        model = create_model()
-        model = compile_model(model)
-
-    # Explicitly build the model by specifying input shape
+        if strategy:
+            with strategy.scope():
+                model = create_model()
+                model = compile_model(model)
+        else:
+            model = create_model()
+            model = compile_model(model)
+    
     print("🔧 Building model with explicit input shape...")
     model.build(input_shape=(None,) + params.INPUT_SHAPE)
     print(f"✅ Model built with input shape: {model.input_shape}")
-        
 
-    # Verify model is built and can forward pass
     print("🔍 Verifying model can forward pass...")
     try:
         test_input = tf.random.normal([1] + list(params.INPUT_SHAPE))
@@ -877,88 +780,95 @@ def train_model(debug=False):
         print(f"❌ Model verification failed: {e}")
         raise
     
-    # Initialize TFLite manager with debug flag
     tflite_manager = TFLiteModelManager(training_dir, debug)
-    
-    # Print comprehensive summary
-    print_training_summary(model, x_train, x_val, x_test, debug)
-    model_summary(model)
-    
-    # Create monitor with debug flag
     monitor = TrainingMonitor(training_dir, debug)
     monitor.set_model(model)
     
-    # Create callbacks with tqdm progress bar
+    print_training_summary(model, x_train, x_val, x_test, debug)
+    model_summary(model)
+    
     callbacks = create_callbacks(training_dir, tflite_manager, representative_data, params.EPOCHS, monitor, debug)
     
-    # Train model
     print("\n🎯 Starting training...")
     print("-" * 60)
     
     start_time = datetime.now()
     
-    # Use the original training approach to maintain accuracy
     history = model.fit(
         x_train, y_train,
         batch_size=params.BATCH_SIZE,
         epochs=params.EPOCHS,
         validation_data=(x_val, y_val),
         callbacks=callbacks,
-        verbose=0,  # We handle progress with tqdm
+        verbose=0,
         shuffle=True
     )
     
     training_time = datetime.now() - start_time
     
-    # Save final TFLite models (silently in non-debug mode)
     if debug:
         print("\n💾 Saving final TFLite models...")
-    final_quantized, quantized_size = tflite_manager.save_as_tflite(
-        model, "final_quantized.tflite", quantize=True, representative_data=representative_data
-    )
-    final_float, float_size = tflite_manager.save_as_tflite(
-        model, "final_float.tflite", quantize=False
-    )
     
-    # Evaluate models
+    try:
+        final_quantized, quantized_size = tflite_manager.save_as_tflite(
+            model, "final_quantized.tflite", quantize=True, representative_data=representative_data
+        )
+    except Exception as e:
+        print(f"❌ Quantized TFLite save failed: {e}")
+        quantized_size = 0
+    
+    try:
+        final_float, float_size = tflite_manager.save_as_tflite(
+            model, "final_float.tflite", quantize=False
+        )
+    except Exception as e:
+        print(f"❌ Float TFLite save failed: {e}")
+        float_size = 0
+    
     print("\n📈 Evaluating models...")
     
-    # Import analysis functions
-    from analyse import evaluate_tflite_model, analyze_quantization_impact, debug_tflite_model
+    try:
+        from analyse import evaluate_tflite_model, analyze_quantization_impact, debug_tflite_model
+    except ImportError:
+        print("⚠️  Analysis module not available")
+        evaluate_tflite_model = lambda *args: 0.0
+        analyze_quantization_impact = lambda *args: None
+        debug_tflite_model = lambda *args: None
     
-    # Add debug info
     if debug:
         quantized_tflite_path = os.path.join(training_dir, params.TFLITE_FILENAME)
-        debug_tflite_model(quantized_tflite_path, x_test[:1])
+        if os.path.exists(quantized_tflite_path):
+            debug_tflite_model(quantized_tflite_path, x_test[:1])
     
-    # Keras model evaluation with tqdm
-    if debug:
-        print("Evaluating Keras model...")
-    train_accuracy = model.evaluate(x_train, y_train, verbose=0)[1]
-    val_accuracy = model.evaluate(x_val, y_val, verbose=0)[1]
-    test_accuracy = model.evaluate(x_test, y_test, verbose=0)[1]
+    try:
+        train_accuracy = model.evaluate(x_train, y_train, verbose=0)[1]
+        val_accuracy = model.evaluate(x_val, y_val, verbose=0)[1]
+        test_accuracy = model.evaluate(x_test, y_test, verbose=0)[1]
+    except Exception as e:
+        print(f"❌ Keras model evaluation failed: {e}")
+        train_accuracy = val_accuracy = test_accuracy = 0.0
     
-    # TFLite model evaluation
+    tflite_accuracy = 0.0
     quantized_tflite_path = os.path.join(training_dir, params.TFLITE_FILENAME)
     if os.path.exists(quantized_tflite_path):
-        tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test)   
-        # Analyze quantization impact
-        analyze_quantization_impact(model, x_test, y_test, quantized_tflite_path)
-    else:
-        tflite_accuracy = 0.0
+        try:
+            tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test)
+            analyze_quantization_impact(model, x_test, y_test, quantized_tflite_path)
+        except Exception as e:
+            print(f"❌ TFLite evaluation failed: {e}")
     
-    # Save training plots
     monitor.save_training_plots()
     
-    # Import and run diagnostics
-    from analyse import training_diagnostics, verify_model_predictions, debug_model_architecture
-    training_diagnostics(model, x_train, y_train, x_val, y_val, debug=debug)
-    verify_model_predictions(model, x_train[:100], y_train[:100])
+    try:
+        from analyse import training_diagnostics, verify_model_predictions, debug_model_architecture
+        training_diagnostics(model, x_train, y_train, x_val, y_val, debug=debug)
+        verify_model_predictions(model, x_train[:100], y_train[:100])
+        
+        if debug:
+            debug_model_architecture(model, x_train[:10])
+    except Exception as e:
+        print(f"⚠️  Diagnostics failed: {e}")
     
-    if debug:
-        debug_model_architecture(model, x_train[:10])
-    
-    # Print final results
     print("\n" + "="*60)
     print("🏁 TRAINING COMPLETED")
     print("="*60)
@@ -977,15 +887,16 @@ def train_model(debug=False):
     print(f"   Training log: training_log.csv")
     print(f"   Training plot: training_history.png")
     
-    # Save training configuration
     save_training_config(training_dir, quantized_size, float_size, tflite_manager,
                         test_accuracy, tflite_accuracy, training_time, debug)
                         
-    # Save final model checkpoint
     print("💾 Saving final model checkpoint...")
     final_checkpoint_path = os.path.join(training_dir, "final_model.keras")
-    model.save(final_checkpoint_path)
-    print(f"✅ Final model saved: {final_checkpoint_path}")
+    try:
+        model.save(final_checkpoint_path)
+        print(f"✅ Final model saved: {final_checkpoint_path}")
+    except Exception as e:
+        print(f"❌ Final model save failed: {e}")
     
     return model, history, training_dir
 
@@ -1096,7 +1007,6 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
     original_model = params.MODEL_ARCHITECTURE
     results = {}
     
-    # Determine which models to test
     if models_to_test is None:
         test_models = params.AVAILABLE_MODELS
     else:
@@ -1109,17 +1019,13 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
         print(f"\n🔍 Testing: {model_name}")
         print("-" * 40)
         
-        # Temporarily change model architecture
         params.MODEL_ARCHITECTURE = model_name
         
         try:
-            # Create and compile model
             model = create_model()
             
-            # Determine appropriate loss function
             if model_name == "original_haverland":
                 loss_fn = 'categorical_crossentropy'
-                # Convert labels to categorical for Haverland model
                 y_train_cat = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
                 y_val_cat = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES)
             else:
@@ -1133,15 +1039,13 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
                 metrics=['accuracy']
             )
             
-            # Use smaller dataset for quick testing
             train_samples = min(1000, len(x_train))
             val_samples = min(200, len(x_val))
             
-            # Train briefly
             history = model.fit(
                 x_train[:train_samples], y_train_cat[:train_samples],
                 validation_data=(x_val[:val_samples], y_val_cat[:val_samples]),
-                epochs=5,  # Reduced epochs for quick testing
+                epochs=5,
                 batch_size=32,
                 verbose=1 if debug else 0
             )
@@ -1170,15 +1074,12 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
                 'error': str(e)
             }
     
-    # Restore original model
     params.MODEL_ARCHITECTURE = original_model
     
-    # Print results
     print("\n" + "="*60)
     print("🏆 MODEL COMPARISON RESULTS:")
     print("="*60)
     
-    # Sort by validation accuracy
     sorted_results = sorted(results.items(), key=lambda x: x[1]['val_accuracy'], reverse=True)
     
     for i, (model_name, metrics) in enumerate(sorted_results, 1):
@@ -1188,138 +1089,198 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
             print(f"{i:2d}. {model_name:35} -> Val: {metrics['val_accuracy']:.4f} | Train: {metrics['train_accuracy']:.4f} | Params: {metrics['params']:,}")
     
     return results
-    
-    
-def train_specific_models(models_to_train, debug=False):
-    """Train specific model architectures with full training"""
-    original_model = params.MODEL_ARCHITECTURE
-    results = {}
-    
-    print(f"\n🚀 TRAINING {len(models_to_train)} MODELS")
-    print("=" * 60)
-    
-    for model_name in models_to_train:
-        print(f"\n🎯 Training: {model_name}")
-        print("=" * 50)
-        
-        # Set current model
-        params.MODEL_ARCHITECTURE = model_name
-        
-        try:
-            # Train model with full configuration
-            model, history, output_dir = train_model(debug=debug)
-            
-            # Extract results
-            from analyse import evaluate_tflite_model
-            quantized_tflite_path = os.path.join(output_dir, params.TFLITE_FILENAME)
-            
-            # Load test data for evaluation
-            (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
-            x_test = preprocess_images(x_test)
-            
-            if model_name == "original_haverland":
-                y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
-            
-            # Evaluate models
-            keras_test_accuracy = model.evaluate(x_test, y_test, verbose=0)[1]
-            
-            tflite_accuracy = 0.0
-            if os.path.exists(quantized_tflite_path):
-                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test)
-            
-            results[model_name] = {
-                'keras_test_accuracy': keras_test_accuracy,
-                'tflite_accuracy': tflite_accuracy,
-                'output_dir': output_dir,
-                'params': model.count_params(),
-                'model': model
-            }
-            
-            print(f"✅ {model_name} completed:")
-            print(f"   Keras Test Accuracy: {keras_test_accuracy:.4f}")
-            print(f"   TFLite Accuracy: {tflite_accuracy:.4f}")
-            print(f"   Output: {output_dir}")
-            
-        except Exception as e:
-            print(f"❌ {model_name} training failed: {e}")
-            if debug:
-                import traceback
-                traceback.print_exc()
-            results[model_name] = {
-                'keras_test_accuracy': 0.0,
-                'tflite_accuracy': 0.0,
-                'error': str(e)
-            }
-    
-    # Restore original model
-    params.MODEL_ARCHITECTURE = original_model
-    
-    # Print summary
-    print("\n" + "="*60)
-    print("🏁 ALL MODELS TRAINING COMPLETED")
-    print("="*60)
-    
-    successful_models = {k: v for k, v in results.items() if 'error' not in v}
-    if successful_models:
-        sorted_results = sorted(successful_models.items(), 
-                              key=lambda x: x[1]['keras_test_accuracy'], 
-                              reverse=True)
-        
-        print("📊 FINAL RANKINGS:")
-        for i, (model_name, metrics) in enumerate(sorted_results, 1):
-            print(f"{i:2d}. {model_name:35} -> Keras: {metrics['keras_test_accuracy']:.4f} | TFLite: {metrics['tflite_accuracy']:.4f} | Params: {metrics['params']:,}")
-    
-    return results
 
-def get_gpu_memory_usage():
-    """Get current GPU memory usage"""
-    try:
-        import subprocess
-        result = subprocess.check_output([
-            'nvidia-smi', '--query-gpu=memory.used,memory.total', 
-            '--format=csv,nounits,noheader'
-        ], encoding='utf-8')
-        memory_info = result.strip().split('\n')[0].split(', ')
-        used = int(memory_info[0])
-        total = int(memory_info[1])
-        return used, total
-    except:
-        return None, None
 
 def main():
     """Main entry point"""
     args = parse_arguments()
     
     try:
-        # Load data first for model testing/training
+        # Load data first for all operations
+        print("📊 Loading dataset from multiple sources...")
         (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
         
-        # Handle different modes
-        if args.test_all_models:
-            # Test all models with quick training
+        # Preprocess data for training/tuning operations
+        if any([getattr(args, 'use_tuner', False), 
+                getattr(args, 'test_all_models', False),
+                getattr(args, 'train', None) is not None,
+                getattr(args, 'train_all', False)]):
+            
+            print("🔄 Preprocessing images...")
+            x_train = preprocess_images(x_train, for_training=True)
+            x_val = preprocess_images(x_val, for_training=True)
+            x_test = preprocess_images(x_test, for_training=True)
+            
+            # Handle label conversion for models that need it
+            if any([getattr(args, 'use_tuner', False),
+                    getattr(args, 'train_all', False),
+                    getattr(args, 'train', None) is not None]):
+                
+                # For test_all_models, conversion happens inside the function
+                if params.MODEL_ARCHITECTURE == "original_haverland":
+                    y_train = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
+                    y_val = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES)
+                    y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+        
+        # DEBUG: Print arguments
+        if args.debug:
+            print("🔍 Command line arguments:")
+            print(f"   debug: {args.debug}")
+            print(f"   use_tuner: {getattr(args, 'use_tuner', False)}")
+            print(f"   num_trials: {getattr(args, 'num_trials', 5)}")
+            print(f"   advanced: {getattr(args, 'advanced', False)}")
+            print(f"   test_all_models: {args.test_all_models}")
+            print(f"   train: {getattr(args, 'train', None)}")
+            print(f"   train_all: {getattr(args, 'train_all', False)}")
+            print(f"   Current MODEL_ARCHITECTURE: {params.MODEL_ARCHITECTURE}")
+        
+        # Handle different operation modes
+        if getattr(args, 'use_tuner', False):
+            # HYPERPARAMETER TUNING MODE
+            print("🚀 Starting training with hyperparameter tuning...")
+            
+            try:
+                from tuner import run_architecture_tuning
+                
+                best_model, best_hps, history, tuner = run_architecture_tuning(
+                    x_train, y_train, x_val, y_val,
+                    num_trials=getattr(args, 'num_trials', 5),
+                    debug=args.debug
+                )
+                
+                if best_model and best_hps:
+                    # Update parameters with best values
+                    best_lr = best_hps.get('learning_rate')
+                    best_batch_size = best_hps.get('batch_size')
+                    
+                    params.LEARNING_RATE = best_lr
+                    params.BATCH_SIZE = best_batch_size
+                    
+                    print(f"\n🎯 Updated with optimized hyperparameters:")
+                    print(f"   Learning Rate: {best_lr}")
+                    print(f"   Batch Size: {best_batch_size}")
+                    print(f"   Architecture: {params.MODEL_ARCHITECTURE} (fixed)")
+                    
+                    if getattr(args, 'advanced', False):
+                        # Use the tuned model directly
+                        print("🏁 Using tuned model directly (advanced mode)")
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_tuned_{timestamp}")
+                        os.makedirs(training_dir, exist_ok=True)
+                        
+                        # Save the tuned model
+                        best_model.save(os.path.join(training_dir, "tuned_model.keras"))
+                        
+                        # Also save tuning configuration
+                        config_path = os.path.join(training_dir, "tuning_config.txt")
+                        with open(config_path, 'w') as f:
+                            f.write(f"Tuned Model Configuration\n")
+                            f.write("=" * 40 + "\n")
+                            f.write(f"Model: {params.MODEL_ARCHITECTURE}\n")
+                            f.write(f"Learning Rate: {best_lr}\n")
+                            f.write(f"Batch Size: {best_batch_size}\n")
+                            f.write(f"Final Val Accuracy: {history.history['val_accuracy'][-1]:.4f}\n")
+                        
+                        print(f"💾 Tuned model saved to: {training_dir}")
+                    else:
+                        # Continue with normal training using best hyperparameters
+                        print("🔄 Retraining from scratch with optimized hyperparameters...")
+                        model, history, output_dir = train_model(debug=args.debug)
+                        print(f"\n✅ Training completed successfully!")
+                        print(f"📁 Output directory: {output_dir}")
+                else:
+                    print("❌ Hyperparameter tuning failed, falling back to normal training")
+                    model, history, output_dir = train_model(debug=args.debug)
+                    print(f"\n✅ Training completed successfully!")
+                    print(f"📁 Output directory: {output_dir}")
+                    
+            except ImportError as e:
+                print(f"❌ Keras Tuner not available: {e}")
+                print("💡 Install with: pip install keras-tuner")
+                print("🔄 Falling back to normal training...")
+                model, history, output_dir = train_model(debug=args.debug)
+                print(f"\n✅ Training completed successfully!")
+                print(f"📁 Output directory: {output_dir}")
+                
+        elif args.test_all_models:
+            # TEST ALL MODELS MODE
+            print("🧪 Testing all available models...")
             test_all_models(x_train, y_train, x_val, y_val, debug=args.debug)
             
-        elif args.train:
-            # Train specific models
-            train_specific_models(args.train, debug=args.debug)
+        elif getattr(args, 'train', None) is not None:
+            # TRAIN SPECIFIC MODELS MODE
+            models_to_train = args.train
+            print(f"🚀 Training specific models: {models_to_train}")
+            results = train_specific_models(models_to_train, debug=args.debug)
             
-        elif args.train_all:
-            # Train all available models
-            train_specific_models(params.AVAILABLE_MODELS, debug=args.debug)
+            # Print summary
+            successful_models = {k: v for k, v in results.items() if 'error' not in v}
+            if successful_models:
+                print(f"\n🏁 Successfully trained {len(successful_models)} models")
+                for model_name, metrics in successful_models.items():
+                    print(f"   {model_name}: {metrics.get('keras_test_accuracy', 0):.4f}")
             
+        elif getattr(args, 'train_all', False):
+            # TRAIN ALL MODELS MODE
+            print(f"🚀 Training all available models: {params.AVAILABLE_MODELS}")
+            results = train_specific_models(params.AVAILABLE_MODELS, debug=args.debug)
+            
+            # Print summary
+            successful_models = {k: v for k, v in results.items() if 'error' not in v}
+            if successful_models:
+                print(f"\n🏁 Successfully trained {len(successful_models)} models")
+                sorted_results = sorted(successful_models.items(), 
+                                      key=lambda x: x[1].get('keras_test_accuracy', 0), 
+                                      reverse=True)
+                for i, (model_name, metrics) in enumerate(sorted_results, 1):
+                    print(f"   {i}. {model_name}: {metrics.get('keras_test_accuracy', 0):.4f}")
+        
         else:
-            # Normal single model training
+            # NORMAL SINGLE MODEL TRAINING MODE
+            print(f"🚀 Training single model: {params.MODEL_ARCHITECTURE}")
             model, history, output_dir = train_model(debug=args.debug)
             print(f"\n✅ Training completed successfully!")
             print(f"📁 Output directory: {output_dir}")
+            
+            # Display final results
+            if hasattr(history, 'history') and history.history:
+                final_val_acc = history.history['val_accuracy'][-1] if 'val_accuracy' in history.history else 0
+                final_train_acc = history.history['accuracy'][-1] if 'accuracy' in history.history else 0
+                print(f"📊 Final metrics - Train: {final_train_acc:.4f}, Val: {final_val_acc:.4f}")
         
     except KeyboardInterrupt:
-        print("\n⚠️  Training interrupted by user")
+        print("\n⚠️  Operation interrupted by user")
+        
     except Exception as e:
-        print(f"\n❌ Training failed: {e}")
+        print(f"\n❌ Operation failed: {e}")
         if args.debug:
             import traceback
             traceback.print_exc()
+        
+        # Provide helpful error information
+        if "CUDA" in str(e) or "GPU" in str(e):
+            print("\n💡 GPU-related error detected. Try:")
+            print("   - Setting USE_GPU = False in parameters.py")
+            print("   - Checking CUDA/cuDNN installation")
+            print("   - Reducing batch size")
+        
+        elif "memory" in str(e).lower():
+            print("\n💡 Memory error detected. Try:")
+            print("   - Reducing batch size")
+            print("   - Setting GPU_MEMORY_LIMIT in parameters.py")
+            print("   - Using a smaller model architecture")
+        
+        elif "shape" in str(e).lower():
+            print("\n💡 Shape mismatch error. Check:")
+            print("   - Input shape in parameters.py matches your data")
+            print("   - Model architecture compatibility")
+            print("   - Data preprocessing steps")
+    
+    finally:
+        # Cleanup and final message
+        print("\n" + "="*60)
+        print("🏁 Program finished")
+        print("="*60)
 
 if __name__ == "__main__":
     main()
