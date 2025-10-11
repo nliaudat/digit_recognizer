@@ -22,6 +22,7 @@ except ImportError:
     QAT_AVAILABLE = False
 
 def parse_arguments():
+    """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='Digit Recognition Training')
     parser.add_argument('--debug', action='store_true', 
                        help='Enable TensorFlow debug logs and verbose output')
@@ -31,37 +32,49 @@ def parse_arguments():
                        help='Train specific model architectures from AVAILABLE_MODELS')      
     parser.add_argument('--use_tuner', action='store_true',
                        help='Enable hyperparameter tuning before training')
-                       
-    # parser.add_argument('--train_all', action='store_true',
-                       # help='Train all available model architectures sequentially')
-    # parser.add_argument('--use_tuner', action='store_true',
-                       # help='Enable hyperparameter tuning before training')
-    # parser.add_argument('--advanced', action='store_true',
-                       # help='Enable advanced training features')
-    # parser.add_argument('--num_trials', type=int, default=5,
-                       # help='Number of tuning trials (default: 5)')
+    parser.add_argument('--train_all', action='store_true',
+                       help='Train all available model architectures sequentially')
+    parser.add_argument('--advanced', action='store_true',
+                       help='Enable advanced training features')
+    parser.add_argument('--num_trials', type=int, default=5,
+                       help='Number of tuning trials (default: 5)')
     return parser.parse_args()
     
 def set_all_seeds(seed=params.SHUFFLE_SEED):
     """Set all random seeds for complete reproducibility"""
+    # Python built-in random
     import random
     random.seed(seed)
+    
+    # NumPy
     np.random.seed(seed)
+    
+    # TensorFlow
     tf.random.set_seed(seed)
+    
+    # Set environment variables for CUDA (if using GPU)
     os.environ['PYTHONHASHSEED'] = str(seed)
     os.environ['TF_DETERMINISTIC_OPS'] = '1'
     os.environ['TF_CUDNN_DETERMINISTIC'] = '1'
+    
+    # Configure TensorFlow for deterministic operations
     tf.config.experimental.enable_op_determinism()
 
+# Set TensorFlow logging level based on debug flag
 def setup_tensorflow_logging(debug=False):
+    """Configure TensorFlow logging verbosity"""
     if debug:
+        # Enable all TensorFlow logs
         tf.get_logger().setLevel('INFO')
         tf.autograph.set_verbosity(3)
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
     else:
+        # Suppress TensorFlow info and warning messages
         tf.get_logger().setLevel('ERROR')
         tf.autograph.set_verbosity(0)
+        # Also suppress other noisy libraries
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+        # Suppress absl logging
         import absl.logging
         absl.logging.set_verbosity(absl.logging.ERROR)
 
@@ -69,17 +82,25 @@ def setup_tensorflow_logging(debug=False):
 def suppress_all_output(debug=False):
     """Completely suppress all output during TFLite conversion"""
     if debug:
+        # Don't suppress anything in debug mode
         yield
         return
     
+    # Redirect all possible output streams
     original_stdout = sys.stdout
     original_stderr = sys.stderr
     
+    # Open null devices for stdout and stderr
     with open(os.devnull, 'w') as fnull:
         sys.stdout = fnull
         sys.stderr = fnull
         
+        # Also suppress C-level stdout/stderr
+        original_stdout_fd = None
+        original_stderr_fd = None
+        
         try:
+            # For Unix-like systems
             if hasattr(sys, '__stdout__'):
                 original_stdout_fd = os.dup(sys.__stdout__.fileno())
                 original_stderr_fd = os.dup(sys.__stderr__.fileno())
@@ -89,17 +110,22 @@ def suppress_all_output(debug=False):
                 os.dup2(devnull_fd, sys.__stderr__.fileno())
                 os.close(devnull_fd)
         except (AttributeError, OSError):
+            # Fallback for Windows or if above fails
             pass
         
+        # Suppress all Python logging
         logging.disable(logging.CRITICAL)
         
         try:
             yield
         finally:
+            # Restore everything
             logging.disable(logging.NOTSET)
+            
             sys.stdout = original_stdout
             sys.stderr = original_stderr
             
+            # Restore C-level stdout/stderr
             try:
                 if original_stdout_fd is not None and original_stderr_fd is not None:
                     os.dup2(original_stdout_fd, sys.__stdout__.fileno())
@@ -502,7 +528,6 @@ class TQDMProgressBar(tf.keras.callbacks.Callback):
             self.pbar.close()
 ### end class TQDMProgressBa           
             
-
 def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False):
     """Create training callbacks with robust CSV logging"""
     
@@ -610,7 +635,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     
     return callbacks
 
-def create_qat_representative_dataset(x_train, num_samples=100):
+def create_qat_representative_dataset(x_train, num_samples=params.QUANTIZE_NUM_SAMPLES):
     """Create representative dataset for QAT model conversion"""
     def representative_dataset():
         # Use actual training data for better calibration
@@ -741,31 +766,44 @@ def train_model(debug=False):
     
     print(f"✅ Preprocessing complete - range: [{x_train.min():.3f}, {x_train.max():.3f}]")
     
-    if params.MODEL_ARCHITECTURE != "original_haverland":
+    # FIXED: Consistent label handling for original_haverland model
+    if params.MODEL_ARCHITECTURE == "original_haverland":
+        # Convert labels to categorical for Haverland model
+        print("🔧 Converting labels to categorical format for Haverland model...")
         y_train = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
         y_val = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES) 
         y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+    else:
+        # For other models, use sparse categorical crossentropy
+        print("🔧 Using sparse categorical labels for other models...")
+        # Keep y_train, y_val, y_test as sparse labels
     
     representative_data = create_qat_representative_dataset(x_train)
     
     use_qat = params.QUANTIZE_MODEL and getattr(params, 'USE_QAT', False) and QAT_AVAILABLE
     
+    # FIXED: Pass the correct loss type to compile_model based on model architecture
     if use_qat:
         if strategy:
             with strategy.scope():
                 model = create_qat_model()
-                model = compile_model(model)
+                # Pass loss_type to compile_model
+                loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'
+                model = compile_model(model, loss_type=loss_type)
         else:
             model = create_qat_model()
-            model = compile_model(model)
+            loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'
+            model = compile_model(model, loss_type=loss_type)
     else:
         if strategy:
             with strategy.scope():
                 model = create_model()
-                model = compile_model(model)
+                loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'
+                model = compile_model(model, loss_type=loss_type)
         else:
             model = create_model()
-            model = compile_model(model)
+            loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'
+            model = compile_model(model, loss_type=loss_type)
     
     print("🔧 Building model with explicit input shape...")
     model.build(input_shape=(None,) + params.INPUT_SHAPE)
@@ -785,6 +823,7 @@ def train_model(debug=False):
     monitor.set_model(model)
     
     print_training_summary(model, x_train, x_val, x_test, debug)
+    # FIXED: Remove debug parameter from model_summary call
     model_summary(model)
     
     callbacks = create_callbacks(training_dir, tflite_manager, representative_data, params.EPOCHS, monitor, debug)
@@ -1090,6 +1129,86 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
     
     return results
 
+def train_specific_models(models_to_train, debug=False):
+    """Train specific model architectures with full training"""
+    original_model = params.MODEL_ARCHITECTURE
+    results = {}
+    
+    print(f"\n🚀 TRAINING {len(models_to_train)} MODELS")
+    print("=" * 60)
+    
+    for model_name in models_to_train:
+        print(f"\n🎯 Training: {model_name}")
+        print("=" * 50)
+        
+        # Set current model
+        params.MODEL_ARCHITECTURE = model_name
+        
+        try:
+            # Train model with full configuration
+            model, history, output_dir = train_model(debug=debug)
+            
+            # Extract results
+            from analyse import evaluate_tflite_model
+            quantized_tflite_path = os.path.join(output_dir, params.TFLITE_FILENAME)
+            
+            # Load test data for evaluation
+            (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
+            x_test = preprocess_images(x_test)
+            
+            if model_name == "original_haverland":
+                y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+            
+            # Evaluate models
+            keras_test_accuracy = model.evaluate(x_test, y_test, verbose=0)[1]
+            
+            tflite_accuracy = 0.0
+            if os.path.exists(quantized_tflite_path):
+                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test)
+            
+            results[model_name] = {
+                'keras_test_accuracy': keras_test_accuracy,
+                'tflite_accuracy': tflite_accuracy,
+                'output_dir': output_dir,
+                'params': model.count_params(),
+                'model': model
+            }
+            
+            print(f"✅ {model_name} completed:")
+            print(f"   Keras Test Accuracy: {keras_test_accuracy:.4f}")
+            print(f"   TFLite Accuracy: {tflite_accuracy:.4f}")
+            print(f"   Output: {output_dir}")
+            
+        except Exception as e:
+            print(f"❌ {model_name} training failed: {e}")
+            if debug:
+                import traceback
+                traceback.print_exc()
+            results[model_name] = {
+                'keras_test_accuracy': 0.0,
+                'tflite_accuracy': 0.0,
+                'error': str(e)
+            }
+    
+    # Restore original model
+    params.MODEL_ARCHITECTURE = original_model
+    
+    # Print summary
+    print("\n" + "="*60)
+    print("🏁 ALL MODELS TRAINING COMPLETED")
+    print("="*60)
+    
+    successful_models = {k: v for k, v in results.items() if 'error' not in v}
+    if successful_models:
+        sorted_results = sorted(successful_models.items(), 
+                              key=lambda x: x[1]['keras_test_accuracy'], 
+                              reverse=True)
+        
+        print("📊 FINAL RANKINGS:")
+        for i, (model_name, metrics) in enumerate(sorted_results, 1):
+            print(f"{i:2d}. {model_name:35} -> Keras: {metrics['keras_test_accuracy']:.4f} | TFLite: {metrics['tflite_accuracy']:.4f} | Params: {metrics['params']:,}")
+    
+    return results
 
 def main():
     """Main entry point"""

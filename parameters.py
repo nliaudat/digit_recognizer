@@ -1,5 +1,6 @@
 """
 Global parameters for Digit Recognition
+Comprehensive hyperparameter configuration for neural network training
 """
 
 import tensorflow as tf
@@ -25,15 +26,94 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v1",
 ]
 
-MODEL_ARCHITECTURE = "mnist_quantization"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
+MODEL_ARCHITECTURE = "esp_ultra_light"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
+
+
+# ==============================================================================
+# INPUT IMAGES 
+# ==============================================================================
+
+# Image Parameters
+INPUT_WIDTH = 20
+INPUT_HEIGHT = 32
+INPUT_CHANNELS = 1  # 1 for grayscale, 3 for RGB
+INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
+USE_GRAYSCALE = (INPUT_CHANNELS == 1) 
+
+
+
+# ==============================================================================
+# DATA SOURCES
+# ==============================================================================
+
+# Multiple Data Sources Configuration
+DATA_SOURCES = [
+    {
+        'name': 'meterdigits',
+        'type': 'folder_structure',
+        'path': 'datasets/meterdigits',
+        'weight': 1.0,
+    },
+    # {
+    #     'name': 'meterdigits_augmented',
+    #     'type': 'folder_structure',
+    #     'path': 'datasets/meterdigits_augmented',
+    #     'weight': 0.3,
+    # },
+    # {
+    #     'name': 'MNIST',
+    #     'type': 'folder_structure',
+    #     'path': 'mnist_dataset_folders',
+    #     'weight': 0.2,
+    # },
+    # {
+    #     'name': 'QMNIST',
+    #     'type': 'folder_structure',
+    #     'path': 'qmnist_dataset_folders',
+    #     'weight': 0.3,
+    # },
+    # {
+    #     'name': 'MR-AMR Dataset',
+    #     'type': 'folder_structure',
+    #     'path': 'MR-AMR Dataset',
+    #     'weight': 0.15,
+    # },
+]
+
+# ==============================================================================
+# MODEL GENERAL PARAMETERS
+# ==============================================================================
+
+# TFLite Conversion Parameters
+QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
+# ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
+ESP_DL_QUANTIZE = True  # Quantize to int8 range [-128, 127] for ESP-DL
+                         # If False: quantize to uint8 range [0, 255] (default)
+                         
+# Quantization Aware Training
+USE_QAT = True  # Enable Quantization Aware Training
+QAT_QUANTIZE_ALL = True  # Quantize all layers
+QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
+
+# File Paths
+MODEL_FILENAME = MODEL_ARCHITECTURE
+OUTPUT_DIR = "exported_models"
+QUANTIZE_NUM_SAMPLES = 1000
+TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
+FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
+
+# Debug and Logging
+VERBOSE = 1
+SAVE_TRAINING_PLOTS = True
+SHUFFLE_SEED = 42
+
+
 
 # ==============================================================================
 # MODEL-SPECIFIC PARAMETERS
 # ==============================================================================
 
 # For practical_tiny_depthwise
-# DEPTHWISE_FILTERS = [16, 32]
-# POINTWISE_FILTERS = [16, 32]
 DEPTHWISE_FILTERS = [32, 64]
 POINTWISE_FILTERS = [32, 64]
 
@@ -51,136 +131,162 @@ ORIGINAL_HAVERLAND_FILTERS = [32, 64, 128]  # Fixed values from notebook
 ORIGINAL_HAVERLAND_DENSE_UNITS = 512        # Fixed value from notebook
 ORIGINAL_HAVERLAND_DROPOUT_RATES = [0.25, 0.25, 0.25, 0.5]  # Fixed from notebook
 
+
 # ==============================================================================
-# INPUT IMAGES 
+# OPTIMIZER HYPERPARAMETERS
 # ==============================================================================
 
-# Image Parameters
-INPUT_WIDTH = 20
-INPUT_HEIGHT = 32
-INPUT_CHANNELS =1  # 1 for grayscale, 3 for RGB
-INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
-USE_GRAYSCALE = (INPUT_CHANNELS == 1) 
+# Optimizer Selection
+OPTIMIZER_TYPE = "rmsprop"  # Options: "rmsprop", "adam", "sgd", "adagrad", "adamw"
 
-# Training Parameters
+# RMSprop Hyperparameters
+RMSPROP_RHO = 0.9
+RMSPROP_MOMENTUM = 0.0
+RMSPROP_EPSILON = 1e-07
+
+# Adam Hyperparameters
+ADAM_BETA_1 = 0.9
+ADAM_BETA_2 = 0.999
+ADAM_EPSILON = 1e-07
+ADAM_AMSGRAD = False
+
+# SGD Hyperparameters  
+SGD_MOMENTUM = 0.9
+SGD_NESTEROV = True
+
+# AdaGrad Hyperparameters
+ADAGRAD_INITIAL_ACCUMULATOR = 0.1
+ADAGRAD_EPSILON = 1e-07
+
+# AdamW Hyperparameters (Adam with Weight Decay)
+ADAMW_WEIGHT_DECAY = 0.01
+ADAMW_BETA_1 = 0.9
+ADAMW_BETA_2 = 0.999
+ADAMW_EPSILON = 1e-07
+
+# ==============================================================================
+# LOSS FUNCTION HYPERPARAMETERS
+# ==============================================================================
+
+LOSS_TYPE = "sparse_categorical_crossentropy"  # Options: "sparse_categorical_crossentropy", "categorical_crossentropy"
+LABEL_SMOOTHING = 0.0  # Apply label smoothing if > 0
+
+# ==============================================================================
+# TRAINING HYPERPARAMETERS
+# ==============================================================================
+
+# Basic Training Parameters
 BATCH_SIZE = 32
 EPOCHS = 200
 LEARNING_RATE = 0.001
 TRAINING_PERCENTAGE = 1.0  # Use 100% of available data
 VALIDATION_SPLIT = 0.2     # 20% of training for validation
 
-USE_EARLY_STOPPING = True  # Set to False to disable early stopping completely
-EARLY_STOPPING_PATIENCE = 30  # Number of epochs with no improvement after which training will be stopped
-EARLY_STOPPING_MONITOR = 'val_accuracy'  # Metric to monitor: 'val_loss', 'val_accuracy
-EARLY_STOPPING_MIN_DELTA = 0.0001  # Minimum change to qualify as an improvement
-RESTORE_BEST_WEIGHTS = True  # Whether to restore weights from the best epoch
-
-# Learning rate scheduler configuration
-LR_SCHEDULER_PATIENCE = 3  # Number of epochs with no improvement after which learning rate will be reduced
-LR_SCHEDULER_MIN_LR = 1e-7  # Lower bound on the learning rate
-LR_SCHEDULER_FACTOR = 0.5   # Factor by which the learning rate will be reduced (new LR = old LR * factor)
-LR_SCHEDULER_MONITOR = 'val_loss'  # Metric to monitor for learning rate reduction
-
 # Model Parameters
 NB_CLASSES = 10  # [0-9]
 
+# ==============================================================================
+# LEARNING RATE SCHEDULING
+# ==============================================================================
 
-# Model Architecture Parameters
-DEPTHWISE_FILTERS_1 = 6
-POINTWISE_FILTERS_1 = 8
-DEPTHWISE_FILTERS_2 = 8
-POINTWISE_FILTERS_2 = 10
+# Learning Rate Scheduler
+USE_LEARNING_RATE_SCHEDULER = True
+LR_SCHEDULER_TYPE = "reduce_on_plateau"  # Options: "reduce_on_plateau", "exponential", "cosine", "step"
+
+# ReduceLROnPlateau Parameters
+LR_SCHEDULER_PATIENCE = 3
+LR_SCHEDULER_MIN_LR = 1e-7
+LR_SCHEDULER_FACTOR = 0.5
+LR_SCHEDULER_MONITOR = 'val_loss'
+
+# Exponential Decay Parameters
+EXPONENTIAL_DECAY_STEPS = 1000
+EXPONENTIAL_DECAY_RATE = 0.96
+
+# Cosine Decay Parameters
+COSINE_DECAY_ALPHA = 0.0  # Minimum learning rate as fraction of initial
+
+# Step Decay Parameters
+STEP_DECAY_STEP_SIZE = 10
+STEP_DECAY_GAMMA = 0.1
+
+# ==============================================================================
+# REGULARIZATION HYPERPARAMETERS
+# ==============================================================================
+
+# L1/L2 Regularization
+L1_REGULARIZATION = 0.0  # L1 regularization factor
+L2_REGULARIZATION = 0.0  # L2 regularization factor
+
+# Dropout Rates (can be overridden by model-specific parameters)
+DEFAULT_DROPOUT_RATE = 0.5
+
+# Batch Normalization
+USE_BATCH_NORM = True
+BATCH_NORM_MOMENTUM = 0.99
+BATCH_NORM_EPSILON = 0.001
+
+# ==============================================================================
+# GRADIENT & TRAINING HYPERPARAMETERS
+# ==============================================================================
+
+# Gradient Clipping
+USE_GRADIENT_CLIPPING = False
+GRADIENT_CLIP_VALUE = 1.0  # Clip by value
+GRADIENT_CLIP_NORM = 1.0   # Clip by norm
+
+# Weight Initialization
+WEIGHT_INITIALIZER = "he_normal"  # Options: "glorot_uniform", "he_normal", "he_uniform", "lecun_normal"
+
+# ==============================================================================
+# CALLBACK HYPERPARAMETERS
+# ==============================================================================
+
+# Early Stopping
+USE_EARLY_STOPPING = True
+EARLY_STOPPING_PATIENCE = 30
+EARLY_STOPPING_MONITOR = 'val_accuracy'
+EARLY_STOPPING_MIN_DELTA = 0.0001
+RESTORE_BEST_WEIGHTS = True
+
+# Model Checkpoint
+SAVE_CHECKPOINTS = True
+CHECKPOINT_FREQUENCY = 5
+SAVE_BEST_ONLY = False
+CHECKPOINT_MONITOR = 'val_accuracy'
+
+# TensorBoard
+USE_TENSORBOARD = True
+TENSORBOARD_UPDATE_FREQ = 'epoch'
+TENSORBOARD_WRITE_GRAPHS = True
+
+# ==============================================================================
+# DATA AUGMENTATION HYPERPARAMETERS
+# ==============================================================================
+
+USE_DATA_AUGMENTATION = True
+AUGMENTATION_ROTATION_RANGE = 10
+AUGMENTATION_WIDTH_SHIFT_RANGE = 0.1
+AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.1
+AUGMENTATION_ZOOM_RANGE = 0.1
+AUGMENTATION_BRIGHTNESS_RANGE = [0.9, 1.1]
+AUGMENTATION_HORIZONTAL_FLIP = False  # Usually False for digits
+AUGMENTATION_VERTICAL_FLIP = False    # Usually False for digits
 
 # ==============================================================================
 # GPU CONFIGURATION
 # ==============================================================================
-USE_GPU = False  # Set to False to force CPU usage (tensorflow cannot use gpu since version xxx)
+
+USE_GPU = False  # Set to False to force CPU usage
 GPU_MEMORY_GROWTH = True  # Gradually allocate GPU memory instead of all at once
 GPU_MEMORY_LIMIT = None  # Set specific memory limit in MB, or None for no limit
 
-# Checkpoint settings
-SAVE_CHECKPOINTS = True
-CHECKPOINT_FREQUENCY = 5  # Save every 5 epochs
-SAVE_BEST_ONLY = False    # Save checkpoints regardless of accuracy improvement
 
-# ==============================================================================
-# DATA SOURCES
-# ==============================================================================
-
-# Multiple Data Sources Configuration
-DATA_SOURCES = [
-    {
-        'name': 'meterdigits',
-        'type': 'folder_structure',
-        'path': 'datasets/meterdigits',
-        'weight': 1.0,
-    },
-    # {
-        # 'name': 'meterdigits_augmented',
-        # 'type': 'folder_structure',
-        # 'path': 'datasets/meterdigits_augmented',
-        # 'weight': 0.3,
-    # },
-    # {
-        # 'name': 'MNIST',
-        # 'type': 'folder_structure',
-        # 'path': 'mnist_dataset_folders',
-        # 'weight': 0.2,
-    # },
-    # {
-        # 'name': 'QMNIST',
-        # 'type': 'folder_structure',
-        # 'path': 'qmnist_dataset_folders',
-        # 'weight': 0.3,
-    # },
-        # {
-        # 'name': 'MR-AMR Dataset',
-        # 'type': 'folder_structure',
-        # 'path': 'MR-AMR Dataset',
-        # 'weight': 0.15,
-    # },
-]
 
 
 # ==============================================================================
-# MODEL GENERAL PARAMETERS
+# ADVANCED TRAINING CONFIGURATION
 # ==============================================================================
-
-# TFLite Conversion Parameters
-QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
-# ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
-ESP_DL_QUANTIZE = True  # Quantize to int8 range [-128, 127] for ESP-DL
-                         # If False: quantize to uint8 range [0, 255] (default)
-                         
-# Quantization Aware Training
-USE_QAT = True  # Enable Quantization Aware Training
-QAT_QUANTIZE_ALL = True  # Quantize all layers
-QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
-                         
-# File Paths
-MODEL_FILENAME = MODEL_ARCHITECTURE
-OUTPUT_DIR = "exported_models"
-
-
-QUANTIZE_NUM_SAMPLES=1000
-TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
-FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
-
-# Debug and Logging
-VERBOSE = 1
-SAVE_TRAINING_PLOTS = True
-SHUFFLE_SEED = 42
-
-# ==============================================================================
-# MODEL TRAINING PARAMETERS
-# ==============================================================================
-
-# HYPERPARAMETER TUNING
-USE_KERAS_TUNER = True
-TUNER_PROJECT_NAME = "digit_recognizer_tuning"
-TUNER_MAX_TRIALS = 50
-TUNER_EXECUTIONS_PER_TRIAL = 2
-TUNER_OBJECTIVE = "val_accuracy"
 
 # TF.DATA CONFIGURATION
 USE_TF_DATA = True
@@ -194,7 +300,6 @@ USE_GRADIENT_ACCUMULATION = False
 ACCUMULATION_STEPS = 4
 
 # ADVANCED CALLBACKS
-USE_TENSORBOARD = True
 USE_LEARNING_RATE_FINDER = False
 USE_STOCHASTIC_WEIGHT_AVERAGING = False
 USE_CYCLICAL_LEARNING_RATE = False
@@ -203,50 +308,171 @@ USE_CYCLICAL_LEARNING_RATE = False
 USE_MODEL_ENSEMBLE = False
 ENSEMBLE_MODEL_COUNT = 3
 
-
 # ==============================================================================
-# MODEL TRAINING PARAMETERS
+# HYPERPARAMETER TUNING
 # ==============================================================================
 
+USE_KERAS_TUNER = True
+TUNER_PROJECT_NAME = "digit_recognizer_tuning"
+TUNER_MAX_TRIALS = 50
+TUNER_EXECUTIONS_PER_TRIAL = 2
+TUNER_OBJECTIVE = "val_accuracy"
 TUNER_NUM_TRIAL = 10
 
 # ==============================================================================
-# others
+# VALIDATION FUNCTIONS
 # ==============================================================================
 
-
-
-# ESP-DL specific parameters
-# ESP_DL_COMPATIBLE_OPS = [
-    # 'CONV_2D',
-    # 'DEPTHWISE_CONV_2D', 
-    # 'FULLY_CONNECTED',
-    # 'MAX_POOL_2D',
-    # 'RESHAPE',
-    # 'SOFTMAX',
-    # 'LOGISTIC',
-    # 'RELU'
-# ]
-
-
-# # ESP memory constraints
-# ESP32_FLASH_SIZE = 4096  # 4MB typical
-# ESP32_PSRAM_SIZE = 0     # No PSRAM on most boards
-# ESP32_RAM_SIZE = 320     # 320KB SRAM
-
-# # Target model size for ESP32
-# TARGET_MODEL_SIZE_KB = 100  # Aim for <100KB quantized
-
+def validate_hyperparameters():
+    """Validate all hyperparameters for consistency"""
+    # Optimizer validation
+    valid_optimizers = ["rmsprop", "adam", "sgd", "adagrad", "adamw"]
+    if OPTIMIZER_TYPE not in valid_optimizers:
+        raise ValueError(f"❌ Invalid OPTIMIZER_TYPE: {OPTIMIZER_TYPE}. Must be one of {valid_optimizers}")
+    
+    # Loss function validation
+    valid_losses = ["sparse_categorical_crossentropy", "categorical_crossentropy"]
+    if LOSS_TYPE not in valid_losses:
+        raise ValueError(f"❌ Invalid LOSS_TYPE: {LOSS_TYPE}. Must be one of {valid_losses}")
+    
+    # Learning rate scheduler validation
+    valid_schedulers = ["reduce_on_plateau", "exponential", "cosine", "step"]
+    if LR_SCHEDULER_TYPE not in valid_schedulers:
+        raise ValueError(f"❌ Invalid LR_SCHEDULER_TYPE: {LR_SCHEDULER_TYPE}. Must be one of {valid_schedulers}")
+    
+    # Weight initializer validation
+    valid_initializers = ["glorot_uniform", "he_normal", "he_uniform", "lecun_normal"]
+    if WEIGHT_INITIALIZER not in valid_initializers:
+        raise ValueError(f"❌ Invalid WEIGHT_INITIALIZER: {WEIGHT_INITIALIZER}. Must be one of {valid_initializers}")
+    
+    # Label smoothing validation
+    if not 0 <= LABEL_SMOOTHING <= 0.5:
+        raise ValueError(f"❌ Invalid LABEL_SMOOTHING: {LABEL_SMOOTHING}. Must be between 0 and 0.5")
+    
+    # Learning rate validation
+    if LEARNING_RATE <= 0:
+        raise ValueError(f"❌ Invalid LEARNING_RATE: {LEARNING_RATE}. Must be positive")
+    
+    print("✅ All hyperparameters validated successfully!")
 
 def validate_quantization_parameters():
     """Validate quantization parameters for consistency"""
-    if params.QUANTIZE_MODEL and not params.ESP_DL_QUANTIZE:
+    if QUANTIZE_MODEL and not ESP_DL_QUANTIZE:
         print("⚠️  Warning: Using UINT8 quantization. For ESP-DL, set ESP_DL_QUANTIZE = True")
     
-    if params.ESP_DL_QUANTIZE and not params.QUANTIZE_MODEL:
+    if ESP_DL_QUANTIZE and not QUANTIZE_MODEL:
         raise ValueError("❌ Error: ESP_DL_QUANTIZE requires QUANTIZE_MODEL = True")
     
     # Validate input normalization
-    if params.ESP_DL_QUANTIZE:
+    if ESP_DL_QUANTIZE:
         print("💡 ESP-DL INT8 quantization: Inputs should be normalized to [-1, 1] range")
 
+def get_hyperparameter_summary():
+    """Return a comprehensive summary of all hyperparameter settings"""
+    summary = {
+        'model': {
+            'architecture': MODEL_ARCHITECTURE,
+            'input_shape': INPUT_SHAPE,
+            'num_classes': NB_CLASSES,
+        },
+        'optimizer': {
+            'type': OPTIMIZER_TYPE,
+            'learning_rate': LEARNING_RATE,
+        },
+        'loss': {
+            'type': LOSS_TYPE,
+            'label_smoothing': LABEL_SMOOTHING,
+        },
+        'training': {
+            'batch_size': BATCH_SIZE,
+            'epochs': EPOCHS,
+            'validation_split': VALIDATION_SPLIT,
+            'training_percentage': TRAINING_PERCENTAGE,
+        },
+        'regularization': {
+            'l1': L1_REGULARIZATION,
+            'l2': L2_REGULARIZATION,
+            'dropout': DEFAULT_DROPOUT_RATE,
+            'batch_norm': USE_BATCH_NORM,
+            'gradient_clipping': USE_GRADIENT_CLIPPING,
+        },
+        'callbacks': {
+            'early_stopping': USE_EARLY_STOPPING,
+            'checkpoints': SAVE_CHECKPOINTS,
+            'lr_scheduler': USE_LEARNING_RATE_SCHEDULER,
+            'tensorboard': USE_TENSORBOARD,
+        },
+        'data': {
+            'augmentation': USE_DATA_AUGMENTATION,
+            'sources': [source['name'] for source in DATA_SOURCES],
+        },
+        'quantization': {
+            'qat': USE_QAT,
+            'post_training': QUANTIZE_MODEL,
+            'esp_dl': ESP_DL_QUANTIZE,
+        }
+    }
+    
+    # Add optimizer-specific parameters
+    if OPTIMIZER_TYPE == "rmsprop":
+        summary['optimizer'].update({
+            'rho': RMSPROP_RHO,
+            'momentum': RMSPROP_MOMENTUM,
+            'epsilon': RMSPROP_EPSILON
+        })
+    elif OPTIMIZER_TYPE == "adam":
+        summary['optimizer'].update({
+            'beta_1': ADAM_BETA_1,
+            'beta_2': ADAM_BETA_2,
+            'epsilon': ADAM_EPSILON,
+            'amsgrad': ADAM_AMSGRAD
+        })
+    elif OPTIMIZER_TYPE == "sgd":
+        summary['optimizer'].update({
+            'momentum': SGD_MOMENTUM,
+            'nesterov': SGD_NESTEROV
+        })
+    
+    # Add learning rate scheduler details
+    if USE_LEARNING_RATE_SCHEDULER:
+        summary['callbacks']['lr_scheduler_type'] = LR_SCHEDULER_TYPE
+        summary['callbacks']['lr_scheduler_patience'] = LR_SCHEDULER_PATIENCE
+        summary['callbacks']['lr_scheduler_factor'] = LR_SCHEDULER_FACTOR
+    
+    return summary
+
+def print_hyperparameter_summary():
+    """Print a formatted summary of all hyperparameters"""
+    summary = get_hyperparameter_summary()
+    
+    print("=" * 60)
+    print("📊 HYPERPARAMETER CONFIGURATION SUMMARY")
+    print("=" * 60)
+    
+    for category, settings in summary.items():
+        print(f"\n{category.upper()}:")
+
+        for key, value in settings.items():
+            if isinstance(value, dict):
+                print(f"  {key}:")
+                for sub_key, sub_value in value.items():
+                    print(f"    {sub_key}: {sub_value}")
+            else:
+                print(f"  {key}: {value}")
+    
+    print("\n" + "=" * 60)
+
+# ==============================================================================
+# INITIALIZATION
+# ==============================================================================
+
+# Validate parameters on import
+try:
+    validate_hyperparameters()
+    validate_quantization_parameters()
+except Exception as e:
+    print(f"❌ Parameter validation failed: {e}")
+
+# Print summary when module is imported
+if __name__ != "__main__":
+    print_hyperparameter_summary()
