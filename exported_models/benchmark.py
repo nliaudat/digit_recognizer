@@ -34,8 +34,9 @@ def estimate_tensor_arena_size(tflite_model_path):
         # Get tensor details to calculate memory requirements
         tensor_details = interpreter.get_tensor_details()
         
-        # Calculate total tensor memory
+        # Calculate total tensor memory and parameters
         total_tensor_memory = 0
+        total_parameters = 0
         input_tensors = []
         output_tensors = []
         intermediate_tensors = []
@@ -44,6 +45,10 @@ def estimate_tensor_arena_size(tflite_model_path):
             tensor_size = 1
             for dim in tensor['shape']:
                 tensor_size *= dim
+            
+            # Count parameters for weight tensors (typically constant tensors)
+            if tensor['name'] and ('weight' in tensor['name'].lower() or 'kernel' in tensor['name'].lower()):
+                total_parameters += tensor_size
             
             # Estimate bytes based on dtype
             dtype_size = 4  # Default to 4 bytes (float32, int32)
@@ -57,17 +62,25 @@ def estimate_tensor_arena_size(tflite_model_path):
             tensor_memory = tensor_size * dtype_size
             
             # Categorize tensors
-            if tensor['index'] in interpreter.get_input_details()[0]['index']:
+            if tensor['index'] in [inp['index'] for inp in interpreter.get_input_details()]:
                 input_tensors.append((tensor['name'], tensor_memory))
-            elif tensor['index'] in interpreter.get_output_details()[0]['index']:
+            elif tensor['index'] in [out['index'] for out in interpreter.get_output_details()]:
                 output_tensors.append((tensor['name'], tensor_memory))
             else:
                 intermediate_tensors.append((tensor['name'], tensor_memory))
+                # Also count parameters from constant tensors (weights)
+                if tensor['name'] and tensor['name'] != '':
+                    total_parameters += tensor_size
             
             total_tensor_memory += tensor_memory
         
+        # If we couldn't find parameters through naming, estimate from model size
+        if total_parameters == 0:
+            model_size_bytes = os.path.getsize(tflite_model_path)
+            # Rough estimate: assume 4 bytes per parameter for float32
+            total_parameters = int(model_size_bytes / 4)
+        
         # Estimate tensor arena size (total memory + overhead)
-        # TFLite typically requires 2x total tensor memory for arena
         estimated_arena_size = total_tensor_memory * 2
         
         # Add some safety margin
@@ -77,6 +90,7 @@ def estimate_tensor_arena_size(tflite_model_path):
             'estimated_arena_bytes': int(estimated_arena_size_with_margin),
             'estimated_arena_kb': estimated_arena_size_with_margin / 1024,
             'total_tensor_memory_bytes': total_tensor_memory,
+            'total_parameters': total_parameters,
             'input_tensors': input_tensors,
             'output_tensors': output_tensors,
             'intermediate_tensors': intermediate_tensors,
@@ -86,13 +100,15 @@ def estimate_tensor_arena_size(tflite_model_path):
     except ImportError:
         # Fallback: estimate from model file size
         model_size_bytes = os.path.getsize(tflite_model_path)
-        # Rough estimation: tensor arena ~ 3x model size
+        # Rough estimation: tensor arena ~ 3x model size, parameters ~ model_size/4
         estimated_arena_bytes = model_size_bytes * 3
+        total_parameters = int(model_size_bytes / 4)  # Estimate parameters
         
         return {
             'estimated_arena_bytes': int(estimated_arena_bytes),
             'estimated_arena_kb': estimated_arena_bytes / 1024,
             'total_tensor_memory_bytes': model_size_bytes,
+            'total_parameters': total_parameters,
             'input_tensors': [],
             'output_tensors': [],
             'intermediate_tensors': [],
@@ -103,7 +119,7 @@ def estimate_tensor_arena_size(tflite_model_path):
         print(f"❌ Error estimating tensor arena for {tflite_model_path}: {e}")
         return None
 
-def estimate_cpu_ops(tflite_model_path):
+def estimate_cpu_ops(tflite_model_path, total_parameters):
     """Estimate CPU operations required for one inference"""
     try:
         import tflite_runtime.interpreter as tflite
@@ -112,23 +128,16 @@ def estimate_cpu_ops(tflite_model_path):
         interpreter.allocate_tensors()
         
         tensor_details = interpreter.get_tensor_details()
-        op_count = len(interpreter._get_ops_details()) if hasattr(interpreter, '_get_ops_details') else 0
         
-        # Estimate operations based on tensor sizes and layers
-        total_ops = 0
-        total_params = 0
+        # Try to get operation details
+        try:
+            op_count = len(interpreter._get_ops_details()) if hasattr(interpreter, '_get_ops_details') else 0
+        except:
+            op_count = 0
         
-        for tensor in tensor_details:
-            # Count parameters (weights)
-            if tensor['shape'] and len(tensor['shape']) > 0:
-                tensor_params = 1
-                for dim in tensor['shape']:
-                    tensor_params *= dim
-                total_params += tensor_params
-        
-        # Rough operation estimation:
+        # Estimate operations based on parameters and model structure
         # For neural networks, ops ≈ 2 * parameters (MAC operations)
-        estimated_ops = total_params * 2
+        estimated_ops = total_parameters * 2
         
         # Alternative estimation based on model complexity
         model_size_kb = os.path.getsize(tflite_model_path) / 1024
@@ -137,7 +146,7 @@ def estimate_cpu_ops(tflite_model_path):
         return {
             'estimated_ops': int(estimated_ops),
             'estimated_ops_millions': estimated_ops / 1e6,
-            'total_parameters': total_params,
+            'total_parameters': total_parameters,
             'operation_count': op_count,
             'tensor_count': len(tensor_details),
             'model_size_kb': model_size_kb,
@@ -148,30 +157,32 @@ def estimate_cpu_ops(tflite_model_path):
     except Exception as e:
         print(f"❌ Error estimating CPU OPS for {tflite_model_path}: {e}")
         
-        # Fallback estimation from model size
+        # Fallback estimation from model size and parameters
         model_size_kb = os.path.getsize(tflite_model_path) / 1024
-        estimated_ops = model_size_kb * 1000  # Rough estimate
+        estimated_ops = total_parameters * 2 if total_parameters > 0 else model_size_kb * 1000
         
         return {
             'estimated_ops': int(estimated_ops),
             'estimated_ops_millions': estimated_ops / 1e6,
-            'total_parameters': 0,
+            'total_parameters': total_parameters,
             'operation_count': 0,
             'tensor_count': 0,
             'model_size_kb': model_size_kb,
             'ops_from_size': int(estimated_ops),
             'ops_from_size_millions': estimated_ops / 1e6,
-            'note': 'Estimated from model size (detailed analysis failed)'
+            'note': 'Estimated from model size and parameters (detailed analysis failed)'
         }
 
 def generate_tensor_arena_report(tflite_model_path, report_file_path):
     """Generate comprehensive tensor arena and OPS report"""
     try:
         arena_info = estimate_tensor_arena_size(tflite_model_path)
-        ops_info = estimate_cpu_ops(tflite_model_path)
         
         if arena_info is None:
             return None
+        
+        # Use the total_parameters from arena_info for OPS estimation
+        ops_info = estimate_cpu_ops(tflite_model_path, arena_info['total_parameters'])
         
         with open(report_file_path, 'w') as f:
             f.write(f"TFLite Model Analysis: {os.path.basename(tflite_model_path)}\n")
@@ -183,7 +194,8 @@ def generate_tensor_arena_report(tflite_model_path, report_file_path):
             f.write(f"Estimated Arena Size: {arena_info['estimated_arena_bytes']:,} bytes\n")
             f.write(f"Estimated Arena Size: {arena_info['estimated_arena_kb']:.2f} KB\n")
             f.write(f"Total Tensor Memory: {arena_info['total_tensor_memory_bytes']:,} bytes\n")
-            f.write(f"Total Tensors: {arena_info['total_tensors']}\n\n")
+            f.write(f"Total Tensors: {arena_info['total_tensors']}\n")
+            f.write(f"Total Parameters: {arena_info['total_parameters']:,}\n\n")
             
             if arena_info['input_tensors']:
                 f.write("Input Tensors:\n")
@@ -235,7 +247,7 @@ def generate_tensor_arena_report(tflite_model_path, report_file_path):
             'tensor_arena_kb': arena_info['estimated_arena_kb'],
             'cpu_ops': ops_info['estimated_ops'],
             'cpu_ops_millions': ops_info['estimated_ops_millions'],
-            'total_parameters': ops_info['total_parameters']
+            'total_parameters': arena_info['total_parameters']  # Use the one from arena_info
         }
         
     except Exception as e:
@@ -268,12 +280,12 @@ def update_training_results_with_metrics(training_dir):
                 if len(row) >= 2:
                     results[row[0]] = row[1]
         
-        # Update with new metrics
+        # Update with new metrics - MAKE SURE total_parameters is included
         results['tensor_arena_bytes'] = str(metrics['tensor_arena_bytes'])
         results['tensor_arena_kb'] = str(metrics['tensor_arena_kb'])
         results['cpu_ops'] = str(metrics['cpu_ops'])
         results['cpu_ops_millions'] = str(metrics['cpu_ops_millions'])
-        results['total_parameters'] = str(metrics['total_parameters'])
+        results['total_parameters'] = str(metrics['total_parameters'])  # This was missing!
         
         # Write back to file
         with open(results_file, 'w', newline='') as f:
@@ -313,6 +325,117 @@ def process_all_tflite_models(output_dir="./"):
     print(f"✅ Processed {len(metrics_data)} models")
     return metrics_data
 
+def plot_accuracy_vs_model_size(df, output_dir="./"):
+    """Create dedicated Accuracy vs Model Size plot with better colors"""
+    if df.empty or 'keras_test_accuracy' not in df.columns or 'quantized_model_size_kb' not in df.columns:
+        print("❌ Insufficient data for Accuracy vs Model Size plot")
+        return
+    
+    setup_plotting_style()
+    
+    # Convert to numeric
+    df['keras_test_accuracy'] = pd.to_numeric(df['keras_test_accuracy'], errors='coerce')
+    df['quantized_model_size_kb'] = pd.to_numeric(df['quantized_model_size_kb'], errors='coerce')
+    
+    # Remove rows with missing data
+    plot_df = df.dropna(subset=['keras_test_accuracy', 'quantized_model_size_kb']).copy()
+    
+    if plot_df.empty:
+        print("❌ No valid data for plotting")
+        return
+    
+    # Create the plot
+    plt.figure(figsize=(12, 8))
+    
+    # IMPROVED COLOR SCHEME - Use distinct colors with better contrast
+    if 'model_architecture' in plot_df.columns:
+        architectures = plot_df['model_architecture'].unique()
+        
+        # Use a color palette with better distinction
+        if len(architectures) <= 8:
+            colors = plt.cm.Set2(np.linspace(0, 1, len(architectures)))
+        elif len(architectures) <= 12:
+            colors = plt.cm.tab20(np.linspace(0, 1, len(architectures)))
+        else:
+            colors = plt.cm.rainbow(np.linspace(0, 1, len(architectures)))
+        
+        # Increase marker size and add borders for better visibility
+        markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h', 'H', '+', 'x', 'd']
+        
+        for i, arch in enumerate(architectures):
+            arch_data = plot_df[plot_df['model_architecture'] == arch]
+            marker = markers[i % len(markers)] if i < len(markers) else 'o'
+            
+            plt.scatter(arch_data['quantized_model_size_kb'], 
+                       arch_data['keras_test_accuracy'],
+                       c=[colors[i]], label=arch, s=150, alpha=0.8, 
+                       edgecolors='black', linewidth=1.5, marker=marker)
+    else:
+        # No architecture info - use single color with variation
+        plt.scatter(plot_df['quantized_model_size_kb'], plot_df['keras_test_accuracy'], 
+                   s=150, alpha=0.8, edgecolors='black', linewidth=1.5, 
+                   c='blue', cmap='viridis')
+    
+    plt.xlabel('Model Size (KB)', fontsize=12, fontweight='bold')
+    plt.ylabel('Test Accuracy', fontsize=12, fontweight='bold')
+    plt.title('Accuracy vs Model Size', fontsize=14, fontweight='bold')
+    
+    # Improve legend placement and appearance
+    if 'model_architecture' in plot_df.columns:
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
+                  frameon=True, fancybox=True, shadow=True, ncol=1)
+    
+    plt.grid(True, alpha=0.3)
+    
+    # Add Pareto frontier
+    try:
+        sorted_df = plot_df.sort_values('quantized_model_size_kb')
+        pareto_points = []
+        max_acc = -1
+        
+        for _, row in sorted_df.iterrows():
+            if row['keras_test_accuracy'] > max_acc:
+                pareto_points.append((row['quantized_model_size_kb'], row['keras_test_accuracy']))
+                max_acc = row['keras_test_accuracy']
+        
+        if len(pareto_points) > 1:
+            pareto_x, pareto_y = zip(*pareto_points)
+            plt.plot(pareto_x, pareto_y, 'r--', alpha=0.8, linewidth=3, 
+                    label='Pareto Frontier', markersize=8)
+    except Exception as e:
+        print(f"⚠️  Could not plot Pareto frontier: {e}")
+    
+    # Add annotations for best models with better styling
+    if len(plot_df) > 1:
+        best_accuracy_idx = plot_df['keras_test_accuracy'].idxmax()
+        best_accuracy = plot_df.loc[best_accuracy_idx]
+        smallest_model_idx = plot_df['quantized_model_size_kb'].idxmin()
+        smallest_model = plot_df.loc[smallest_model_idx]
+        
+        # Best accuracy annotation
+        plt.annotate(f"🏆 Best\n{best_accuracy['keras_test_accuracy']:.3f}", 
+                    xy=(best_accuracy['quantized_model_size_kb'], best_accuracy['keras_test_accuracy']),
+                    xytext=(15, 15), textcoords='offset points',
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='gold', alpha=0.8),
+                    arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0.2', color='red'),
+                    fontweight='bold', fontsize=9)
+        
+        # Smallest model annotation
+        plt.annotate(f"📦 Smallest\n{smallest_model['quantized_model_size_kb']:.1f}KB", 
+                    xy=(smallest_model['quantized_model_size_kb'], smallest_model['keras_test_accuracy']),
+                    xytext=(15, -25), textcoords='offset points',
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.8),
+                    arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=-0.2', color='blue'),
+                    fontweight='bold', fontsize=9)
+    
+    plt.tight_layout()
+    
+    # Save the dedicated plot
+    plot_path = os.path.join(output_dir, "accuracy_vs_model_size.png")
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    print(f"📊 Dedicated Accuracy vs Model Size plot saved: {plot_path}")
+    plt.close()
+
 def plot_tensor_arena_analysis(df, output_dir="./"):
     """Create dedicated tensor arena analysis plots"""
     if df.empty or 'tensor_arena_kb' not in df.columns:
@@ -342,14 +465,23 @@ def plot_tensor_arena_analysis(df, output_dir="./"):
     ax1 = axes[0, 0]
     if 'model_architecture' in plot_df.columns:
         architectures = plot_df['model_architecture'].unique()
-        colors = plt.cm.Set3(np.linspace(0, 1, len(architectures)))
+        
+        # Improved color scheme
+        if len(architectures) <= 8:
+            colors = plt.cm.Set2(np.linspace(0, 1, len(architectures)))
+        else:
+            colors = plt.cm.tab20(np.linspace(0, 1, len(architectures)))
+        
+        markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h']
         
         for i, arch in enumerate(architectures):
             arch_data = plot_df[plot_df['model_architecture'] == arch]
+            marker = markers[i % len(markers)] if i < len(markers) else 'o'
+            
             ax1.scatter(arch_data['tensor_arena_kb'], 
                        arch_data['keras_test_accuracy'],
                        c=[colors[i]], label=arch, s=100, alpha=0.7, 
-                       edgecolors='black', linewidth=0.5)
+                       edgecolors='black', linewidth=0.5, marker=marker)
     else:
         ax1.scatter(plot_df['tensor_arena_kb'], plot_df['keras_test_accuracy'], 
                    s=100, alpha=0.7, edgecolors='black', linewidth=0.5)
@@ -476,14 +608,23 @@ def plot_cpu_ops_analysis(df, output_dir="./"):
     ax1 = axes[0, 0]
     if 'model_architecture' in plot_df.columns:
         architectures = plot_df['model_architecture'].unique()
-        colors = plt.cm.Set3(np.linspace(0, 1, len(architectures)))
+        
+        # Improved color scheme
+        if len(architectures) <= 8:
+            colors = plt.cm.Set2(np.linspace(0, 1, len(architectures)))
+        else:
+            colors = plt.cm.tab20(np.linspace(0, 1, len(architectures)))
+        
+        markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h']
         
         for i, arch in enumerate(architectures):
             arch_data = plot_df[plot_df['model_architecture'] == arch]
+            marker = markers[i % len(markers)] if i < len(markers) else 'o'
+            
             ax1.scatter(arch_data['cpu_ops_millions'], 
                        arch_data['keras_test_accuracy'],
                        c=[colors[i]], label=arch, s=100, alpha=0.7, 
-                       edgecolors='black', linewidth=0.5)
+                       edgecolors='black', linewidth=0.5, marker=marker)
     else:
         ax1.scatter(plot_df['cpu_ops_millions'], plot_df['keras_test_accuracy'], 
                    s=100, alpha=0.7, edgecolors='black', linewidth=0.5)
@@ -564,20 +705,17 @@ def plot_cpu_ops_analysis(df, output_dir="./"):
     plt.close()
 
 def plot_model_efficiency(df, output_dir="./"):
-    """Create comprehensive model efficiency plots (updated with new metrics)"""
-    # [Keep the existing plot_model_efficiency function content, but ensure it uses the new metrics]
-    # This function remains largely the same but will benefit from the new data columns
-    
+    """Create comprehensive model efficiency plots"""
     if df.empty or 'keras_test_accuracy' not in df.columns or 'quantized_model_size_kb' not in df.columns:
         print("❌ Insufficient data for efficiency plots")
         return
     
     setup_plotting_style()
     
-    # Convert to numeric including new metrics
+    # Convert to numeric including new metrics - FIX: Ensure total_parameters is converted
     numeric_columns = ['keras_test_accuracy', 'tflite_test_accuracy', 
                       'quantized_model_size_kb', 'float_model_size_kb',
-                      'tensor_arena_kb', 'cpu_ops_millions', 'total_parameters']
+                      'tensor_arena_kb', 'cpu_ops_millions', 'total_parameters']  # Added total_parameters
     
     for col in numeric_columns:
         if col in df.columns:
@@ -600,13 +738,298 @@ def plot_model_efficiency(df, output_dir="./"):
     if 'cpu_ops_millions' in plot_df.columns:
         plot_df['compute_efficiency'] = plot_df['keras_test_accuracy'] / plot_df['cpu_ops_millions']
     
-    # [Rest of the existing plot_model_efficiency function...]
-    # Create subplots and plots as before, but now with additional data available
+    # Create subplots
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle('Model Efficiency Analysis', fontsize=16, fontweight='bold')
     
-    # After the main efficiency plots, create the new dedicated plots
+    # Plot 1: Accuracy vs Model Size (main efficiency plot) - WITH IMPROVED COLORS
+    ax1 = axes[0, 0]
+    if 'model_architecture' in plot_df.columns:
+        architectures = plot_df['model_architecture'].unique()
+        
+        # Improved color scheme
+        if len(architectures) <= 8:
+            colors = plt.cm.Set2(np.linspace(0, 1, len(architectures)))
+        else:
+            colors = plt.cm.tab20(np.linspace(0, 1, len(architectures)))
+        
+        markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h']
+        
+        for i, arch in enumerate(architectures):
+            arch_data = plot_df[plot_df['model_architecture'] == arch]
+            marker = markers[i % len(markers)] if i < len(markers) else 'o'
+            
+            ax1.scatter(arch_data['quantized_model_size_kb'], 
+                       arch_data['keras_test_accuracy'],
+                       c=[colors[i]], label=arch, s=120, alpha=0.8, 
+                       edgecolors='black', linewidth=1, marker=marker)
+    else:
+        ax1.scatter(plot_df['quantized_model_size_kb'], plot_df['keras_test_accuracy'], 
+                   s=120, alpha=0.8, edgecolors='black', linewidth=1)
+    
+    ax1.set_xlabel('Model Size (KB)')
+    ax1.set_ylabel('Test Accuracy')
+    ax1.set_title('Accuracy vs Model Size', fontweight='bold')
+    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax1.grid(True, alpha=0.3)
+    
+    # Add efficiency lines (pareto frontier)
+    try:
+        # Find Pareto frontier
+        sorted_df = plot_df.sort_values('quantized_model_size_kb')
+        pareto_points = []
+        max_acc = -1
+        
+        for _, row in sorted_df.iterrows():
+            if row['keras_test_accuracy'] > max_acc:
+                pareto_points.append((row['quantized_model_size_kb'], row['keras_test_accuracy']))
+                max_acc = row['keras_test_accuracy']
+        
+        if len(pareto_points) > 1:
+            pareto_x, pareto_y = zip(*pareto_points)
+            ax1.plot(pareto_x, pareto_y, 'r--', alpha=0.7, linewidth=2, label='Pareto Frontier')
+    except:
+        pass
+    
+    # Plot 2: Efficiency Score Ranking
+    ax2 = axes[0, 1]
+    efficiency_df = plot_df.nlargest(15, 'efficiency_score')  # Top 15 most efficient
+    bars = ax2.barh(range(len(efficiency_df)), efficiency_df['efficiency_score'])
+    ax2.set_yticks(range(len(efficiency_df)))
+    
+    if 'run_name' in efficiency_df.columns:
+        ax2.set_yticklabels(efficiency_df['run_name'])
+    elif 'model_architecture' in efficiency_df.columns:
+        ax2.set_yticklabels(efficiency_df['model_architecture'])
+    else:
+        ax2.set_yticklabels([f'Model {i+1}' for i in range(len(efficiency_df))])
+    
+    ax2.set_xlabel('Efficiency Score (Accuracy × 1000 / Size)')
+    ax2.set_title('Top 15 Most Efficient Models', fontweight='bold')
+    
+    # Add value labels on bars
+    for i, bar in enumerate(bars):
+        width = bar.get_width()
+        ax2.text(width, bar.get_y() + bar.get_height()/2, f'{width:.1f}', 
+                ha='left', va='center', fontweight='bold')
+    
+    # Plot 3: Accuracy vs Parameters (FIXED: Now uses total_parameters properly)
+    ax3 = axes[1, 0]
+    
+    # DEBUG: Check if we have total_parameters data
+    if 'total_parameters' in plot_df.columns:
+        print(f"🔍 DEBUG: total_parameters data range: {plot_df['total_parameters'].min()} to {plot_df['total_parameters'].max()}")
+        print(f"🔍 DEBUG: Non-zero parameters: {len(plot_df[plot_df['total_parameters'] > 0])} models")
+    
+    if 'total_parameters' in plot_df.columns and not plot_df['total_parameters'].isna().all() and plot_df['total_parameters'].max() > 0:
+        # Filter out zero or negative parameters
+        valid_params_df = plot_df[plot_df['total_parameters'] > 0]
+        
+        if not valid_params_df.empty:
+            ax3.scatter(valid_params_df['total_parameters'], valid_params_df['keras_test_accuracy'], 
+                       s=100, alpha=0.7, edgecolors='black', linewidth=0.5)
+            ax3.set_xlabel('Total Parameters (Model Complexity)')
+            ax3.set_ylabel('Test Accuracy')
+            ax3.set_title('Accuracy vs Model Complexity (Total Parameters)', fontweight='bold')
+            ax3.grid(True, alpha=0.3)
+            ax3.ticklabel_format(axis='x', style='scientific', scilimits=(0,0))
+            
+            # Add correlation coefficient
+            correlation = valid_params_df['total_parameters'].corr(valid_params_df['keras_test_accuracy'])
+            ax3.text(0.05, 0.95, f'Correlation: {correlation:.3f}', 
+                    transform=ax3.transAxes, fontsize=12,
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        else:
+            ax3.text(0.5, 0.5, 'No valid parameter data\n(All values are zero)', 
+                    transform=ax3.transAxes, ha='center', va='center', fontsize=12)
+            ax3.set_title('Accuracy vs Model Complexity\n(No Parameter Data)', fontweight='bold')
+    else:
+        # Fallback if total_parameters is not available or all zeros
+        if 'params' in plot_df.columns and not plot_df['params'].isna().all() and plot_df['params'].max() > 0:
+            ax3.scatter(plot_df['params'], plot_df['keras_test_accuracy'], 
+                       s=100, alpha=0.7, edgecolors='black', linewidth=0.5)
+            ax3.set_xlabel('Number of Parameters')
+            ax3.set_ylabel('Test Accuracy')
+            ax3.set_title('Accuracy vs Model Complexity', fontweight='bold')
+            ax3.grid(True, alpha=0.3)
+            ax3.ticklabel_format(axis='x', style='scientific', scilimits=(0,0))
+        else:
+            # Alternative: Training time vs accuracy
+            if 'training_time' in plot_df.columns:
+                # Convert time strings to numeric (basic conversion)
+                time_seconds = []
+                for time_str in plot_df['training_time']:
+                    try:
+                        if ':' in str(time_str):
+                            parts = str(time_str).split(':')
+                            if len(parts) == 3:  # HH:MM:SS
+                                seconds = int(parts[0])*3600 + int(parts[1])*60 + int(parts[2])
+                            else:  # MM:SS
+                                seconds = int(parts[0])*60 + int(parts[1])
+                            time_seconds.append(seconds)
+                        else:
+                            time_seconds.append(float(time_str))
+                    except:
+                        time_seconds.append(np.nan)
+                
+                if len([x for x in time_seconds if not np.isnan(x)]) > 0:
+                    plot_df['training_seconds'] = time_seconds
+                    ax3.scatter(plot_df['training_seconds'], plot_df['keras_test_accuracy'], 
+                               s=100, alpha=0.7, edgecolors='black', linewidth=0.5)
+                    ax3.set_xlabel('Training Time (seconds)')
+                    ax3.set_ylabel('Test Accuracy')
+                    ax3.set_title('Accuracy vs Training Time', fontweight='bold')
+                    ax3.grid(True, alpha=0.3)
+            else:
+                ax3.text(0.5, 0.5, 'No complexity data available', 
+                        transform=ax3.transAxes, ha='center', va='center', fontsize=12)
+                ax3.set_title('Accuracy vs Model Complexity\n(No Data)', fontweight='bold')
+    
+    # Plot 4: Model Size Distribution
+    ax4 = axes[1, 1]
+    sizes = plot_df['quantized_model_size_kb'].dropna()
+    if not sizes.empty:
+        ax4.hist(sizes, bins=15, alpha=0.7, edgecolor='black')
+        ax4.axvline(sizes.mean(), color='red', linestyle='--', linewidth=2, 
+                   label=f'Mean: {sizes.mean():.1f} KB')
+        ax4.axvline(sizes.median(), color='green', linestyle='--', linewidth=2,
+                   label=f'Median: {sizes.median():.1f} KB')
+        ax4.set_xlabel('Model Size (KB)')
+        ax4.set_ylabel('Frequency')
+        ax4.set_title('Model Size Distribution', fontweight='bold')
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    # Save the main efficiency plot
+    efficiency_plot_path = os.path.join(output_dir, "model_efficiency_analysis.png")
+    plt.savefig(efficiency_plot_path, dpi=300, bbox_inches='tight')
+    print(f"📊 Efficiency plot saved: {efficiency_plot_path}")
+    plt.close()
+    
+    # Create additional specialized plots
+    create_specialized_plots(plot_df, output_dir)
+    
+    # Create dedicated Accuracy vs Model Size plot with improved colors
+    plot_accuracy_vs_model_size(df, output_dir)
+    
+    # Create tensor arena and CPU OPS analysis plots
     plot_tensor_arena_analysis(df, output_dir)
     
     return plot_df
+
+def create_specialized_plots(df, output_dir):
+    """Create additional specialized efficiency plots"""
+    setup_plotting_style()
+    
+    # Plot 1: Architecture comparison
+    if 'model_architecture' in df.columns and len(df['model_architecture'].unique()) > 1:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+        
+        # Architecture vs Accuracy
+        arch_data = df.groupby('model_architecture').agg({
+            'keras_test_accuracy': ['mean', 'std', 'count'],
+            'quantized_model_size_kb': 'mean',
+            'efficiency_score': 'mean'
+        }).round(4)
+        
+        arch_data.columns = ['_'.join(col).strip() for col in arch_data.columns.values]
+        arch_data = arch_data.sort_values('efficiency_score_mean', ascending=False)
+        
+        # Plot accuracy by architecture
+        architectures = arch_data.index
+        y_pos = np.arange(len(architectures))
+        
+        ax1.barh(y_pos, arch_data['keras_test_accuracy_mean'], 
+                xerr=arch_data['keras_test_accuracy_std'], 
+                alpha=0.7, edgecolor='black')
+        ax1.set_yticks(y_pos)
+        ax1.set_yticklabels(architectures)
+        ax1.set_xlabel('Test Accuracy')
+        ax1.set_title('Accuracy by Model Architecture', fontweight='bold')
+        ax1.grid(True, alpha=0.3, axis='x')
+        
+        # Plot efficiency by architecture
+        ax2.barh(y_pos, arch_data['efficiency_score_mean'], alpha=0.7, edgecolor='black')
+        ax2.set_yticks(y_pos)
+        ax2.set_yticklabels(architectures)
+        ax2.set_xlabel('Efficiency Score')
+        ax2.set_title('Efficiency by Model Architecture', fontweight='bold')
+        ax2.grid(True, alpha=0.3, axis='x')
+        
+        plt.tight_layout()
+        arch_plot_path = os.path.join(output_dir, "architecture_comparison.png")
+        plt.savefig(arch_plot_path, dpi=300, bbox_inches='tight')
+        print(f"📊 Architecture comparison saved: {arch_plot_path}")
+        plt.close()
+    
+    # Plot 2: Time series of model improvements (if timestamp available)
+    if 'timestamp' in df.columns:
+        try:
+            df['datetime'] = pd.to_datetime(df['timestamp'], errors='coerce')
+            time_df = df.dropna(subset=['datetime']).sort_values('datetime')
+            
+            if len(time_df) > 1:
+                fig, ax = plt.subplots(figsize=(12, 6))
+                
+                ax.plot(time_df['datetime'], time_df['keras_test_accuracy'], 
+                       'o-', linewidth=2, markersize=8, label='Accuracy')
+                ax.set_xlabel('Time')
+                ax.set_ylabel('Test Accuracy')
+                ax.set_title('Model Performance Over Time', fontweight='bold')
+                ax.grid(True, alpha=0.3)
+                ax.legend()
+                
+                # Format x-axis
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                
+                time_plot_path = os.path.join(output_dir, "performance_timeline.png")
+                plt.savefig(time_plot_path, dpi=300, bbox_inches='tight')
+                print(f"📊 Performance timeline saved: {time_plot_path}")
+                plt.close()
+        except:
+            pass
+    
+    # Plot 3: Correlation heatmap
+    numeric_columns = ['keras_test_accuracy', 'tflite_test_accuracy', 
+                      'quantized_model_size_kb', 'float_model_size_kb']
+    
+    # Add new metrics if available
+    if 'total_parameters' in df.columns:
+        numeric_columns.append('total_parameters')
+    if 'tensor_arena_kb' in df.columns:
+        numeric_columns.append('tensor_arena_kb')
+    if 'cpu_ops_millions' in df.columns:
+        numeric_columns.append('cpu_ops_millions')
+    
+    numeric_df = df[numeric_columns].apply(pd.to_numeric, errors='coerce').dropna()
+    
+    if len(numeric_df) > 2:
+        fig, ax = plt.subplots(figsize=(10, 8))
+        correlation_matrix = numeric_df.corr()
+        
+        im = ax.imshow(correlation_matrix, cmap='coolwarm', vmin=-1, vmax=1)
+        ax.set_xticks(range(len(correlation_matrix.columns)))
+        ax.set_yticks(range(len(correlation_matrix.columns)))
+        ax.set_xticklabels(correlation_matrix.columns, rotation=45)
+        ax.set_yticklabels(correlation_matrix.columns)
+        
+        # Add correlation values as text
+        for i in range(len(correlation_matrix.columns)):
+            for j in range(len(correlation_matrix.columns)):
+                text = ax.text(j, i, f'{correlation_matrix.iloc[i, j]:.2f}',
+                              ha="center", va="center", color="black", fontweight='bold')
+        
+        ax.set_title('Feature Correlation Matrix', fontweight='bold')
+        plt.colorbar(im)
+        plt.tight_layout()
+        
+        corr_plot_path = os.path.join(output_dir, "correlation_heatmap.png")
+        plt.savefig(corr_plot_path, dpi=300, bbox_inches='tight')
+        print(f"📊 Correlation heatmap saved: {corr_plot_path}")
+        plt.close()
 
 def collect_benchmark_results(output_dir="./", output_csv="benchmark_results.csv"):
     """
@@ -685,7 +1108,7 @@ def collect_benchmark_results(output_dir="./", output_csv="benchmark_results.csv
     print(f"✅ Benchmark results saved to: {output_path}")
     print(f"📈 Collected {len(df)} training runs")
     
-    # Print summary of new metrics
+    # Print summary of new metrics - ADD total_parameters check
     if 'tensor_arena_kb' in df.columns:
         arena_sizes = pd.to_numeric(df['tensor_arena_kb'], errors='coerce').dropna()
         if len(arena_sizes) > 0:
@@ -696,7 +1119,89 @@ def collect_benchmark_results(output_dir="./", output_csv="benchmark_results.csv
         if len(ops_data) > 0:
             print(f"⚡ CPU OPS: {len(ops_data)} models, avg: {ops_data.mean():.1f} million")
     
+    # DEBUG: Check if total_parameters is present and has values
+    if 'total_parameters' in df.columns:
+        total_params = pd.to_numeric(df['total_parameters'], errors='coerce').dropna()
+        if len(total_params) > 0:
+            non_zero = total_params[total_params > 0]
+            print(f"🔢 Total Parameters: {len(non_zero)} models with data, avg: {non_zero.mean():,.0f}")
+            if len(non_zero) < len(total_params):
+                print(f"⚠️  Warning: {len(total_params) - len(non_zero)} models have zero parameters")
+        else:
+            print("⚠️  Warning: total_parameters column exists but all values are zero/NaN")
+    else:
+        print("❌ total_parameters column not found in collected results")
+    
     return df
+
+def compare_models_by_architecture(df):
+    """Compare performance by model architecture"""
+    if 'model_architecture' not in df.columns or df.empty:
+        print("❌ No model architecture information found!")
+        return
+    
+    print("\n🧩 MODEL ARCHITECTURE COMPARISON:")
+    
+    # Convert to numeric including new metrics
+    numeric_columns = ['keras_test_accuracy', 'quantized_model_size_kb', 
+                      'tensor_arena_kb', 'cpu_ops_millions', 'total_parameters']
+    
+    for col in numeric_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # Group by architecture and calculate statistics
+    comparison_columns = ['keras_test_accuracy', 'quantized_model_size_kb']
+    
+    # Add new metrics if available
+    if 'tensor_arena_kb' in df.columns:
+        comparison_columns.append('tensor_arena_kb')
+    if 'cpu_ops_millions' in df.columns:
+        comparison_columns.append('cpu_ops_millions')
+    if 'total_parameters' in df.columns:
+        comparison_columns.append('total_parameters')
+    
+    comparison = df.groupby('model_architecture').agg({
+        col: ['count', 'mean', 'max', 'min', 'std'] for col in comparison_columns
+    }).round(4)
+    
+    print(comparison)
+    
+    return comparison
+
+def analyze_trends(df):
+    """Analyze trends in the benchmark data"""
+    if df.empty:
+        print("❌ No data for trend analysis!")
+        return
+        
+    print("\n📈 TREND ANALYSIS:")
+    
+    # Convert relevant columns to numeric
+    numeric_columns = ['keras_test_accuracy', 'tflite_test_accuracy', 
+                      'quantized_model_size_kb', 'float_model_size_kb',
+                      'tensor_arena_kb', 'cpu_ops_millions', 'total_parameters']
+    
+    for col in numeric_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # Basic statistics
+    print("Overall Statistics:")
+    for col in numeric_columns:
+        if col in df.columns and not df[col].isnull().all():
+            valid_data = df[col].dropna()
+            if len(valid_data) > 0:
+                print(f"  {col}:")
+                print(f"    Count: {len(valid_data)}")
+                print(f"    Mean: {valid_data.mean():.4f}")
+                if col != 'total_parameters':  # For accuracy metrics
+                    print(f"    Best: {valid_data.max():.4f}")
+                    print(f"    Worst: {valid_data.min():.4f}")
+                else:  # For parameter counts
+                    print(f"    Max: {valid_data.max():,.0f}")
+                    print(f"    Min: {valid_data.min():,.0f}")
+                print(f"    Std: {valid_data.std():.4f}")
 
 def main():
     parser = argparse.ArgumentParser(description='Benchmark Training Results')
@@ -771,71 +1276,6 @@ def main():
         print("💡 Make sure training has been run and results are properly saved")
     else:
         print("❌ No data available for analysis!")
-
-# [Keep the existing helper functions compare_models_by_architecture and analyze_trends]
-
-def compare_models_by_architecture(df):
-    """Compare performance by model architecture"""
-    if 'model_architecture' not in df.columns or df.empty:
-        print("❌ No model architecture information found!")
-        return
-    
-    print("\n🧩 MODEL ARCHITECTURE COMPARISON:")
-    
-    # Convert to numeric including new metrics
-    numeric_columns = ['keras_test_accuracy', 'quantized_model_size_kb', 
-                      'tensor_arena_kb', 'cpu_ops_millions']
-    
-    for col in numeric_columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    # Group by architecture and calculate statistics
-    comparison_columns = ['keras_test_accuracy', 'quantized_model_size_kb']
-    
-    # Add new metrics if available
-    if 'tensor_arena_kb' in df.columns:
-        comparison_columns.append('tensor_arena_kb')
-    if 'cpu_ops_millions' in df.columns:
-        comparison_columns.append('cpu_ops_millions')
-    
-    comparison = df.groupby('model_architecture').agg({
-        col: ['count', 'mean', 'max', 'min', 'std'] for col in comparison_columns
-    }).round(4)
-    
-    print(comparison)
-    
-    return comparison
-
-def analyze_trends(df):
-    """Analyze trends in the benchmark data"""
-    if df.empty:
-        print("❌ No data for trend analysis!")
-        return
-        
-    print("\n📈 TREND ANALYSIS:")
-    
-    # Convert relevant columns to numeric
-    numeric_columns = ['keras_test_accuracy', 'tflite_test_accuracy', 
-                      'quantized_model_size_kb', 'float_model_size_kb',
-                      'tensor_arena_kb', 'cpu_ops_millions']
-    
-    for col in numeric_columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    # Basic statistics
-    print("Overall Statistics:")
-    for col in numeric_columns:
-        if col in df.columns and not df[col].isnull().all():
-            valid_data = df[col].dropna()
-            if len(valid_data) > 0:
-                print(f"  {col}:")
-                print(f"    Count: {len(valid_data)}")
-                print(f"    Mean: {valid_data.mean():.4f}")
-                print(f"    Best: {valid_data.max():.4f}")
-                print(f"    Worst: {valid_data.min():.4f}")
-                print(f"    Std: {valid_data.std():.4f}")
 
 if __name__ == "__main__":
     main()
