@@ -55,10 +55,10 @@ DATA_SOURCES = [
         'weight': 1.0,
     },
     # {
-    #     'name': 'meterdigits_augmented',
-    #     'type': 'folder_structure',
-    #     'path': 'datasets/meterdigits_augmented',
-    #     'weight': 0.3,
+        # 'name': 'meterdigits_augmented',
+        # 'type': 'folder_structure',
+        # 'path': 'datasets/meterdigits_augmented',
+        # 'weight': 0.3,
     # },
     # {
     #     'name': 'MNIST',
@@ -461,7 +461,26 @@ def print_hyperparameter_summary():
                 print(f"  {key}: {value}")
     
     print("\n" + "=" * 60)
-
+    
+def get_hyperparameter_summary_text():
+    """Return hyperparameter summary as formatted text for file export"""
+    summary = get_hyperparameter_summary()
+    
+    lines = []
+    lines.append("HYPERPARAMETER CONFIGURATION SUMMARY")
+    lines.append("=" * 50)
+    
+    for category, settings in summary.items():
+        lines.append(f"\n{category.upper()}:")
+        for key, value in settings.items():
+            if isinstance(value, dict):
+                lines.append(f"  {key}:")
+                for sub_key, sub_value in value.items():
+                    lines.append(f"    {sub_key}: {sub_value}")
+            else:
+                lines.append(f"  {key}: {value}")
+    
+    return "\n".join(lines)
 # ==============================================================================
 # INITIALIZATION
 # ==============================================================================
