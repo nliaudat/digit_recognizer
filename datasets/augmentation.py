@@ -29,7 +29,7 @@ AUGMENTED_DATA_DIR = None      # Auto-generated: [input]_augmented
 
 # Enable/disable augmentation
 USE_DATA_AUGMENTATION = True
-AUGMENTATION_MULTIPLIER = 2  # How many augmented samples per original sample
+AUGMENTATION_MULTIPLIER = 1  # How many augmented samples per original sample
 
 # Basic Image Transformations
 AUG_ROTATION_RANGE = 5    # Reduced from 15 (±5 degrees)
@@ -45,7 +45,7 @@ AUG_COLOR_JITTER = 0.05            # Reduced from 0.1
 AUG_GAUSSIAN_NOISE_STD = 0.05      # Standard deviation for Gaussian noise
 
 # Random Erasing/Cutout
-AUG_USE_RANDOM_ERASING = True
+AUG_USE_RANDOM_ERASING = False
 AUG_ERASING_MAX_AREA = 0.1         # Max 10% of image area
 AUG_ERASING_ASPECT_RATIO = (0.3, 3.3)  # Aspect ratio range
 
@@ -58,7 +58,7 @@ AUG_PERSPECTIVE_TRANSFORM = True
 AUG_PERSPECTIVE_SCALE = 0.1        # 10% perspective distortion
 
 # Flashlight Disturbance Augmentation
-AUG_FLASHLIGHT_DISTURBANCE = False
+AUG_FLASHLIGHT_DISTURBANCE = True
 AUG_FLASHLIGHT_INTENSITY = 0.8           # Maximum brightness intensity (0.0 to 1.0)
 AUG_FLASHLIGHT_RADIUS_RANGE = [0.1, 0.3] # Radius as fraction of image size (10% to 30%)
 AUG_FLASHLIGHT_PROGRESSIVE = True        # Whether the effect is progressive (fades out)
@@ -398,7 +398,7 @@ class SingleShotAugmentor:
         return self.ensure_correct_shape(perspective)
     
     def apply_flashlight_disturbance(self, image):
-        """Apply flashlight disturbance - bright white spot affecting 1/4 of image"""
+        """Apply flashlight disturbance - bright white spot overexposing the image"""
         if not AUG_FLASHLIGHT_DISTURBANCE:
             return image
         
@@ -406,15 +406,15 @@ class SingleShotAugmentor:
         if random.random() > AUG_FLASHLIGHT_PROBABILITY:
             return image
         
-        # Ensure correct shape
+        # Ensure correct shape and make a copy
         image = self.ensure_correct_shape(image)
-        h, w = image.shape[:2]  # h = height, w = width
+        disturbed = image.copy()
+        h, w = disturbed.shape[:2]  # h = height, w = width
         
         # Calculate target affected area (1/4 of image)
         target_area = AUG_FLASHLIGHT_AFFECTED_AREA * (h * w)
         
         # Determine flashlight radius to achieve approximately 1/4 area coverage
-        # Area of circle = πr², so r = sqrt(area/π)
         target_radius = np.sqrt(target_area / np.pi)
         max_possible_radius = min(h, w) / 2
         
@@ -428,57 +428,53 @@ class SingleShotAugmentor:
         center_x = random.randint(margin, w - margin)  # width position
         center_y = random.randint(margin, h - margin)  # height position
         
-        # Random intensity variation
-        intensity = random.uniform(AUG_FLASHLIGHT_INTENSITY * 0.7, AUG_FLASHLIGHT_INTENSITY)
+        # Random intensity variation - use higher intensity for stronger overexposure
+        intensity = random.uniform(AUG_FLASHLIGHT_INTENSITY * 0.8, AUG_FLASHLIGHT_INTENSITY)
         
-        # Create flashlight effect
-        disturbed = image.copy()
+        # Create coordinate grids for vectorized operations
+        y_coords, x_coords = np.ogrid[:h, :w]  # y = height, x = width
+        
+        # Calculate distance from flashlight center for each pixel
+        distance_map = np.sqrt((x_coords - center_x)**2 + (y_coords - center_y)**2)
         
         if AUG_FLASHLIGHT_PROGRESSIVE:
-            # Create coordinate grids for vectorized operations
-            y_coords, x_coords = np.ogrid[:h, :w]  # y = height, x = width
-            
-            # Calculate distance from flashlight center for each pixel
-            distance_map = np.sqrt((x_coords - center_x)**2 + (y_coords - center_y)**2)
-            
             # Create smooth intensity falloff using Gaussian function
-            sigma = flashlight_radius / 2.5  # Controls falloff steepness
+            sigma = flashlight_radius / 2.0  # Controls falloff steepness
             intensity_map = intensity * np.exp(-(distance_map**2) / (2 * sigma**2))
-            
-            # Apply flashlight effect
-            if len(disturbed.shape) == 2:
-                # Grayscale
-                disturbed = np.clip(disturbed + intensity_map, 0, 1)
-            else:
-                # Color - apply to all channels
-                for channel in range(disturbed.shape[2]):
-                    disturbed[:, :, channel] = np.clip(
-                        disturbed[:, :, channel] + intensity_map, 0, 1
-                    )
-            
-            # Optional: Add slight blur at the edges for more realistic light transition
-            if random.random() < 0.3:
-                kernel_size = random.choice([3, 5])
-                if len(disturbed.shape) == 2:
-                    disturbed = cv2.GaussianBlur(disturbed, (kernel_size, kernel_size), 0)
-                else:
-                    for channel in range(disturbed.shape[2]):
-                        disturbed[:, :, channel] = cv2.GaussianBlur(
-                            disturbed[:, :, channel], (kernel_size, kernel_size), 0
-                        )
         else:
-            # Simple circular flashlight (uniform brightness within radius)
-            y_coords, x_coords = np.ogrid[:h, :w]  # y = height, x = width
-            mask = (x_coords - center_x)**2 + (y_coords - center_y)**2 <= flashlight_radius**2
+            # Sharp circular falloff
+            intensity_map = np.where(distance_map <= flashlight_radius, intensity, 0)
+        
+        # Apply flashlight effect - ADD brightness to create overexposure
+        if len(disturbed.shape) == 2:
+            # Grayscale - add intensity to create bright white spot
+            disturbed = np.clip(disturbed + intensity_map, 0, 1)
             
+            # Ensure center is fully white for strong overexposure effect
+            center_mask = distance_map <= (flashlight_radius * 0.3)
+            disturbed[center_mask] = 1.0  # Pure white at center
+            
+        else:
+            # Color - apply to all channels to create white light
+            for channel in range(disturbed.shape[2]):
+                channel_data = disturbed[:, :, channel]
+                augmented_channel = np.clip(channel_data + intensity_map, 0, 1)
+                
+                # Ensure center is fully white for strong overexposure effect
+                center_mask = distance_map <= (flashlight_radius * 0.3)
+                augmented_channel[center_mask] = 1.0  # Pure white at center
+                
+                disturbed[:, :, channel] = augmented_channel
+        
+        # Optional: Add slight blur at the edges for more realistic light transition
+        if random.random() < 0.3:
+            kernel_size = random.choice([3, 5])
             if len(disturbed.shape) == 2:
-                # Grayscale
-                disturbed[mask] = np.clip(disturbed[mask] + intensity, 0, 1)
+                disturbed = cv2.GaussianBlur(disturbed, (kernel_size, kernel_size), 0)
             else:
-                # Color
                 for channel in range(disturbed.shape[2]):
-                    disturbed[mask, channel] = np.clip(
-                        disturbed[mask, channel] + intensity, 0, 1
+                    disturbed[:, :, channel] = cv2.GaussianBlur(
+                        disturbed[:, :, channel], (kernel_size, kernel_size), 0
                     )
         
         return self.ensure_correct_shape(disturbed)

@@ -340,7 +340,7 @@ def collect_benchmark_results(output_dir="./", output_csv="benchmark_results.csv
         'learning_rate', 'use_early_stopping', 'early_stopping_monitor',
         'early_stopping_patience', 'lr_scheduler_monitor', 'lr_scheduler_patience',
         'lr_scheduler_factor', 'quantize_model', 'esp_dl_quantize',
-        'quantize_num_samples', 'use_gpu'
+        'quantize_num_samples', 'use_gpu', 'optimizer', 'model_parameters'
     ]
     
     # Reorder columns, keeping any additional columns

@@ -10,6 +10,7 @@ from tqdm.auto import tqdm
 import logging
 from contextlib import contextmanager
 from models import create_model, compile_model, model_summary
+# from models.model_factory import print_hyperparameter_summary
 from utils import get_data_splits, preprocess_images
 import parameters as params
 
@@ -20,6 +21,15 @@ try:
 except ImportError:
     print("⚠️  tensorflow-model-optimization not available. Install with: pip install tensorflow-model-optimization")
     QAT_AVAILABLE = False
+    
+# try:
+    # import onnx
+    # import tf2onnx
+    # from tf2onnx import tf_loader
+    # ONNX_AVAILABLE = True
+# except ImportError:
+    # print("⚠️  ONNX export not available. Install with: pip install onnx tf2onnx")
+    # ONNX_AVAILABLE = False
 
 def parse_arguments():
     """Parse command line arguments"""
@@ -382,6 +392,76 @@ class TFLiteModelManager:
                 print(f"❌ TFLite conversion failed: {e}")
                 return None
         return None
+        
+    # def export_to_onnx(self, model, filename="best_model.onnx"):
+        # """Export model to ONNX format - programmatic approach"""
+        # if not ONNX_AVAILABLE:
+            # print("❌ ONNX export not available - install onnx and tf2onnx")
+            # return None
+        
+        # try:
+            # print("🔄 Converting to ONNX format...")
+            
+            # # Build model if not built
+            # if not model.built:
+                # dummy_input = tf.zeros([1] + list(params.INPUT_SHAPE), dtype=tf.float32)
+                # _ = model(dummy_input)
+            
+            # onnx_path = os.path.join(self.output_dir, filename)
+            
+            # # Get the concrete function from the Keras model
+            # input_spec = tf.TensorSpec((None,) + params.INPUT_SHAPE, tf.float32, name="input")
+            
+            # # Use the newer tf2onnx API
+            # from tf2onnx import convert
+            # from tf2onnx import tf_loader
+            # import onnxruntime as ort
+            
+            # # Save as SavedModel first
+            # temp_model_path = os.path.join(self.output_dir, "temp_saved_model")
+            # tf.saved_model.save(model, temp_model_path)
+            
+            # # Convert using tf2onnx
+            # convert.from_saved_model(
+                # temp_model_path,
+                # input_signature=[input_spec],
+                # output_path=onnx_path,
+                # opset=13
+            # )
+            
+            # # Clean up temporary model
+            # import shutil
+            # shutil.rmtree(temp_model_path, ignore_errors=True)
+            
+            # # Verify the ONNX model
+            # try:
+                # ort_session = ort.InferenceSession(onnx_path)
+                # onnx_size_kb = os.path.getsize(onnx_path) / 1024
+                # print(f"✅ ONNX model saved and verified: {onnx_path} ({onnx_size_kb:.1f} KB)")
+                # print(f"   ONNX Inputs: {[input.name for input in ort_session.get_inputs()]}")
+                # print(f"   ONNX Outputs: {[output.name for output in ort_session.get_outputs()]}")
+                # return onnx_path, onnx_size_kb
+            # except Exception as verification_error:
+                # print(f"⚠️  ONNX model saved but verification failed: {verification_error}")
+                # onnx_size_kb = os.path.getsize(onnx_path) / 1024
+                # return onnx_path, onnx_size_kb
+                
+        # except Exception as e:
+            # print(f"❌ ONNX conversion failed: {e}")
+            # if self.debug:
+                # import traceback
+                # traceback.print_exc()
+            
+            # # Clean up on error
+            # try:
+                # import shutil
+                # temp_model_path = os.path.join(self.output_dir, "temp_saved_model")
+                # if os.path.exists(temp_model_path):
+                    # shutil.rmtree(temp_model_path, ignore_errors=True)
+            # except:
+                # pass
+            
+            # return None
 
 class TrainingMonitor:
     def __init__(self, output_dir, debug=False):
@@ -936,6 +1016,38 @@ def train_model(debug=False):
         print(f"✅ Final model saved: {final_checkpoint_path}")
     except Exception as e:
         print(f"❌ Final model save failed: {e}")
+        
+    # print("\n💾 Exporting best model to ONNX format...")
+    
+    # # Load the best model for ONNX export
+    # best_model_path = os.path.join(training_dir, "best_model.keras")
+    # if os.path.exists(best_model_path):
+        # try:
+            # best_model = tf.keras.models.load_model(best_model_path)
+            # onnx_path, onnx_size = tflite_manager.export_to_onnx(best_model, "best_model.onnx")
+            
+            # if onnx_path:
+                # print(f"✅ ONNX model exported: {onnx_path} ({onnx_size:.1f} KB)")
+                
+                # # Update training config with ONNX info
+                # config_path = os.path.join(training_dir, "training_config.txt")
+                # if os.path.exists(config_path):
+                    # with open(config_path, 'a') as f:
+                        # f.write(f"\nONNX Export:\n")
+                        # f.write(f"  ONNX Model Size: {onnx_size:.1f} KB\n")
+                        # f.write(f"  ONNX File: {os.path.basename(onnx_path)}\n")
+        # except Exception as e:
+            # print(f"❌ ONNX export failed: {e}")
+    # else:
+        # print("⚠️  Best model not found for ONNX export")
+    
+    # Also export the current model
+    try:
+        onnx_path, onnx_size = tflite_manager.export_to_onnx(model, "final_model.onnx")
+        if onnx_path:
+            print(f"✅ Final model exported to ONNX: {onnx_path} ({onnx_size:.1f} KB)")
+    except Exception as e:
+        print(f"❌ Final model ONNX export failed: {e}")
     
     return model, history, training_dir
 
@@ -967,7 +1079,7 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         
         f.write(f"\nMODEL ARCHITECTURE:\n")
         f.write(f"  Model: {params.MODEL_ARCHITECTURE}\n")
-        f.write(f"  Input shape: {params.INPUT_SHAPE}\n")
+        f.write(f"  Input shape: [{params.INPUT_SHAPE}]\n")
         f.write(f"  Classes: {params.NB_CLASSES}\n")
         
         f.write(f"\nTRAINING CONFIG:\n")
@@ -999,6 +1111,17 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
             f.write(f"  Memory growth: {params.GPU_MEMORY_GROWTH}\n")
             f.write(f"  Memory limit: {params.GPU_MEMORY_LIMIT} MB\n")
         
+        
+        
+        # Add hyperparameter summary
+        try:
+            from parameters import get_hyperparameter_summary_text
+            hyperparam_text = get_hyperparameter_summary_text()
+            f.write(hyperparam_text)
+            f.write("\n\n" + "=" * 50 + "\n\n")
+        except ImportError:
+            print("⚠️  Could not import hyperparameter summary function")
+            
         f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     
     # Also save as CSV for benchmarking
@@ -1040,6 +1163,8 @@ def save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
         f.write(f"quantized_model_size_kb,{quantized_size:.1f}\n")
         f.write(f"float_model_size_kb,{float_size:.1f}\n")
         f.write(f"training_time,{training_time}\n")
+        f.write(f"optimizer,{params.OPTIMIZER_TYPE}\n")
+        #f.write(f"model_parameters,{model.count_params()}\n")
 
 def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=False):
     """Test all available model architectures or specific models"""

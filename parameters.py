@@ -24,9 +24,12 @@ AVAILABLE_MODELS = [
     "esp_quantization_ready_v3",
     "mnist_quantization",
     "digit_recognizer_v1",
+    "simple_cnn_v2",
+    "minimal_cnn",
+    "mobilenet_style"
 ]
 
-MODEL_ARCHITECTURE = "esp_ultra_light"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
+MODEL_ARCHITECTURE = "original_haverland"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
 
 
 # ==============================================================================
@@ -47,18 +50,30 @@ USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 # ==============================================================================
 
 # Multiple Data Sources Configuration
-DATA_SOURCES = [
+DATA_SOURCES = [ 
+    # {
+        # 'name': 'meterdigits_100',
+        # 'type': 'folder_structure',
+        # 'path': 'datasets/meterdigits_100',
+        # 'weight': 1.0,
+    # },
+    # {
+        # 'name': 'meterdigits_100_augmented',
+        # 'type': 'folder_structure',
+        # 'path': 'datasets/meterdigits_10_augmented',
+        # 'weight': 0.5,
+    # },
     {
-        'name': 'meterdigits',
+        'name': 'meterdigits_10',
         'type': 'folder_structure',
-        'path': 'datasets/meterdigits',
+        'path': 'datasets/meterdigits_10',
         'weight': 1.0,
     },
     # {
-    #     'name': 'meterdigits_augmented',
-    #     'type': 'folder_structure',
-    #     'path': 'datasets/meterdigits_augmented',
-    #     'weight': 0.3,
+        # 'name': 'meterdigits_10_augmented',
+        # 'type': 'folder_structure',
+        # 'path': 'datasets/meterdigits_10_augmented',
+        # 'weight': 0.3,
     # },
     # {
     #     'name': 'MNIST',
@@ -83,6 +98,9 @@ DATA_SOURCES = [
 # ==============================================================================
 # MODEL GENERAL PARAMETERS
 # ==============================================================================
+
+# Model Parameters
+NB_CLASSES = 100  # [0-9]
 
 # TFLite Conversion Parameters
 QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
@@ -176,14 +194,13 @@ LABEL_SMOOTHING = 0.0  # Apply label smoothing if > 0
 # ==============================================================================
 
 # Basic Training Parameters
-BATCH_SIZE = 32
+BATCH_SIZE = 64 # 32
 EPOCHS = 200
 LEARNING_RATE = 0.001
 TRAINING_PERCENTAGE = 1.0  # Use 100% of available data
 VALIDATION_SPLIT = 0.2     # 20% of training for validation
 
-# Model Parameters
-NB_CLASSES = 10  # [0-9]
+
 
 # ==============================================================================
 # LEARNING RATE SCHEDULING
@@ -461,7 +478,26 @@ def print_hyperparameter_summary():
                 print(f"  {key}: {value}")
     
     print("\n" + "=" * 60)
-
+    
+def get_hyperparameter_summary_text():
+    """Return hyperparameter summary as formatted text for file export"""
+    summary = get_hyperparameter_summary()
+    
+    lines = []
+    lines.append("HYPERPARAMETER CONFIGURATION SUMMARY")
+    lines.append("=" * 50)
+    
+    for category, settings in summary.items():
+        lines.append(f"\n{category.upper()}:")
+        for key, value in settings.items():
+            if isinstance(value, dict):
+                lines.append(f"  {key}:")
+                for sub_key, sub_value in value.items():
+                    lines.append(f"    {sub_key}: {sub_value}")
+            else:
+                lines.append(f"  {key}: {value}")
+    
+    return "\n".join(lines)
 # ==============================================================================
 # INITIALIZATION
 # ==============================================================================
