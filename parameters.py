@@ -25,7 +25,7 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v1",
 ]
 
-MODEL_ARCHITECTURE = "mnist_quantization"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
+MODEL_ARCHITECTURE = "simple_cnn"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
 
 # ==============================================================================
 # MODEL-SPECIFIC PARAMETERS
@@ -68,6 +68,12 @@ EPOCHS = 200
 LEARNING_RATE = 0.001
 TRAINING_PERCENTAGE = 1.0  # Use 100% of available data
 VALIDATION_SPLIT = 0.2     # 20% of training for validation
+
+### Hyperparameters
+USE_RMSPROP = True
+RMSPROP_RHO = 0.9
+RMSPROP_MOMENTUM = 0.0
+RMSPROP_EPSILON = 1e-07
 
 USE_EARLY_STOPPING = True  # Set to False to disable early stopping completely
 EARLY_STOPPING_PATIENCE = 30  # Number of epochs with no improvement after which training will be stopped

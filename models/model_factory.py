@@ -122,23 +122,33 @@ def get_model_creators():
     return {k: v for k, v in MODEL_CREATORS.items() if v is not None}
 
 
-def compile_model(model):
+def compile_model(model, loss_type='sparse'):
     """Compile model with settings that actually work"""
     
     # Use the SAME optimizer as Haverland for all models
     # RMSprop was key to Haverland's success
     optimizer = tf.keras.optimizers.RMSprop(
         learning_rate=params.LEARNING_RATE,
-        rho=0.9,  # Same as Haverland
-        momentum=0.0,  # Same as Haverland
-        epsilon=1e-07  # Same as Haverland
+        rho=params.RMSPROP_RHO,  
+        momentum=params.RMSPROP_MOMENTUM,  
+        epsilon=params.RMSPROP_EPSILON 
     )
     
-    # Use categorical crossentropy for all models during training
-    # (ESP-DL will handle quantization to int8 later)
+
+    
+    # Choose the appropriate loss function based on model type
+    if loss_type == 'categorical':
+        # For original_haverland model - uses one-hot encoded labels
+        loss = 'categorical_crossentropy'
+        print("🔧 Using categorical crossentropy loss (for Haverland model)")
+    else:
+        # For all other models - uses integer labels
+        loss = 'sparse_categorical_crossentropy'
+        print("🔧 Using sparse categorical crossentropy loss (for other models)")
+    
     model.compile(
         optimizer=optimizer,
-        loss='categorical_crossentropy',  # Consistent loss
+        loss=loss,
         metrics=['accuracy']
     )
     
