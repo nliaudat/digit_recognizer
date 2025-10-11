@@ -26,10 +26,11 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v1",
     "simple_cnn_v2",
     "minimal_cnn",
-    "mobilenet_style"
+    "mobilenet_style",
+    "digit_recognizer_v2",
 ]
 
-MODEL_ARCHITECTURE = "original_haverland"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
+MODEL_ARCHITECTURE = "digit_recognizer_v2"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
 
 
 # ==============================================================================
@@ -61,7 +62,7 @@ DATA_SOURCES = [
         # 'name': 'meterdigits_100_augmented',
         # 'type': 'folder_structure',
         # 'path': 'datasets/meterdigits_10_augmented',
-        # 'weight': 0.5,
+        # 'weight': 0.3,
     # },
     {
         'name': 'meterdigits_10',
@@ -69,12 +70,12 @@ DATA_SOURCES = [
         'path': 'datasets/meterdigits_10',
         'weight': 1.0,
     },
-    # {
-        # 'name': 'meterdigits_10_augmented',
-        # 'type': 'folder_structure',
-        # 'path': 'datasets/meterdigits_10_augmented',
-        # 'weight': 0.3,
-    # },
+    {
+        'name': 'meterdigits_10_augmented',
+        'type': 'folder_structure',
+        'path': 'datasets/meterdigits_10_augmented',
+        'weight': 0.3,
+    },
     # {
     #     'name': 'MNIST',
     #     'type': 'folder_structure',
@@ -100,7 +101,7 @@ DATA_SOURCES = [
 # ==============================================================================
 
 # Model Parameters
-NB_CLASSES = 100  # [0-9]
+NB_CLASSES = 10  # [0-9]
 
 # TFLite Conversion Parameters
 QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
