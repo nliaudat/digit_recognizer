@@ -8,7 +8,7 @@ def create_digit_recognizer_v2():
     Based on: https://www.tensorflow.org/model_optimization/guide/quantization/training_example
     
     Key points:
-    - Avoids ReLU6 (use ReLU + Clip instead)
+    - Avoids ReLU6 (use ReLU + Clip instead) for esp-dl and tflite-micro compat
     - No BatchNorm or Flatten
     - Uses GlobalAveragePooling for dimensionality reduction
     - Compatible with integer quantization (int8)
@@ -102,5 +102,8 @@ def create_digit_recognizer_v2():
 
     model = tf.keras.Model(inputs, outputs, name="digit_recognizer_v2")
 
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
     return model
