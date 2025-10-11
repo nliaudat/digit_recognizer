@@ -3,6 +3,7 @@
 !datasets/augmentation.py
 !datasets/mnist.py
 !datasets/qmnist.py
+!datasets/haverland_flatten.py
 /exported_models/*
 !exported_models/benchmark.py
 /models/__pycache__
