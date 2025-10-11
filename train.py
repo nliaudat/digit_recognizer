@@ -1079,7 +1079,7 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         
         f.write(f"\nMODEL ARCHITECTURE:\n")
         f.write(f"  Model: {params.MODEL_ARCHITECTURE}\n")
-        f.write(f"  Input shape: {params.INPUT_SHAPE}\n")
+        f.write(f"  Input shape: [{params.INPUT_SHAPE}]\n")
         f.write(f"  Classes: {params.NB_CLASSES}\n")
         
         f.write(f"\nTRAINING CONFIG:\n")
@@ -1111,7 +1111,7 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
             f.write(f"  Memory growth: {params.GPU_MEMORY_GROWTH}\n")
             f.write(f"  Memory limit: {params.GPU_MEMORY_LIMIT} MB\n")
         
-        f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        
         
         # Add hyperparameter summary
         try:
@@ -1121,6 +1121,8 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
             f.write("\n\n" + "=" * 50 + "\n\n")
         except ImportError:
             print("⚠️  Could not import hyperparameter summary function")
+            
+        f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     
     # Also save as CSV for benchmarking
     save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
@@ -1161,6 +1163,8 @@ def save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
         f.write(f"quantized_model_size_kb,{quantized_size:.1f}\n")
         f.write(f"float_model_size_kb,{float_size:.1f}\n")
         f.write(f"training_time,{training_time}\n")
+        f.write(f"optimizer,{params.OPTIMIZER_TYPE}\n")
+        #f.write(f"model_parameters,{model.count_params()}\n")
 
 def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=False):
     """Test all available model architectures or specific models"""
