@@ -10,23 +10,23 @@ import tensorflow as tf
 # ==============================================================================
 
 AVAILABLE_MODELS = [
-    "practical_tiny_depthwise",
-    "simple_cnn", 
-    "dig_class100_s2",
+    # "practical_tiny_depthwise",
+    # "simple_cnn", 
+    # "dig_class100_s2",
     "original_haverland",
-    "esp_optimized_cnn",
-    "esp_ultra_light", 
-    "esp_high_capacity",
+    # "esp_optimized_cnn",
+    # "esp_ultra_light", 
+    # "esp_high_capacity",
     "esp_quantization_ready",
-    "esp_haverland_compatible",
-    "esp_quantization_ready_v2",
-    "esp_quantization_ready_v2_aggressive",
-    "esp_quantization_ready_v3",
+    # "esp_haverland_compatible",
+    # "esp_quantization_ready_v2",
+    # "esp_quantization_ready_v2_aggressive",
+    # "esp_quantization_ready_v3",
     "mnist_quantization",
     "digit_recognizer_v1",
-    "simple_cnn_v2",
-    "minimal_cnn",
-    "mobilenet_style",
+    # "simple_cnn_v2",
+    # "minimal_cnn",
+    # "mobilenet_style",
     "digit_recognizer_v2",
 ]
 
@@ -195,7 +195,7 @@ LABEL_SMOOTHING = 0.0  # Apply label smoothing if > 0
 # ==============================================================================
 
 # Basic Training Parameters
-BATCH_SIZE = 64 # 32
+BATCH_SIZE = 32 # 32
 EPOCHS = 200
 LEARNING_RATE = 0.001
 TRAINING_PERCENTAGE = 1.0  # Use 100% of available data

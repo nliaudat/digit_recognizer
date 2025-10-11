@@ -15,9 +15,9 @@ from .model_factory import (
 )
 
 # Import core models that are always available
-from .practical_tiny_depthwise import create_practical_tiny_depthwise
-from .simple_cnn import create_simple_cnn
-from .dig_class100_s2 import create_dig_class100_s2
+# from .practical_tiny_depthwise import create_practical_tiny_depthwise
+# from .simple_cnn import create_simple_cnn
+# from .dig_class100_s2 import create_dig_class100_s2
 from .original_haverland import create_original_haverland
 from .cnn32 import CNN_s2
 
