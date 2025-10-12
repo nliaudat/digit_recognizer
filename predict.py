@@ -9,6 +9,8 @@ import parameters as params
 from tabulate import tabulate
 import glob
 from tqdm import tqdm
+import csv
+from datetime import datetime
 
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
@@ -375,7 +377,23 @@ def get_all_models(quantized_only=False):
     
     return all_models
 
-def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug=False):
+def count_total_images_in_dataset():
+    """Count total number of images available in the dataset"""
+    if not params.DATA_SOURCES:
+        return 0
+    
+    dataset_path = params.DATA_SOURCES[0]['path']
+    total_images = 0
+    
+    for digit in range(10):
+        digit_folder = os.path.join(dataset_path, str(digit))
+        if os.path.exists(digit_folder):
+            image_files = [f for f in os.listdir(digit_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+            total_images += len(image_files)
+    
+    return total_images
+
+def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug=False, use_all_images=False):
     """Test a model on random images from dataset and return accuracy"""
     predictor = TFLiteDigitPredictor(model_path)
     correct_predictions = 0
@@ -399,10 +417,14 @@ def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug
         image_files = [f for f in os.listdir(digit_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
         if not image_files:
             continue
-            
-        # Test up to num_test_images//10 per digit
-        test_per_digit = max(1, num_test_images // 10)
-        test_images = np.random.choice(image_files, min(test_per_digit, len(image_files)), replace=False)
+        
+        if use_all_images:
+            # Use all available images
+            test_images = image_files
+        else:
+            # Test up to num_test_images//10 per digit
+            test_per_digit = max(1, num_test_images // 10)
+            test_images = np.random.choice(image_files, min(test_per_digit, len(image_files)), replace=False)
         
         for image_file in test_images:
             test_data.append((os.path.join(digit_folder, image_file), digit))
@@ -435,7 +457,46 @@ def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug
     accuracy = correct_predictions / total_tested if total_tested > 0 else 0.0
     return accuracy, total_tested
 
-def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, debug=False):
+def save_results_to_csv(results, rgb_mode=False, quantized_only=False, use_all_images=False, test_images_count=100):
+    """Save results to CSV file"""
+    # Create results directory if it doesn't exist
+    results_dir = os.path.join(params.OUTPUT_DIR, "test_results")
+    os.makedirs(results_dir, exist_ok=True)
+    
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    mode_suffix = "rgb" if rgb_mode else "grayscale"
+    quant_suffix = "quantized" if quantized_only else "all"
+    dataset_suffix = "full" if use_all_images else f"{test_images_count}images"
+    
+    filename = f"model_comparison_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.csv"
+    csv_path = os.path.join(results_dir, filename)
+    
+    # Prepare data for CSV
+    csv_data = []
+    for result in results:
+        csv_data.append({
+            'Model': result['Model'],
+            'Directory': result['Directory'],
+            'Type': result['Type'],
+            'Size_KB': result['Size (KB)'],
+            'Accuracy': float(result['Accuracy']),
+            'Tested_Images': result['Tested Images']
+        })
+    
+    # Write to CSV
+    with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['Model', 'Directory', 'Type', 'Size_KB', 'Accuracy', 'Tested_Images']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        
+        writer.writeheader()
+        for row in csv_data:
+            writer.writerow(row)
+    
+    print(f"Results saved to: {csv_path}")
+    return csv_path
+
+def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, debug=False, use_all_datasets=False):
     """Test all available models and print summary table"""
     models = get_all_models(quantized_only=quantized_only)
     
@@ -443,7 +504,15 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
         print("No models found to test.")
         return
     
-    print(f"\nTesting {len(models)} models on {num_test_images} images...")
+    # Determine test configuration
+    if use_all_datasets:
+        total_images = count_total_images_in_dataset()
+        print(f"\nTesting {len(models)} models on ALL available images ({total_images} total)...")
+        actual_test_images = total_images
+    else:
+        print(f"\nTesting {len(models)} models on {num_test_images} images...")
+        actual_test_images = num_test_images
+    
     print("Mode:", "RGB" if rgb_mode else "Grayscale")
     print("-" * 80)
     
@@ -455,7 +524,8 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
             model_info['path'], 
             rgb_mode=rgb_mode, 
             num_test_images=num_test_images,
-            debug=debug
+            debug=debug,
+            use_all_images=use_all_datasets
         )
         
         results.append({
@@ -480,6 +550,17 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
     if results and float(results[0]['Accuracy']) > 0:
         best = results[0]
         print(f"\n🎯 BEST MODEL: {best['Directory']}/{best['Model']} (Accuracy: {best['Accuracy']})")
+    
+    # Save results to CSV
+    csv_path = save_results_to_csv(
+        results, 
+        rgb_mode=rgb_mode, 
+        quantized_only=quantized_only,
+        use_all_images=use_all_datasets,
+        test_images_count=actual_test_images
+    )
+    
+    return results
 
 def debug_model_output(quantized_only=False, rgb_mode=False):
     """Debug function to test model output interpretation"""
@@ -520,7 +601,8 @@ def main():
     parser.add_argument('--quantized', action='store_true', help='Use only quantized models')
     parser.add_argument('--RGB', action='store_true', help='Process image as RGB instead of grayscale')
     parser.add_argument('--test_all', action='store_true', help='Test all available models and print accuracy summary')
-    parser.add_argument('--test_images', type=int, default=1000, help='Number of test images per model (default: 100)')
+    parser.add_argument('--test_images', type=int, default=1000, help='Number of test images per model (default: 1000)')
+    parser.add_argument('--all_datasets', action='store_true', help='Use all available images from dataset (overrides --test_images, only for --test_all)')
     parser.add_argument('--debug', action='store_true', help='Debug model output interpretation')
     parser.add_argument('--list', action='store_true', help='List all available models')
     
@@ -531,11 +613,17 @@ def main():
         return
     
     if args.test_all:
+        # Validate that --all_datasets is only used with --test_all
+        if args.all_datasets and not args.test_all:
+            print("Warning: --all_datasets can only be used with --test_all. Ignoring --all_datasets.")
+            args.all_datasets = False
+        
         test_all_models(
             rgb_mode=args.RGB, 
             quantized_only=args.quantized, 
             num_test_images=args.test_images,
-            debug=args.debug  # Pass debug flag to testing
+            debug=args.debug,
+            use_all_datasets=args.all_datasets
         )
         return
     
