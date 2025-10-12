@@ -26,13 +26,7 @@ class TFLiteDigitPredictor:
         
         print(f"Input shape: {self.input_details[0]['shape']}")
         print(f"Input type: {self.input_details[0]['dtype']}")
-        print(f"Output type: {self.output_details[0]['dtype']}")
         print(f"Output shape: {self.output_details[0]['shape']}")
-        
-        # Print quantization info
-        if self.input_details[0]['quantization'][0] != 0:
-            input_scale, input_zero_point = self.input_details[0]['quantization']
-            print(f"Input quantization: scale={input_scale}, zero_point={input_zero_point}")
     
     def predict(self, image):
         """Predict digit from image using TFLite"""
@@ -64,10 +58,6 @@ class TFLiteDigitPredictor:
         if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
             output_scale, output_zero_point = self.output_details[0]['quantization']
             output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
-        
-        # DEBUG: Print raw output to understand the distribution
-        print(f"Raw output: {output_data[0]}")
-        print(f"Output sum: {np.sum(output_data[0]):.6f}")
         
         # Get prediction and confidence
         prediction = np.argmax(output_data[0])
@@ -129,136 +119,115 @@ def load_image_from_path(image_path):
     return image
 
 def find_model_path(model_name=None):
-    """Find the model path based on model name or use default behavior"""
-    # Look for training directories
-    # training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if d.startswith('training_')]
-    # training_dirs = [d for d in os.listdir(params.OUTPUT_DIR)]
-    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
+    """Find the model path based on model name"""
+    # Look for training directories - exclude test_results and other non-training dirs
+    all_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
+    
+    # Filter out non-training directories
+    training_dirs = []
+    for dir_name in all_dirs:
+        dir_path = os.path.join(params.OUTPUT_DIR, dir_name)
+        # Check if this directory contains .tflite files and is likely a training directory
+        tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite')]
+        if tflite_files and not dir_name.startswith('test_results'):
+            training_dirs.append(dir_name)
+    
     if not training_dirs:
-        print("No training directories found. Please run train.py first.")
+        print("No training directories with TFLite models found.")
+        print(f"Please check if models exist in: {params.OUTPUT_DIR}")
         return None
     
     if model_name:
-        # Search for the specific model in training directories
-        for training_dir in sorted(training_dirs, reverse=True):
-            # Try multiple possible model file locations and names
-            possible_paths = [
-                # Model with specific name in training directory
-                os.path.join(params.OUTPUT_DIR, training_dir, f"{model_name}.tflite"),
-                # Default TFLITE_FILENAME in training directory
-                os.path.join(params.OUTPUT_DIR, training_dir, params.TFLITE_FILENAME),
-                # Model in a subdirectory matching the model name
-                os.path.join(params.OUTPUT_DIR, training_dir, "models", f"{model_name}.tflite"),
-            ]
+        # Remove .tflite extension if present for easier matching
+        model_name_clean = model_name.replace('.tflite', '')
+        
+        print(f"Searching for model: {model_name}")
+        
+        # First, check if model_name matches a training directory
+        matching_dirs = [d for d in training_dirs if model_name_clean in d]
+        if matching_dirs:
+            # Use the best matching directory (exact match first, then partial)
+            best_match = None
+            for dir_name in matching_dirs:
+                if dir_name == model_name_clean:
+                    best_match = dir_name
+                    break
+            if not best_match and matching_dirs:
+                best_match = matching_dirs[0]  # Use first partial match
             
-            for model_path in possible_paths:
-                if os.path.exists(model_path):
-                    print(f"Found model: {model_path}")
+            training_path = os.path.join(params.OUTPUT_DIR, best_match)
+            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+            
+            if tflite_files:
+                # Prefer quantized models
+                quantized_models = [f for f in tflite_files if 'quantized' in f.lower()]
+                if quantized_models:
+                    model_path = os.path.join(training_path, quantized_models[0])
+                    print(f"Found in directory '{best_match}': {quantized_models[0]}")
+                    return model_path
+                else:
+                    model_path = os.path.join(training_path, tflite_files[0])
+                    print(f"Found in directory '{best_match}': {tflite_files[0]}")
                     return model_path
         
-        print(f"Model '{model_name}' not found in any training directory")
-        print("Available training directories:")
+        # If no directory match, search for specific model files
+        for training_dir in sorted(training_dirs, reverse=True):
+            training_path = os.path.join(params.OUTPUT_DIR, training_dir)
+            
+            # Check for exact model file matches
+            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+            for model_file in tflite_files:
+                model_file_clean = model_file.replace('.tflite', '')
+                
+                # Exact match or partial match
+                if (model_name_clean == model_file_clean or 
+                    model_name_clean in model_file_clean or
+                    model_name == model_file):
+                    
+                    model_path = os.path.join(training_path, model_file)
+                    print(f"Found: {training_dir}/{model_file}")
+                    return model_path
+        
+        print(f"Model or directory '{model_name}' not found in any training directory.")
+        print("Available models:")
         for training_dir in training_dirs:
-            print(f"  - {training_dir}")
-            training_dir_path = os.path.join(params.OUTPUT_DIR, training_dir)
-            if os.path.exists(training_dir_path):
-                files = [f for f in os.listdir(training_dir_path) if f.endswith('.tflite')]
-                for file in files:
-                    print(f"    └── {file}")
+            training_path = os.path.join(params.OUTPUT_DIR, training_dir)
+            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+            if tflite_files:
+                print(f"  {training_dir}:")
+                for model_file in tflite_files:
+                    print(f"    └── {model_file}")
         return None
     else:
-        # Use default behavior - latest training directory with default TFLITE_FILENAME
+        # Use default behavior - latest training directory
         latest_training = sorted(training_dirs)[-1]
-        
-        # Try multiple possible model file locations
-        possible_paths = [
-            os.path.join(params.OUTPUT_DIR, latest_training, params.TFLITE_FILENAME),
-            os.path.join(params.OUTPUT_DIR, latest_training, "final_quantized.tflite"),
-            os.path.join(params.OUTPUT_DIR, latest_training, "final_float.tflite"),
-        ]
-        
-        for model_path in possible_paths:
-            if os.path.exists(model_path):
-                print(f"Using model: {model_path}")
-                return model_path
-        
-        # If no specific model found, look for any .tflite file in the latest directory
         latest_dir_path = os.path.join(params.OUTPUT_DIR, latest_training)
+        
+        # Look for any .tflite file in the latest directory
         tflite_files = [f for f in os.listdir(latest_dir_path) if f.endswith('.tflite')]
         
         if tflite_files:
-            model_path = os.path.join(latest_dir_path, tflite_files[0])
-            print(f"Using first available model: {model_path}")
-            return model_path
+            # Prefer quantized models if available
+            quantized_models = [f for f in tflite_files if 'quantized' in f.lower()]
+            if quantized_models:
+                model_path = os.path.join(latest_dir_path, quantized_models[0])
+                print(f"Using latest quantized model: {latest_training}/{quantized_models[0]}")
+                return model_path
+            else:
+                model_path = os.path.join(latest_dir_path, tflite_files[0])
+                print(f"Using latest model: {latest_training}/{tflite_files[0]}")
+                return model_path
         
         print(f"No TFLite model found in: {latest_dir_path}")
-        print("Available files:")
-        for file in os.listdir(latest_dir_path):
-            print(f"  - {file}")
         return None
 
-def list_available_models():
-    """List all available models in training directories"""
-    # training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if d.startswith('training_')]
-    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
-    if not training_dirs:
-        print("No training directories found.")
-        return
-    
-    print("Available models:")
-    print("-" * 50)
-    
-    for training_dir in sorted(training_dirs, reverse=True):
-        training_path = os.path.join(params.OUTPUT_DIR, training_dir)
-        tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
-        
-        if tflite_files:
-            print(f"\n{training_dir}:")
-            for model_file in tflite_files:
-                model_path = os.path.join(training_path, model_file)
-                model_size = os.path.getsize(model_path) / 1024
-                print(f"  └── {model_file} ({model_size:.1f} KB)")
-
-def debug_model_output():
-    """Debug function to test model output interpretation"""
-    model_path = find_model_path()
-    if not model_path:
-        return
-    
-    predictor = TFLiteDigitPredictor(model_path)
-    
-    # Test with multiple random images
-    print("\n=== DEBUGGING MODEL OUTPUT ===")
-    for i in range(3):
-        print(f"\n--- Test {i+1} ---")
-        test_image = np.random.randint(0, 255, (params.INPUT_HEIGHT, params.INPUT_WIDTH), dtype=np.uint8)
-        prediction, confidence, raw_output = predictor.predict(test_image)
-        
-        print(f"Prediction: {prediction}")
-        print(f"Confidence: {confidence:.6f}")
-        print(f"All confidences: {[f'{x:.6f}' for x in raw_output]}")
-        
-        # Check if softmax properties hold
-        output_sum = np.sum(raw_output)
-        print(f"Softmax sum: {output_sum:.6f} (should be ~1.0)")
-
 def main():
-    """Main function with command line arguments"""
+    """Simple prediction function"""
     parser = argparse.ArgumentParser(description='Digit Recognition Prediction')
     parser.add_argument('--img', type=str, help='Path to input image for prediction')
     parser.add_argument('--model', type=str, help='Model name to use for prediction')
-    parser.add_argument('--debug', action='store_true', help='Debug model output interpretation')
-    parser.add_argument('--list', action='store_true', help='List all available models')
     
     args = parser.parse_args()
-    
-    if args.list:
-        list_available_models()
-        return
-    
-    if args.debug:
-        debug_model_output()
-        return
     
     # Find model path
     model_path = find_model_path(args.model)
@@ -281,6 +250,7 @@ def main():
     
     # Perform prediction
     prediction, confidence, raw_output = predictor.predict(image)
+    
     print(f"\n=== PREDICTION RESULT ===")
     print(f"Predicted digit: {prediction}")
     print(f"Confidence: {confidence:.4f}")
