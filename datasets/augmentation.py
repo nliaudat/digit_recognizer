@@ -19,7 +19,7 @@ import sys
 # Image Parameters - CORRECTED: width first, then height
 INPUT_WIDTH = 20
 INPUT_HEIGHT = 32
-INPUT_CHANNELS = 1  # 1 for grayscale, 3 for RGB
+INPUT_CHANNELS = 3  # 1 for grayscale, 3 for RGB
 INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)  # (height, width, channels)
 USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 
