@@ -827,8 +827,10 @@ def train_model(debug=False):
     print("🔧 Configuring hardware...")
     strategy = setup_gpu()
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_{timestamp}")
+    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    color_mode = "GR" if params.USE_GRAYSCALE else "RGB"
+    # training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}_{color_mode}_{timestamp}")
+    training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}_{color_mode}")
     os.makedirs(training_dir, exist_ok=True)
     
     print("🚀 Starting Digit Recognition Training")
