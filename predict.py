@@ -8,6 +8,7 @@ from utils.preprocess import predict_single_image
 import parameters as params
 from tabulate import tabulate
 import glob
+from tqdm import tqdm
 
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
@@ -38,7 +39,7 @@ class TFLiteDigitPredictor:
         else:
             print("Model type: Float32 (non-quantized)")
     
-    def predict(self, image, rgb_mode=False):
+    def predict(self, image, rgb_mode=False, debug=False):
         """Predict digit from image using TFLite"""
         # Preprocess image
         processed_image = self.preprocess_image_for_prediction(image, rgb_mode=rgb_mode)
@@ -69,9 +70,10 @@ class TFLiteDigitPredictor:
             output_scale, output_zero_point = self.output_details[0]['quantization']
             output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
         
-        # DEBUG: Print raw output to understand the distribution
-        print(f"Raw output: {output_data[0]}")
-        print(f"Output sum: {np.sum(output_data[0]):.6f}")
+        # DEBUG: Print raw output only in debug mode
+        if debug:
+            print(f"Raw output: {output_data[0]}")
+            print(f"Output sum: {np.sum(output_data[0]):.6f}")
         
         # Get prediction and confidence
         prediction = np.argmax(output_data[0])
@@ -177,43 +179,78 @@ def find_model_path(model_name=None, quantized_only=False):
         print("No training directories found. Please run train.py first.")
         return None
     
+    # If model_name is provided, it could be:
+    # 1. Full model name with extension (e.g., "final_quantized.tflite")
+    # 2. Model name without extension (e.g., "final_quantized")
+    # 3. Training directory name (e.g., "digit_recognizer_v2_10_GR")
+    # 4. Partial name match
+    
     if model_name:
-        # Search for the specific model in training directories
+        # Remove .tflite extension if present for easier matching
+        model_name_clean = model_name.replace('.tflite', '')
+        
+        print(f"Searching for model: {model_name}")
+        
+        # Search through all training directories
+        found_models = []
+        
         for training_dir in sorted(training_dirs, reverse=True):
-            # Define possible paths based on quantization preference
-            possible_paths = []
+            training_path = os.path.join(params.OUTPUT_DIR, training_dir)
             
-            if quantized_only:
-                # Only look for quantized models
-                possible_paths = [
-                    os.path.join(params.OUTPUT_DIR, training_dir, f"{model_name}_quantized.tflite"),
-                    os.path.join(params.OUTPUT_DIR, training_dir, "final_quantized.tflite"),
-                    os.path.join(params.OUTPUT_DIR, training_dir, f"{model_name}.tflite"),  # Try the name as is
-                    os.path.join(params.OUTPUT_DIR, training_dir, params.TFLITE_FILENAME),
-                ]
+            # Check if model_name matches the training directory name
+            if model_name_clean in training_dir:
+                # Look for all models in this directory
+                tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+                for model_file in tflite_files:
+                    model_path = os.path.join(training_path, model_file)
+                    if quantized_only and not is_quantized_model(model_path):
+                        continue
+                    found_models.append(model_path)
+            
+            # Check for exact model file matches
+            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+            for model_file in tflite_files:
+                model_file_clean = model_file.replace('.tflite', '')
+                
+                # Exact match or partial match
+                if (model_name_clean == model_file_clean or 
+                    model_name_clean in model_file_clean or
+                    model_name == model_file):
+                    
+                    model_path = os.path.join(training_path, model_file)
+                    if quantized_only and not is_quantized_model(model_path):
+                        continue
+                    found_models.append(model_path)
+        
+        # Remove duplicates and sort
+        found_models = list(set(found_models))
+        found_models.sort()
+        
+        if found_models:
+            if len(found_models) > 1:
+                print(f"Multiple models found matching '{model_name}':")
+                for i, model_path in enumerate(found_models, 1):
+                    model_dir = os.path.basename(os.path.dirname(model_path))
+                    model_file = os.path.basename(model_path)
+                    model_type = "quantized" if is_quantized_model(model_path) else "float"
+                    print(f"  {i}. {model_dir}/{model_file} ({model_type})")
+                
+                # Use the first one (usually most recent)
+                selected_model = found_models[0]
+                model_dir = os.path.basename(os.path.dirname(selected_model))
+                model_file = os.path.basename(selected_model)
+                print(f"Using: {model_dir}/{model_file}")
+                return selected_model
             else:
-                # Look for all models
-                possible_paths = [
-                    os.path.join(params.OUTPUT_DIR, training_dir, f"{model_name}.tflite"),
-                    os.path.join(params.OUTPUT_DIR, training_dir, params.TFLITE_FILENAME),
-                    os.path.join(params.OUTPUT_DIR, training_dir, "models", f"{model_name}.tflite"),
-                ]
-            
-            for model_path in possible_paths:
-                if os.path.exists(model_path):
-                    # If quantized_only is specified, verify it's actually a quantized model
-                    if quantized_only:
-                        if is_quantized_model(model_path):
-                            return model_path
-                        else:
-                            continue
-                    else:
-                        return model_path
+                model_dir = os.path.basename(os.path.dirname(found_models[0]))
+                model_file = os.path.basename(found_models[0])
+                print(f"Found: {model_dir}/{model_file}")
+                return found_models[0]
         
         print(f"Model '{model_name}' not found in any training directory")
         if quantized_only:
             print("No quantized model found with the specified name.")
-        print("Available training directories:")
+        print("Available training directories and models:")
         for training_dir in training_dirs:
             print(f"  - {training_dir}")
             training_dir_path = os.path.join(params.OUTPUT_DIR, training_dir)
@@ -338,24 +375,21 @@ def get_all_models(quantized_only=False):
     
     return all_models
 
-def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100):
+def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug=False):
     """Test a model on random images from dataset and return accuracy"""
     predictor = TFLiteDigitPredictor(model_path)
     correct_predictions = 0
     total_tested = 0
     
-    # Extract directory and model name for display
-    model_dir = os.path.basename(os.path.dirname(model_path))
-    model_name = os.path.basename(model_path)
-    print(f"\nTesting model: {model_dir}/{model_name}")
-    
     # Get dataset path
     if not params.DATA_SOURCES:
         print("No data sources found in parameters.py")
-        return 0.0
+        return 0.0, 0
     
     dataset_path = params.DATA_SOURCES[0]['path']
     
+    # Collect all test images with their true labels
+    test_data = []
     for digit in range(10):
         digit_folder = os.path.join(dataset_path, str(digit))
         if not os.path.exists(digit_folder):
@@ -371,34 +405,37 @@ def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100):
         test_images = np.random.choice(image_files, min(test_per_digit, len(image_files)), replace=False)
         
         for image_file in test_images:
-            image_path = os.path.join(digit_folder, image_file)
-            
-            # Load image
-            if rgb_mode:
-                image = cv2.imread(image_path, cv2.IMREAD_COLOR)
-                if image is not None:
-                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            else:
-                image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-            
-            if image is None:
-                continue
-            
-            # Predict
-            try:
-                prediction, confidence, _ = predictor.predict(image, rgb_mode=rgb_mode)
-                if prediction == digit:
-                    correct_predictions += 1
-                total_tested += 1
-            except Exception as e:
-                print(f"Error predicting {image_path}: {e}")
-                continue
+            test_data.append((os.path.join(digit_folder, image_file), digit))
+    
+    # Shuffle test data
+    np.random.shuffle(test_data)
+    
+    # Test with progress bar
+    for image_path, true_digit in tqdm(test_data, desc=f"Testing {os.path.basename(model_path)}", leave=False):
+        # Load image
+        if rgb_mode:
+            image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+            if image is not None:
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        else:
+            image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        
+        if image is None:
+            continue
+        
+        # Predict
+        try:
+            prediction, confidence, _ = predictor.predict(image, rgb_mode=rgb_mode, debug=debug)
+            if prediction == true_digit:
+                correct_predictions += 1
+            total_tested += 1
+        except Exception as e:
+            continue
     
     accuracy = correct_predictions / total_tested if total_tested > 0 else 0.0
-    print(f"Tested {total_tested} images, Accuracy: {accuracy:.4f}")
-    return accuracy
+    return accuracy, total_tested
 
-def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100):
+def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, debug=False):
     """Test all available models and print summary table"""
     models = get_all_models(quantized_only=quantized_only)
     
@@ -412,11 +449,13 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100):
     
     results = []
     
-    for model_info in models:
-        accuracy = test_model_on_dataset(
+    # Test all models with progress bar
+    for model_info in tqdm(models, desc="Testing all models"):
+        accuracy, tested_count = test_model_on_dataset(
             model_info['path'], 
             rgb_mode=rgb_mode, 
-            num_test_images=num_test_images
+            num_test_images=num_test_images,
+            debug=debug
         )
         
         results.append({
@@ -425,7 +464,7 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100):
             'Type': model_info['type'],
             'Size (KB)': f"{model_info['size_kb']:.1f}",
             'Accuracy': f"{accuracy:.4f}",
-            'Tested Images': num_test_images
+            'Tested Images': tested_count
         })
     
     # Sort by accuracy descending
@@ -463,7 +502,7 @@ def debug_model_output(quantized_only=False, rgb_mode=False):
         else:
             test_image = np.random.randint(0, 255, (params.INPUT_HEIGHT, params.INPUT_WIDTH), dtype=np.uint8)
         
-        prediction, confidence, raw_output = predictor.predict(test_image, rgb_mode=rgb_mode)
+        prediction, confidence, raw_output = predictor.predict(test_image, rgb_mode=rgb_mode, debug=True)
         
         print(f"Prediction: {prediction}")
         print(f"Confidence: {confidence:.6f}")
@@ -477,11 +516,11 @@ def main():
     """Main function with command line arguments"""
     parser = argparse.ArgumentParser(description='Digit Recognition Prediction')
     parser.add_argument('--img', type=str, help='Path to input image for prediction')
-    parser.add_argument('--model', type=str, help='Model name to use for prediction')
+    parser.add_argument('--model', type=str, help='Model name to use for prediction (can be: model filename, training directory name, or partial match)')
     parser.add_argument('--quantized', action='store_true', help='Use only quantized models')
     parser.add_argument('--RGB', action='store_true', help='Process image as RGB instead of grayscale')
     parser.add_argument('--test_all', action='store_true', help='Test all available models and print accuracy summary')
-    parser.add_argument('--test_images', type=int, default=100, help='Number of test images per model (default: 100)')
+    parser.add_argument('--test_images', type=int, default=1000, help='Number of test images per model (default: 100)')
     parser.add_argument('--debug', action='store_true', help='Debug model output interpretation')
     parser.add_argument('--list', action='store_true', help='List all available models')
     
@@ -495,7 +534,8 @@ def main():
         test_all_models(
             rgb_mode=args.RGB, 
             quantized_only=args.quantized, 
-            num_test_images=args.test_images
+            num_test_images=args.test_images,
+            debug=args.debug  # Pass debug flag to testing
         )
         return
     
@@ -528,7 +568,7 @@ def main():
         return
     
     # Perform prediction
-    prediction, confidence, raw_output = predictor.predict(image, rgb_mode=args.RGB)
+    prediction, confidence, raw_output = predictor.predict(image, rgb_mode=args.RGB, debug=args.debug)
     print(f"\n=== PREDICTION RESULT ===")
     print(f"Predicted digit: {prediction}")
     print(f"Confidence: {confidence:.4f}")
