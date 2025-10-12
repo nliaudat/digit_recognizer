@@ -377,63 +377,78 @@ def get_all_models(quantized_only=False):
     
     return all_models
 
-def count_total_images_in_dataset():
-    """Count total number of images available in the dataset"""
+def count_total_images_in_datasets():
+    """Count total number of images available in all datasets"""
     if not params.DATA_SOURCES:
         return 0
     
-    dataset_path = params.DATA_SOURCES[0]['path']
     total_images = 0
-    
-    for digit in range(10):
-        digit_folder = os.path.join(dataset_path, str(digit))
-        if os.path.exists(digit_folder):
-            image_files = [f for f in os.listdir(digit_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-            total_images += len(image_files)
+    for data_source in params.DATA_SOURCES:
+        dataset_path = data_source['path']
+        dataset_images = 0
+        
+        for digit in range(10):
+            digit_folder = os.path.join(dataset_path, str(digit))
+            if os.path.exists(digit_folder):
+                image_files = [f for f in os.listdir(digit_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                dataset_images += len(image_files)
+        
+        print(f"  - {data_source['name']}: {dataset_images} images")
+        total_images += dataset_images
     
     return total_images
 
-def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug=False, use_all_images=False):
+def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug=False, use_all_datasets=False):
     """Test a model on random images from dataset and return accuracy"""
     predictor = TFLiteDigitPredictor(model_path)
     correct_predictions = 0
     total_tested = 0
     
-    # Get dataset path
+    # Get dataset paths from all data sources
     if not params.DATA_SOURCES:
         print("No data sources found in parameters.py")
         return 0.0, 0
     
-    dataset_path = params.DATA_SOURCES[0]['path']
-    
-    # Collect all test images with their true labels
+    # Collect all test images with their true labels from all datasets
     test_data = []
-    for digit in range(10):
-        digit_folder = os.path.join(dataset_path, str(digit))
-        if not os.path.exists(digit_folder):
-            continue
+    
+    for data_source in params.DATA_SOURCES:
+        dataset_path = data_source['path']
+        weight = data_source.get('weight', 1.0)  # Default weight is 1.0 if not specified
+        
+        for digit in range(10):
+            digit_folder = os.path.join(dataset_path, str(digit))
+            if not os.path.exists(digit_folder):
+                continue
+                
+            # Get images for this digit
+            image_files = [f for f in os.listdir(digit_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+            if not image_files:
+                continue
             
-        # Get images for this digit
-        image_files = [f for f in os.listdir(digit_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-        if not image_files:
-            continue
-        
-        if use_all_images:
-            # Use all available images
-            test_images = image_files
-        else:
-            # Test up to num_test_images//10 per digit
-            test_per_digit = max(1, num_test_images // 10)
-            test_images = np.random.choice(image_files, min(test_per_digit, len(image_files)), replace=False)
-        
-        for image_file in test_images:
-            test_data.append((os.path.join(digit_folder, image_file), digit))
+            if use_all_datasets:
+                # Use all available images from this dataset
+                for image_file in image_files:
+                    test_data.append((os.path.join(digit_folder, image_file), digit, weight))
+            else:
+                # Calculate number of images to use from this dataset based on weight
+                dataset_images_count = int((num_test_images // 10) * weight)
+                dataset_images_count = max(1, dataset_images_count)  # At least 1 image per digit
+                
+                if len(image_files) > 0:
+                    test_images = np.random.choice(
+                        image_files, 
+                        min(dataset_images_count, len(image_files)), 
+                        replace=False
+                    )
+                    for image_file in test_images:
+                        test_data.append((os.path.join(digit_folder, image_file), digit, weight))
     
     # Shuffle test data
     np.random.shuffle(test_data)
     
     # Test with progress bar
-    for image_path, true_digit in tqdm(test_data, desc=f"Testing {os.path.basename(model_path)}", leave=False):
+    for image_path, true_digit, weight in tqdm(test_data, desc=f"Testing {os.path.basename(model_path)}", leave=False):
         # Load image
         if rgb_mode:
             image = cv2.imread(image_path, cv2.IMREAD_COLOR)
@@ -506,11 +521,11 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
     
     # Determine test configuration
     if use_all_datasets:
-        total_images = count_total_images_in_dataset()
-        print(f"\nTesting {len(models)} models on ALL available images ({total_images} total)...")
+        print(f"\nTesting {len(models)} models on ALL available images from all datasets:")
+        total_images = count_total_images_in_datasets()
         actual_test_images = total_images
     else:
-        print(f"\nTesting {len(models)} models on {num_test_images} images...")
+        print(f"\nTesting {len(models)} models on {num_test_images} images (distributed across datasets by weight)...")
         actual_test_images = num_test_images
     
     print("Mode:", "RGB" if rgb_mode else "Grayscale")
@@ -525,7 +540,7 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
             rgb_mode=rgb_mode, 
             num_test_images=num_test_images,
             debug=debug,
-            use_all_images=use_all_datasets
+            use_all_datasets=use_all_datasets
         )
         
         results.append({
@@ -543,6 +558,10 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
     # Print results table
     print(f"\n{'='*80}")
     print(f"SUMMARY RESULTS ({'RGB' if rgb_mode else 'Grayscale'} mode)")
+    if use_all_datasets:
+        print("DATASETS: ALL datasets (using all available images)")
+    else:
+        print(f"DATASETS: Distributed sampling (target: {num_test_images} images)")
     print(f"{'='*80}")
     print(tabulate(results, headers='keys', tablefmt='grid', stralign='right'))
     
@@ -664,3 +683,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+# py predict.py --test_all --quantized --all_datasets
+# py predict.py --test_all --quantized --test_images 18000 (+0.x weight from augmented datasource)
