@@ -4,10 +4,13 @@ A deep learning project for rotating digit recognition using various neural netw
 
 ## Overview
 
-This project implements and compares different neural network models for recognizing rotating digits from [haverland dataset](https://github.com/haverland/Tenth-of-step-of-a-meter-digit). The goal is to explore the trade-offs between model complexity, size, and accuracy.
+This project implements and compares different neural network models for recognizing rotating digits from [haverland dataset](https://github.com/haverland/Tenth-of-step-of-a-meter-digit). 
 
-It's actually focused on 10 classes recognitions [0-9] but can works for 100 classes [0-99]
-And grayscale as it performe the same on test datasets
+The goal is to explore the trade-offs between model complexity, size, and accuracy.
+
+It's actually focused on 10 classes recognitions [0-9] but can works for 100 classes [0-99] And grayscale as it performe the same on test datasets
+
+Grayscale or RGB perform the same on test datasets, but RGB need more resources at image processing level.
 
 ## Model Performance
 
