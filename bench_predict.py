@@ -426,7 +426,7 @@ def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug
     return accuracy, total_tested, avg_inference_time, inferences_per_second
 
 def generate_comparison_graphs(results, rgb_mode=False, quantized_only=False, use_all_datasets=False):
-    """Generate comparison graphs for the benchmark results"""
+    """Generate separate comparison graphs for the benchmark results"""
     # Create graphs directory
     graphs_dir = os.path.join(params.OUTPUT_DIR, "test_results", "graphs")
     os.makedirs(graphs_dir, exist_ok=True)
@@ -442,12 +442,15 @@ def generate_comparison_graphs(results, rgb_mode=False, quantized_only=False, us
     inferences_per_second = []
     sizes_kb = []
     parameters = []
+    model_names = []
     
     for result in results:
-        directories.append(result['Directory'][:15] + '...' if len(result['Directory']) > 18 else result['Directory'])
+        short_dir = result['Directory'][:15] + '...' if len(result['Directory']) > 18 else result['Directory']
+        directories.append(short_dir)
         accuracies.append(float(result['Accuracy']) * 100)  # Convert to percentage
         inferences_per_second.append(float(result['Inf/s']))
         sizes_kb.append(float(result['Size (KB)']))
+        model_names.append(result['Model'])
         
         # Convert parameters string to numeric
         params_str = result['Params']
@@ -459,64 +462,161 @@ def generate_comparison_graphs(results, rgb_mode=False, quantized_only=False, us
             params_val = float(params_str)
         parameters.append(params_val / 1_000_000)  # Convert to millions
     
-    # Create figure with subplots
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
-    fig.suptitle(f'Model Comparison ({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=16, fontweight='bold')
+    graph_paths = []
     
-    # Plot 1: Accuracy vs Inference Speed (main comparison)
-    colors = ['green' if acc >= max(accuracies) - 1 else 'blue' for acc in accuracies]  # Highlight best accuracy
-    scatter1 = ax1.scatter(inferences_per_second, accuracies, c=colors, s=100, alpha=0.7)
-    ax1.set_xlabel('Inferences per Second')
-    ax1.set_ylabel('Accuracy (%)')
-    ax1.set_title('Accuracy vs Speed')
-    ax1.grid(True, alpha=0.3)
+    # Graph 1: Accuracy vs Inference Speed (main comparison)
+    plt.figure(figsize=(12, 8))
+    colors = ['green' if acc >= max(accuracies) - 1 else 'blue' for acc in accuracies]
+    scatter = plt.scatter(inferences_per_second, accuracies, c=colors, s=100, alpha=0.7)
+    plt.xlabel('Inferences per Second', fontsize=12)
+    plt.ylabel('Accuracy (%)', fontsize=12)
+    plt.title(f'Accuracy vs Speed\n({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
+    plt.grid(True, alpha=0.3)
     
     # Annotate points with model names
-    for i, dir_name in enumerate(directories):
-        ax1.annotate(dir_name, (inferences_per_second[i], accuracies[i]), 
-                    xytext=(5, 5), textcoords='offset points', fontsize=8)
-    
-    # Plot 2: Model Size vs Accuracy
-    scatter2 = ax2.scatter(sizes_kb, accuracies, c=parameters, s=100, alpha=0.7, cmap='viridis')
-    ax2.set_xlabel('Model Size (KB)')
-    ax2.set_ylabel('Accuracy (%)')
-    ax2.set_title('Accuracy vs Model Size')
-    ax2.grid(True, alpha=0.3)
-    plt.colorbar(scatter2, ax=ax2, label='Parameters (Millions)')
-    
-    # Plot 3: Parameters vs Speed
-    scatter3 = ax3.scatter(parameters, inferences_per_second, c=accuracies, s=100, alpha=0.7, cmap='plasma')
-    ax3.set_xlabel('Parameters (Millions)')
-    ax3.set_ylabel('Inferences per Second')
-    ax3.set_title('Speed vs Model Complexity')
-    ax3.grid(True, alpha=0.3)
-    plt.colorbar(scatter3, ax=ax3, label='Accuracy (%)')
-    
-    # Plot 4: Bar chart of inference speeds
-    y_pos = np.arange(len(directories))
-    bars = ax4.barh(y_pos, inferences_per_second, color='lightblue')
-    ax4.set_yticks(y_pos)
-    ax4.set_yticklabels(directories, fontsize=8)
-    ax4.set_xlabel('Inferences per Second')
-    ax4.set_title('Inference Speed Comparison')
-    ax4.grid(True, alpha=0.3, axis='x')
-    
-    # Add value labels on bars
-    for i, bar in enumerate(bars):
-        width = bar.get_width()
-        ax4.text(width + max(inferences_per_second) * 0.01, bar.get_y() + bar.get_height()/2,
-                f'{int(width)}', ha='left', va='center', fontsize=8)
+    for i, (dir_name, model_name) in enumerate(zip(directories, model_names)):
+        plt.annotate(f"{dir_name}\n{model_name}", 
+                    (inferences_per_second[i], accuracies[i]), 
+                    xytext=(10, 10), textcoords='offset points', 
+                    fontsize=8, alpha=0.8,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
     
     plt.tight_layout()
-    
-    # Save the figure
-    graph_filename = f"model_comparison_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
-    graph_path = os.path.join(graphs_dir, graph_filename)
-    plt.savefig(graph_path, dpi=300, bbox_inches='tight')
+    graph1_filename = f"accuracy_vs_speed_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
+    graph1_path = os.path.join(graphs_dir, graph1_filename)
+    plt.savefig(graph1_path, dpi=300, bbox_inches='tight')
     plt.close()
+    graph_paths.append(graph1_path)
     
-    print(f"📊 Comparison graphs saved to: {graph_path}")
-    return graph_path
+    # Graph 2: Model Size vs Accuracy
+    plt.figure(figsize=(12, 8))
+    scatter = plt.scatter(sizes_kb, accuracies, c=parameters, s=100, alpha=0.7, cmap='viridis')
+    plt.xlabel('Model Size (KB)', fontsize=12)
+    plt.ylabel('Accuracy (%)', fontsize=12)
+    plt.title(f'Accuracy vs Model Size\n({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    cbar = plt.colorbar(scatter)
+    cbar.set_label('Parameters (Millions)', fontsize=10)
+    
+    # Annotate points
+    for i, (dir_name, model_name) in enumerate(zip(directories, model_names)):
+        plt.annotate(f"{dir_name}\n{model_name}", 
+                    (sizes_kb[i], accuracies[i]), 
+                    xytext=(10, 10), textcoords='offset points', 
+                    fontsize=8, alpha=0.8,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+    
+    plt.tight_layout()
+    graph2_filename = f"accuracy_vs_size_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
+    graph2_path = os.path.join(graphs_dir, graph2_filename)
+    plt.savefig(graph2_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    graph_paths.append(graph2_path)
+    
+    # Graph 3: Parameters vs Speed
+    plt.figure(figsize=(12, 8))
+    scatter = plt.scatter(parameters, inferences_per_second, c=accuracies, s=100, alpha=0.7, cmap='plasma')
+    plt.xlabel('Parameters (Millions)', fontsize=12)
+    plt.ylabel('Inferences per Second', fontsize=12)
+    plt.title(f'Speed vs Model Complexity\n({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    cbar = plt.colorbar(scatter)
+    cbar.set_label('Accuracy (%)', fontsize=10)
+    
+    # Annotate points
+    for i, (dir_name, model_name) in enumerate(zip(directories, model_names)):
+        plt.annotate(f"{dir_name}\n{model_name}", 
+                    (parameters[i], inferences_per_second[i]), 
+                    xytext=(10, 10), textcoords='offset points', 
+                    fontsize=8, alpha=0.8,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+    
+    plt.tight_layout()
+    graph3_filename = f"speed_vs_complexity_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
+    graph3_path = os.path.join(graphs_dir, graph3_filename)
+    plt.savefig(graph3_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    graph_paths.append(graph3_path)
+    
+    # Graph 4: Inference Speed Bar Chart
+    plt.figure(figsize=(14, 8))
+    y_pos = np.arange(len(directories))
+    bars = plt.barh(y_pos, inferences_per_second, color='lightblue', alpha=0.7)
+    plt.yticks(y_pos, directories, fontsize=10)
+    plt.xlabel('Inferences per Second', fontsize=12)
+    plt.title(f'Inference Speed Comparison\n({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
+    plt.grid(True, alpha=0.3, axis='x')
+    
+    # Add value labels on bars and accuracy info
+    for i, (bar, acc, model) in enumerate(zip(bars, accuracies, model_names)):
+        width = bar.get_width()
+        plt.text(width + max(inferences_per_second) * 0.01, bar.get_y() + bar.get_height()/2,
+                f'{int(width)} inf/s\n{acc:.1f}% acc\n{model}', 
+                ha='left', va='center', fontsize=8,
+                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    graph4_filename = f"speed_comparison_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
+    graph4_path = os.path.join(graphs_dir, graph4_filename)
+    plt.savefig(graph4_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    graph_paths.append(graph4_path)
+    
+    # Graph 5: Accuracy Bar Chart
+    plt.figure(figsize=(14, 8))
+    y_pos = np.arange(len(directories))
+    colors = ['lightgreen' if acc == max(accuracies) else 'lightcoral' for acc in accuracies]
+    bars = plt.barh(y_pos, accuracies, color=colors, alpha=0.7)
+    plt.yticks(y_pos, directories, fontsize=10)
+    plt.xlabel('Accuracy (%)', fontsize=12)
+    plt.title(f'Accuracy Comparison\n({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
+    plt.grid(True, alpha=0.3, axis='x')
+    
+    # Add value labels on bars and speed info
+    for i, (bar, speed, model) in enumerate(zip(bars, inferences_per_second, model_names)):
+        width = bar.get_width()
+        plt.text(width + 0.5, bar.get_y() + bar.get_height()/2,
+                f'{width:.1f}% acc\n{int(speed)} inf/s\n{model}', 
+                ha='left', va='center', fontsize=8,
+                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    graph5_filename = f"accuracy_comparison_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
+    graph5_path = os.path.join(graphs_dir, graph5_filename)
+    plt.savefig(graph5_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    graph_paths.append(graph5_path)
+    
+    # Graph 6: Size vs Speed Trade-off
+    plt.figure(figsize=(12, 8))
+    scatter = plt.scatter(sizes_kb, inferences_per_second, c=accuracies, s=100, alpha=0.7, cmap='coolwarm')
+    plt.xlabel('Model Size (KB)', fontsize=12)
+    plt.ylabel('Inferences per Second', fontsize=12)
+    plt.title(f'Size vs Speed Trade-off\n({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    cbar = plt.colorbar(scatter)
+    cbar.set_label('Accuracy (%)', fontsize=10)
+    
+    # Annotate points
+    for i, (dir_name, model_name) in enumerate(zip(directories, model_names)):
+        plt.annotate(f"{dir_name}\n{model_name}", 
+                    (sizes_kb[i], inferences_per_second[i]), 
+                    xytext=(10, 10), textcoords='offset points', 
+                    fontsize=8, alpha=0.8,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+    
+    plt.tight_layout()
+    graph6_filename = f"size_vs_speed_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
+    graph6_path = os.path.join(graphs_dir, graph6_filename)
+    plt.savefig(graph6_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    graph_paths.append(graph6_path)
+    
+    print(f"📊 Generated {len(graph_paths)} separate comparison graphs:")
+    for path in graph_paths:
+        print(f"   📈 {os.path.basename(path)}")
+    
+    return graph_paths
 
 def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, debug=False, use_all_datasets=False):
     """Test all available models and print summary table"""
