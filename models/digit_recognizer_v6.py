@@ -6,7 +6,7 @@ def create_digit_recognizer_v6():
     """
     Digit Recognizer v6 - Optimized for TFLite Micro & ESP-DL compatibility
     
-    Key improvements over v5:
+    Key improvements over v6:
     - Standard ReLU instead of ReLU6 (better TFLite Micro support)
     - Optimized quantization-friendly architecture
     - ESP-DL compatible operations only
