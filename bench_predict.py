@@ -278,33 +278,90 @@ def find_model_path(model_name=None, quantized_only=False):
         return None
 
 def get_all_models(quantized_only=False):
-    """Get all available models with parameters count"""
+    """Get all available models with parameters count - with error handling"""
     training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
     all_models = []
     
     for training_dir in training_dirs:
         training_path = os.path.join(params.OUTPUT_DIR, training_dir)
-        tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
         
-        for model_file in tflite_files:
+        # Look for the standard model file names
+        possible_model_files = [
+            "final_quantized.tflite",
+            "final_float.tflite", 
+            "model_quantized.tflite",
+            "model_float.tflite",
+            "quantized.tflite",
+            "float.tflite",
+            params.TFLITE_FILENAME  # Use the filename from parameters
+        ]
+        
+        # Also look for any .tflite files in the directory
+        all_tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+        
+        # Combine both approaches
+        model_files_to_check = []
+        for model_file in possible_model_files:
+            if model_file in all_tflite_files:
+                model_files_to_check.append(model_file)
+        
+        # If no standard files found, use all available .tflite files
+        if not model_files_to_check and all_tflite_files:
+            model_files_to_check = all_tflite_files
+        
+        for model_file in model_files_to_check:
             model_path = os.path.join(training_path, model_file)
+            
+            # Skip if file doesn't exist or is empty
+            if not os.path.exists(model_path) or os.path.getsize(model_path) == 0:
+                print(f"⚠️  Skipping invalid model file: {training_dir}/{model_file}")
+                continue
+                
+            # Verify the model can be loaded
+            if not is_valid_tflite_model(model_path):
+                print(f"⚠️  Skipping corrupted model file: {training_dir}/{model_file}")
+                continue
+                
             if quantized_only and not is_quantized_model(model_path):
                 continue
                 
-            model_size = os.path.getsize(model_path) / 1024
-            model_type = "quantized" if is_quantized_model(model_path) else "float"
-            parameters_count = get_model_parameters_count(model_path)
-            
-            all_models.append({
-                'path': model_path,
-                'name': model_file,
-                'directory': training_dir,
-                'size_kb': model_size,
-                'type': model_type,
-                'parameters': parameters_count
-            })
+            try:
+                model_size = os.path.getsize(model_path) / 1024
+                model_type = "quantized" if is_quantized_model(model_path) else "float"
+                parameters_count = get_model_parameters_count(model_path)
+                
+                all_models.append({
+                    'path': model_path,
+                    'name': model_file,  # Use the actual filename
+                    'directory': training_dir,
+                    'size_kb': model_size,
+                    'type': model_type,
+                    'parameters': parameters_count
+                })
+                print(f"✅ Found valid model: {training_dir}/{model_file}")
+                
+            except Exception as e:
+                print(f"⚠️  Error processing model {training_dir}/{model_file}: {e}")
+                continue
     
-    return all_models
+    # Remove duplicates and sort by directory name
+    unique_models = {}
+    for model in all_models:
+        key = f"{model['directory']}/{model['name']}"
+        if key not in unique_models:
+            unique_models[key] = model
+    
+    return list(unique_models.values())
+    
+def is_valid_tflite_model(model_path):
+    """Check if a TFLite model file is valid and can be loaded"""
+    try:
+        interpreter = tf.lite.Interpreter(model_path=model_path)
+        interpreter.allocate_tensors()
+        return True
+    except Exception as e:
+        print(f"❌ Invalid TFLite model {os.path.basename(model_path)}: {e}")
+        return False
 
 def count_total_images_in_datasets():
     """Count total number of images available in all datasets"""
@@ -824,20 +881,39 @@ def list_available_models(quantized_only=False):
     print(f"Available {'quantized ' if quantized_only else ''}models:")
     print("-" * 50)
     
+    valid_models_found = False
     for training_dir in sorted(training_dirs, reverse=True):
         training_path = os.path.join(params.OUTPUT_DIR, training_dir)
-        tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+        
+        # Look for standard model files
+        model_files = []
+        for model_file in ["final_quantized.tflite", "final_float.tflite", "model_quantized.tflite", "model_float.tflite"]:
+            if os.path.exists(os.path.join(training_path, model_file)):
+                model_files.append(model_file)
+        
+        # If no standard files, look for any .tflite files
+        if not model_files:
+            model_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
         
         if quantized_only:
-            tflite_files = [f for f in tflite_files if is_quantized_model(os.path.join(training_path, f))]
+            model_files = [f for f in model_files if is_quantized_model(os.path.join(training_path, f))]
         
-        if tflite_files:
+        if model_files:
+            valid_models_found = True
             print(f"\n{training_dir}:")
-            for model_file in tflite_files:
+            for model_file in model_files:
                 model_path = os.path.join(training_path, model_file)
-                model_size = os.path.getsize(model_path) / 1024
-                model_type = "quantized" if is_quantized_model(model_path) else "float"
-                print(f"  └── {model_file} ({model_size:.1f} KB, {model_type})")
+                if os.path.exists(model_path):
+                    model_size = os.path.getsize(model_path) / 1024
+                    model_type = "quantized" if is_quantized_model(model_path) else "float"
+                    print(f"  └── {model_file} ({model_size:.1f} KB, {model_type})")
+                else:
+                    print(f"  └── {model_file} (FILE NOT FOUND)")
+    
+    if not valid_models_found:
+        print("No valid model files found in any training directory.")
+        print("Expected model files: final_quantized.tflite, final_float.tflite, etc.")
+
 
 def main():
     """Main function with command line arguments"""
