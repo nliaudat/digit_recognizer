@@ -11,6 +11,7 @@ import glob
 from tqdm import tqdm
 import csv
 from datetime import datetime
+import time
 
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
@@ -399,15 +400,16 @@ def count_total_images_in_datasets():
     return total_images
 
 def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug=False, use_all_datasets=False):
-    """Test a model on random images from dataset and return accuracy"""
+    """Test a model on random images from dataset and return accuracy and performance metrics"""
     predictor = TFLiteDigitPredictor(model_path)
     correct_predictions = 0
     total_tested = 0
+    total_inference_time = 0.0
     
     # Get dataset paths from all data sources
     if not params.DATA_SOURCES:
         print("No data sources found in parameters.py")
-        return 0.0, 0
+        return 0.0, 0, 0.0, 0.0
     
     # Collect all test images with their true labels from all datasets
     test_data = []
@@ -447,6 +449,18 @@ def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug
     # Shuffle test data
     np.random.shuffle(test_data)
     
+    # Warm-up run to avoid cold start timing issues
+    if len(test_data) > 0:
+        warmup_image_path, warmup_digit, _ = test_data[0]
+        warmup_image = cv2.imread(warmup_image_path, cv2.IMREAD_GRAYSCALE if not rgb_mode else cv2.IMREAD_COLOR)
+        if warmup_image is not None and rgb_mode:
+            warmup_image = cv2.cvtColor(warmup_image, cv2.COLOR_BGR2RGB)
+        if warmup_image is not None:
+            try:
+                predictor.predict(warmup_image, rgb_mode=rgb_mode, debug=False)
+            except:
+                pass
+    
     # Test with progress bar
     for image_path, true_digit, weight in tqdm(test_data, desc=f"Testing {os.path.basename(model_path)}", leave=False):
         # Load image
@@ -460,17 +474,28 @@ def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug
         if image is None:
             continue
         
-        # Predict
+        # Predict with timing
         try:
+            start_time = time.perf_counter()
             prediction, confidence, _ = predictor.predict(image, rgb_mode=rgb_mode, debug=debug)
+            end_time = time.perf_counter()
+            
+            inference_time = (end_time - start_time) * 1000  # Convert to milliseconds
+            total_inference_time += inference_time
+            
             if prediction == true_digit:
                 correct_predictions += 1
             total_tested += 1
         except Exception as e:
             continue
     
+    # Calculate performance metrics
     accuracy = correct_predictions / total_tested if total_tested > 0 else 0.0
-    return accuracy, total_tested
+    
+    avg_inference_time = total_inference_time / total_tested if total_tested > 0 else 0.0
+    inferences_per_second = 1000 / avg_inference_time if avg_inference_time > 0 else 0.0
+    
+    return accuracy, total_tested, avg_inference_time, inferences_per_second
 
 def save_results_to_csv(results, rgb_mode=False, quantized_only=False, use_all_images=False, test_images_count=100):
     """Save results to CSV file"""
@@ -496,12 +521,14 @@ def save_results_to_csv(results, rgb_mode=False, quantized_only=False, use_all_i
             'Type': result['Type'],
             'Size_KB': result['Size (KB)'],
             'Accuracy': float(result['Accuracy']),
+            'Inference_ms': float(result['Inference (ms)']),
+            'Inferences_per_second': float(result['Inferences/s']),
             'Tested_Images': result['Tested Images']
         })
     
     # Write to CSV
     with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-        fieldnames = ['Model', 'Directory', 'Type', 'Size_KB', 'Accuracy', 'Tested_Images']
+        fieldnames = ['Model', 'Directory', 'Type', 'Size_KB', 'Accuracy', 'Inference_ms', 'Inferences_per_second', 'Tested_Images']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         
         writer.writeheader()
@@ -535,7 +562,7 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
     
     # Test all models with progress bar
     for model_info in tqdm(models, desc="Testing all models"):
-        accuracy, tested_count = test_model_on_dataset(
+        accuracy, tested_count, avg_inference_time, inferences_per_second = test_model_on_dataset(
             model_info['path'], 
             rgb_mode=rgb_mode, 
             num_test_images=num_test_images,
@@ -549,26 +576,38 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
             'Type': model_info['type'],
             'Size (KB)': f"{model_info['size_kb']:.1f}",
             'Accuracy': f"{accuracy:.4f}",
+            'Inference (ms)': f"{avg_inference_time:.2f}",
+            'Inferences/s': f"{inferences_per_second:.1f}",
             'Tested Images': tested_count
         })
     
-    # Sort by accuracy descending
+    # Sort by accuracy descending (you can change this to sort by speed if preferred)
     results.sort(key=lambda x: float(x['Accuracy']), reverse=True)
     
     # Print results table
-    print(f"\n{'='*80}")
+    print(f"\n{'='*100}")
     print(f"SUMMARY RESULTS ({'RGB' if rgb_mode else 'Grayscale'} mode)")
     if use_all_datasets:
         print("DATASETS: ALL datasets (using all available images)")
     else:
         print(f"DATASETS: Distributed sampling (target: {num_test_images} images)")
-    print(f"{'='*80}")
+    print(f"{'='*100}")
     print(tabulate(results, headers='keys', tablefmt='grid', stralign='right'))
     
-    # Print best model
+    # Print best models by different criteria
     if results and float(results[0]['Accuracy']) > 0:
-        best = results[0]
-        print(f"\n🎯 BEST MODEL: {best['Directory']}/{best['Model']} (Accuracy: {best['Accuracy']})")
+        best_accuracy = max(results, key=lambda x: float(x['Accuracy']))
+        fastest_model = min(results, key=lambda x: float(x['Inference (ms)']))
+        best_balanced = max(results, key=lambda x: float(x['Accuracy']) * float(x['Inferences/s']) / 100)
+        
+        print(f"\n🏆 BEST BY ACCURACY: {best_accuracy['Directory']}/{best_accuracy['Model']} "
+              f"(Accuracy: {best_accuracy['Accuracy']}, Speed: {best_accuracy['Inferences/s']} inf/s)")
+        
+        print(f"⚡ FASTEST MODEL: {fastest_model['Directory']}/{fastest_model['Model']} "
+              f"(Speed: {fastest_model['Inferences/s']} inf/s, Accuracy: {fastest_model['Accuracy']})")
+        
+        print(f"⭐ BEST BALANCED: {best_balanced['Directory']}/{best_balanced['Model']} "
+              f"(Accuracy: {best_balanced['Accuracy']}, Speed: {best_balanced['Inferences/s']} inf/s)")
     
     # Save results to CSV
     csv_path = save_results_to_csv(
