@@ -31,6 +31,11 @@ The project demonstrates that :
  - There is major differences between training efficiency and real tests
  - Model size "double" the tensor arena needed in memory
  - CPU operations must be also taken into parameters for IOT
+ - RGB or grayscale has very same benchmark results, but the processing is not the same as in parameters needed. Every CNN works on Conv2D style : 
+ ##### How Conv2D Actually Works with Channels:
+-   **Input**: `(height, width, channels)` - e.g., `(32, 20, 1)` for grayscale or `(32, 20, 3)` for RGB
+-   **Conv2D with 32 filters**: Each filter has shape `(3, 3, channels)` and produces 1 output channel
+-   **Output**: `(height, width, 32)` - 32 feature maps, each combining information from all input channels
 
 ## Related Projects
 
