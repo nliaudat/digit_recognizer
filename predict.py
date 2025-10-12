@@ -353,7 +353,7 @@ def list_available_models(quantized_only=False):
                 print(f"  └── {model_file} ({model_size:.1f} KB, {model_type})")
 
 def get_all_models(quantized_only=False):
-    """Get all available models"""
+    """Get all available models with parameters count"""
     training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
     all_models = []
     
@@ -368,12 +368,15 @@ def get_all_models(quantized_only=False):
                 
             model_size = os.path.getsize(model_path) / 1024
             model_type = "quantized" if is_quantized_model(model_path) else "float"
+            parameters_count = get_model_parameters_count(model_path)
+            
             all_models.append({
                 'path': model_path,
                 'name': model_file,
                 'directory': training_dir,
                 'size_kb': model_size,
-                'type': model_type
+                'type': model_type,
+                'parameters': parameters_count
             })
     
     return all_models
@@ -498,7 +501,7 @@ def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug
     return accuracy, total_tested, avg_inference_time, inferences_per_second
 
 def save_results_to_csv(results, rgb_mode=False, quantized_only=False, use_all_images=False, test_images_count=100):
-    """Save results to CSV file"""
+    """Save FULL results to CSV file with all information"""
     # Create results directory if it doesn't exist
     results_dir = os.path.join(params.OUTPUT_DIR, "test_results")
     os.makedirs(results_dir, exist_ok=True)
@@ -512,30 +515,40 @@ def save_results_to_csv(results, rgb_mode=False, quantized_only=False, use_all_i
     filename = f"model_comparison_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.csv"
     csv_path = os.path.join(results_dir, filename)
     
-    # Prepare data for CSV
+    # Prepare FULL data for CSV (all information)
     csv_data = []
     for result in results:
+        # Convert params string back to number for CSV
+        params_str = result['Params']
+        if 'M' in params_str:
+            params_count = float(params_str.replace('M', '')) * 1_000_000
+        elif 'K' in params_str:
+            params_count = float(params_str.replace('K', '')) * 1_000
+        else:
+            params_count = float(params_str)
+            
         csv_data.append({
             'Model': result['Model'],
             'Directory': result['Directory'],
             'Type': result['Type'],
-            'Size_KB': result['Size (KB)'],
+            'Parameters': int(params_count),
+            'Size_KB': float(result['Size (KB)']),
             'Accuracy': float(result['Accuracy']),
-            'Inference_ms': float(result['Inference (ms)']),
-            'Inferences_per_second': float(result['Inferences/s']),
-            'Tested_Images': result['Tested Images']
+            'Inference_Time_ms': float(result['Inf Time (ms)']),
+            'Inferences_per_second': float(result['Inf/s']),
+            'Tested_Images': result['Tested']
         })
     
     # Write to CSV
     with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-        fieldnames = ['Model', 'Directory', 'Type', 'Size_KB', 'Accuracy', 'Inference_ms', 'Inferences_per_second', 'Tested_Images']
+        fieldnames = ['Model', 'Directory', 'Type', 'Parameters', 'Size_KB', 'Accuracy', 'Inference_Time_ms', 'Inferences_per_second', 'Tested_Images']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         
         writer.writeheader()
         for row in csv_data:
             writer.writerow(row)
     
-    print(f"Results saved to: {csv_path}")
+    print(f"\n💾 Full results saved to: {csv_path}")
     return csv_path
 
 def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, debug=False, use_all_datasets=False):
@@ -570,46 +583,88 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
             use_all_datasets=use_all_datasets
         )
         
+        # Format parameters for display
+        params_count = model_info['parameters']
+        if params_count >= 1_000_000:
+            params_str = f"{params_count/1_000_000:.1f}M"
+        elif params_count >= 1_000:
+            params_str = f"{params_count/1_000:.1f}K"
+        else:
+            params_str = f"{params_count}"
+        
         results.append({
             'Model': model_info['name'],
             'Directory': model_info['directory'],
             'Type': model_info['type'],
+            'Params': params_str,
+            'Params_Raw': params_count,  # Keep raw for sorting
             'Size (KB)': f"{model_info['size_kb']:.1f}",
+            'Size_Raw': model_info['size_kb'],  # Keep raw for sorting
             'Accuracy': f"{accuracy:.4f}",
-            'Inference (ms)': f"{avg_inference_time:.2f}",
-            'Inferences/s': f"{inferences_per_second:.1f}",
-            'Tested Images': tested_count
+            'Accuracy_Raw': accuracy,  # Keep raw for sorting
+            'Inf Time (ms)': f"{avg_inference_time:.2f}",
+            'Inf Time_Raw': avg_inference_time,  # Keep raw for sorting
+            'Inf/s': f"{inferences_per_second:.0f}",
+            'Inf/s_Raw': inferences_per_second,  # Keep raw for sorting
+            'Tested': tested_count
         })
     
-    # Sort by accuracy descending (you can change this to sort by speed if preferred)
-    results.sort(key=lambda x: float(x['Accuracy']), reverse=True)
+    # Sort by accuracy descending
+    results.sort(key=lambda x: x['Accuracy_Raw'], reverse=True)
     
-    # Print results table
-    print(f"\n{'='*100}")
+    # Print simplified console table
+    print(f"\n{'='*80}")
     print(f"SUMMARY RESULTS ({'RGB' if rgb_mode else 'Grayscale'} mode)")
     if use_all_datasets:
-        print("DATASETS: ALL datasets (using all available images)")
+        print(f"DATASETS: ALL datasets ({actual_test_images} total images)")
     else:
-        print(f"DATASETS: Distributed sampling (target: {num_test_images} images)")
-    print(f"{'='*100}")
-    print(tabulate(results, headers='keys', tablefmt='grid', stralign='right'))
+        print(f"DATASETS: Distributed sampling ({actual_test_images} target images)")
+    print(f"{'='*80}")
+    
+    # Simplified console output - only essential columns
+    headers = ['Directory', 'Params', 'Size', 'Accuracy', 'Inf/s', 'Images']
+    table_data = []
+    for result in results:
+        # Shorten directory name for display
+        short_dir = result['Directory'][:20] + '...' if len(result['Directory']) > 23 else result['Directory']
+        
+        table_data.append([
+            short_dir,
+            result['Params'],
+            result['Size (KB)'],
+            result['Accuracy'],
+            result['Inf/s'],
+            result['Tested']
+        ])
+    
+    print(tabulate(table_data, headers=headers, tablefmt='simple_grid', stralign='right'))
     
     # Print best models by different criteria
-    if results and float(results[0]['Accuracy']) > 0:
-        best_accuracy = max(results, key=lambda x: float(x['Accuracy']))
-        fastest_model = min(results, key=lambda x: float(x['Inference (ms)']))
-        best_balanced = max(results, key=lambda x: float(x['Accuracy']) * float(x['Inferences/s']) / 100)
+    if results and results[0]['Accuracy_Raw'] > 0:
+        best_accuracy = max(results, key=lambda x: x['Accuracy_Raw'])
+        fastest_model = min(results, key=lambda x: x['Inf Time_Raw'])
         
-        print(f"\n🏆 BEST BY ACCURACY: {best_accuracy['Directory']}/{best_accuracy['Model']} "
-              f"(Accuracy: {best_accuracy['Accuracy']}, Speed: {best_accuracy['Inferences/s']} inf/s)")
+        # Find best balanced (accuracy * speed)
+        balanced_scores = []
+        for result in results:
+            acc = result['Accuracy_Raw']
+            speed = result['Inf/s_Raw']
+            # Normalize and combine (you can adjust weights here)
+            balanced_score = acc * (speed / 1000)  # Normalize speed
+            balanced_scores.append((result, balanced_score))
         
-        print(f"⚡ FASTEST MODEL: {fastest_model['Directory']}/{fastest_model['Model']} "
-              f"(Speed: {fastest_model['Inferences/s']} inf/s, Accuracy: {fastest_model['Accuracy']})")
+        best_balanced = max(balanced_scores, key=lambda x: x[1])[0]
         
-        print(f"⭐ BEST BALANCED: {best_balanced['Directory']}/{best_balanced['Model']} "
-              f"(Accuracy: {best_balanced['Accuracy']}, Speed: {best_balanced['Inferences/s']} inf/s)")
+        print(f"\n🏆 BEST BY ACCURACY: {best_accuracy['Directory']}/{best_accuracy['Model']}")
+        print(f"   Accuracy: {best_accuracy['Accuracy']}, Speed: {best_accuracy['Inf/s']} inf/s")
+        
+        print(f"⚡ FASTEST MODEL: {fastest_model['Directory']}/{fastest_model['Model']}")
+        print(f"   Speed: {fastest_model['Inf/s']} inf/s, Accuracy: {fastest_model['Accuracy']}")
+        
+        print(f"⭐ BEST BALANCED: {best_balanced['Directory']}/{best_balanced['Model']}")
+        print(f"   Accuracy: {best_balanced['Accuracy']}, Speed: {best_balanced['Inf/s']} inf/s")
     
-    # Save results to CSV
+    # Save full results to CSV
     csv_path = save_results_to_csv(
         results, 
         rgb_mode=rgb_mode, 
@@ -650,6 +705,26 @@ def debug_model_output(quantized_only=False, rgb_mode=False):
         # Check if softmax properties hold
         output_sum = np.sum(raw_output)
         print(f"Softmax sum: {output_sum:.6f} (should be ~1.0)")
+        
+def get_model_parameters_count(model_path):
+    """Get the number of parameters in a TFLite model"""
+    try:
+        interpreter = tf.lite.Interpreter(model_path=model_path)
+        interpreter.allocate_tensors()
+        
+        total_params = 0
+        for tensor in interpreter.get_tensor_details():
+            # Count only non-constant tensors (weights and biases)
+            if 'buffer' not in tensor or tensor['buffer'] == 0:
+                shape = tensor['shape']
+                if shape is not None and len(shape) > 0:
+                    params_in_tensor = np.prod(shape)
+                    total_params += params_in_tensor
+        
+        return total_params
+    except Exception as e:
+        print(f"Error counting parameters for {model_path}: {e}")
+        return 0
 
 def main():
     """Main function with command line arguments"""
