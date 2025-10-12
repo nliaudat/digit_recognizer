@@ -6,6 +6,8 @@ import os
 import argparse
 from utils.preprocess import predict_single_image
 import parameters as params
+from tabulate import tabulate
+import glob
 
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
@@ -36,10 +38,10 @@ class TFLiteDigitPredictor:
         else:
             print("Model type: Float32 (non-quantized)")
     
-    def predict(self, image):
+    def predict(self, image, rgb_mode=False):
         """Predict digit from image using TFLite"""
         # Preprocess image
-        processed_image = predict_single_image(image)
+        processed_image = self.preprocess_image_for_prediction(image, rgb_mode=rgb_mode)
         
         # Add batch dimension
         input_data = np.expand_dims(processed_image, axis=0)
@@ -77,7 +79,32 @@ class TFLiteDigitPredictor:
         
         return prediction, confidence, output_data[0]
 
-def load_random_image_from_dataset():
+    def preprocess_image_for_prediction(self, image, rgb_mode=False):
+        """Preprocess image for prediction with RGB support"""
+        if rgb_mode:
+            # If image is grayscale but we need RGB, convert it
+            if len(image.shape) == 2:
+                image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+            # If image is RGB, ensure it's the right format
+            elif len(image.shape) == 3 and image.shape[2] == 3:
+                # Already RGB, do nothing
+                pass
+            else:
+                raise ValueError(f"Unsupported image shape for RGB mode: {image.shape}")
+        else:
+            # If image is RGB but we need grayscale, convert it
+            if len(image.shape) == 3 and image.shape[2] == 3:
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+            # If image is already grayscale, do nothing
+            elif len(image.shape) == 2:
+                pass
+            else:
+                raise ValueError(f"Unsupported image shape for grayscale mode: {image.shape}")
+        
+        # Use the existing preprocess function
+        return predict_single_image(image)
+
+def load_random_image_from_dataset(rgb_mode=False):
     """Load a random image from the first available data source"""
     if not params.DATA_SOURCES:
         print("No data sources found in parameters.py")
@@ -109,20 +136,32 @@ def load_random_image_from_dataset():
     print(f"Loading random image: {random_image_path}")
     
     # Load and return the image
-    image = cv2.imread(random_image_path, cv2.IMREAD_GRAYSCALE)
+    if rgb_mode:
+        image = cv2.imread(random_image_path, cv2.IMREAD_COLOR)
+        if image is not None:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    else:
+        image = cv2.imread(random_image_path, cv2.IMREAD_GRAYSCALE)
+    
     if image is None:
         print(f"Failed to load image: {random_image_path}")
         return None
     
     return image
 
-def load_image_from_path(image_path):
+def load_image_from_path(image_path, rgb_mode=False):
     """Load image from specified path"""
     if not os.path.exists(image_path):
         print(f"Image not found: {image_path}")
         return None
     
-    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if rgb_mode:
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        if image is not None:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    else:
+        image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    
     if image is None:
         print(f"Failed to load image: {image_path}")
         return None
@@ -165,12 +204,10 @@ def find_model_path(model_name=None, quantized_only=False):
                     # If quantized_only is specified, verify it's actually a quantized model
                     if quantized_only:
                         if is_quantized_model(model_path):
-                            print(f"Found quantized model: {model_path}")
                             return model_path
                         else:
                             continue
                     else:
-                        print(f"Found model: {model_path}")
                         return model_path
         
         print(f"Model '{model_name}' not found in any training directory")
@@ -214,7 +251,6 @@ def find_model_path(model_name=None, quantized_only=False):
             if os.path.exists(model_path):
                 if quantized_only and not is_quantized_model(model_path):
                     continue
-                print(f"Using model: {model_path}")
                 return model_path
         
         # If no specific model found, look for any .tflite file in the latest directory
@@ -227,7 +263,6 @@ def find_model_path(model_name=None, quantized_only=False):
         
         if tflite_files:
             model_path = os.path.join(latest_dir_path, tflite_files[0])
-            print(f"Using first available model: {model_path}")
             return model_path
         
         print(f"No {'quantized ' if quantized_only else ''}TFLite model found in: {latest_dir_path}")
@@ -277,20 +312,158 @@ def list_available_models(quantized_only=False):
                 model_type = "quantized" if is_quantized_model(model_path) else "float"
                 print(f"  └── {model_file} ({model_size:.1f} KB, {model_type})")
 
-def debug_model_output(quantized_only=False):
+def get_all_models(quantized_only=False):
+    """Get all available models"""
+    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
+    all_models = []
+    
+    for training_dir in training_dirs:
+        training_path = os.path.join(params.OUTPUT_DIR, training_dir)
+        tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+        
+        for model_file in tflite_files:
+            model_path = os.path.join(training_path, model_file)
+            if quantized_only and not is_quantized_model(model_path):
+                continue
+                
+            model_size = os.path.getsize(model_path) / 1024
+            model_type = "quantized" if is_quantized_model(model_path) else "float"
+            all_models.append({
+                'path': model_path,
+                'name': model_file,
+                'directory': training_dir,
+                'size_kb': model_size,
+                'type': model_type
+            })
+    
+    return all_models
+
+def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100):
+    """Test a model on random images from dataset and return accuracy"""
+    predictor = TFLiteDigitPredictor(model_path)
+    correct_predictions = 0
+    total_tested = 0
+    
+    # Extract directory and model name for display
+    model_dir = os.path.basename(os.path.dirname(model_path))
+    model_name = os.path.basename(model_path)
+    print(f"\nTesting model: {model_dir}/{model_name}")
+    
+    # Get dataset path
+    if not params.DATA_SOURCES:
+        print("No data sources found in parameters.py")
+        return 0.0
+    
+    dataset_path = params.DATA_SOURCES[0]['path']
+    
+    for digit in range(10):
+        digit_folder = os.path.join(dataset_path, str(digit))
+        if not os.path.exists(digit_folder):
+            continue
+            
+        # Get images for this digit
+        image_files = [f for f in os.listdir(digit_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        if not image_files:
+            continue
+            
+        # Test up to num_test_images//10 per digit
+        test_per_digit = max(1, num_test_images // 10)
+        test_images = np.random.choice(image_files, min(test_per_digit, len(image_files)), replace=False)
+        
+        for image_file in test_images:
+            image_path = os.path.join(digit_folder, image_file)
+            
+            # Load image
+            if rgb_mode:
+                image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+                if image is not None:
+                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            else:
+                image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+            
+            if image is None:
+                continue
+            
+            # Predict
+            try:
+                prediction, confidence, _ = predictor.predict(image, rgb_mode=rgb_mode)
+                if prediction == digit:
+                    correct_predictions += 1
+                total_tested += 1
+            except Exception as e:
+                print(f"Error predicting {image_path}: {e}")
+                continue
+    
+    accuracy = correct_predictions / total_tested if total_tested > 0 else 0.0
+    print(f"Tested {total_tested} images, Accuracy: {accuracy:.4f}")
+    return accuracy
+
+def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100):
+    """Test all available models and print summary table"""
+    models = get_all_models(quantized_only=quantized_only)
+    
+    if not models:
+        print("No models found to test.")
+        return
+    
+    print(f"\nTesting {len(models)} models on {num_test_images} images...")
+    print("Mode:", "RGB" if rgb_mode else "Grayscale")
+    print("-" * 80)
+    
+    results = []
+    
+    for model_info in models:
+        accuracy = test_model_on_dataset(
+            model_info['path'], 
+            rgb_mode=rgb_mode, 
+            num_test_images=num_test_images
+        )
+        
+        results.append({
+            'Model': model_info['name'],
+            'Directory': model_info['directory'],
+            'Type': model_info['type'],
+            'Size (KB)': f"{model_info['size_kb']:.1f}",
+            'Accuracy': f"{accuracy:.4f}",
+            'Tested Images': num_test_images
+        })
+    
+    # Sort by accuracy descending
+    results.sort(key=lambda x: float(x['Accuracy']), reverse=True)
+    
+    # Print results table
+    print(f"\n{'='*80}")
+    print(f"SUMMARY RESULTS ({'RGB' if rgb_mode else 'Grayscale'} mode)")
+    print(f"{'='*80}")
+    print(tabulate(results, headers='keys', tablefmt='grid', stralign='right'))
+    
+    # Print best model
+    if results and float(results[0]['Accuracy']) > 0:
+        best = results[0]
+        print(f"\n🎯 BEST MODEL: {best['Directory']}/{best['Model']} (Accuracy: {best['Accuracy']})")
+
+def debug_model_output(quantized_only=False, rgb_mode=False):
     """Debug function to test model output interpretation"""
     model_path = find_model_path(quantized_only=quantized_only)
     if not model_path:
         return
     
+    model_dir = os.path.basename(os.path.dirname(model_path))
+    model_name = os.path.basename(model_path)
+    print(f"\n=== MODEL USED: {model_dir}/{model_name} ===")
+    
     predictor = TFLiteDigitPredictor(model_path)
     
     # Test with multiple random images
-    print(f"\n=== DEBUGGING MODEL OUTPUT ({'quantized' if quantized_only else 'float'}) ===")
+    print(f"\n=== DEBUGGING MODEL OUTPUT ({'quantized' if quantized_only else 'float'}, {'RGB' if rgb_mode else 'grayscale'}) ===")
     for i in range(3):
         print(f"\n--- Test {i+1} ---")
-        test_image = np.random.randint(0, 255, (params.INPUT_HEIGHT, params.INPUT_WIDTH), dtype=np.uint8)
-        prediction, confidence, raw_output = predictor.predict(test_image)
+        if rgb_mode:
+            test_image = np.random.randint(0, 255, (params.INPUT_HEIGHT, params.INPUT_WIDTH, 3), dtype=np.uint8)
+        else:
+            test_image = np.random.randint(0, 255, (params.INPUT_HEIGHT, params.INPUT_WIDTH), dtype=np.uint8)
+        
+        prediction, confidence, raw_output = predictor.predict(test_image, rgb_mode=rgb_mode)
         
         print(f"Prediction: {prediction}")
         print(f"Confidence: {confidence:.6f}")
@@ -306,6 +479,9 @@ def main():
     parser.add_argument('--img', type=str, help='Path to input image for prediction')
     parser.add_argument('--model', type=str, help='Model name to use for prediction')
     parser.add_argument('--quantized', action='store_true', help='Use only quantized models')
+    parser.add_argument('--RGB', action='store_true', help='Process image as RGB instead of grayscale')
+    parser.add_argument('--test_all', action='store_true', help='Test all available models and print accuracy summary')
+    parser.add_argument('--test_images', type=int, default=100, help='Number of test images per model (default: 100)')
     parser.add_argument('--debug', action='store_true', help='Debug model output interpretation')
     parser.add_argument('--list', action='store_true', help='List all available models')
     
@@ -315,8 +491,16 @@ def main():
         list_available_models(quantized_only=args.quantized)
         return
     
+    if args.test_all:
+        test_all_models(
+            rgb_mode=args.RGB, 
+            quantized_only=args.quantized, 
+            num_test_images=args.test_images
+        )
+        return
+    
     if args.debug:
-        debug_model_output(quantized_only=args.quantized)
+        debug_model_output(quantized_only=args.quantized, rgb_mode=args.RGB)
         return
     
     # Find model path
@@ -324,22 +508,27 @@ def main():
     if not model_path:
         return
     
+    # Print model used before loading - include directory
+    model_dir = os.path.basename(os.path.dirname(model_path))
+    model_name = os.path.basename(model_path)
+    print(f"\n=== MODEL USED: {model_dir}/{model_name} ===")
+    
     # Load predictor
     predictor = TFLiteDigitPredictor(model_path)
     
     # Load image
     if args.img:
-        image = load_image_from_path(args.img)
+        image = load_image_from_path(args.img, rgb_mode=args.RGB)
     else:
         print("No image specified, loading random image from dataset...")
-        image = load_random_image_from_dataset()
+        image = load_random_image_from_dataset(rgb_mode=args.RGB)
     
     if image is None:
         print("Failed to load image")
         return
     
     # Perform prediction
-    prediction, confidence, raw_output = predictor.predict(image)
+    prediction, confidence, raw_output = predictor.predict(image, rgb_mode=args.RGB)
     print(f"\n=== PREDICTION RESULT ===")
     print(f"Predicted digit: {prediction}")
     print(f"Confidence: {confidence:.4f}")
