@@ -8,7 +8,7 @@ This project implements and compares different neural network models for recogni
 
 The goal is to explore the trade-offs between model complexity, size, and accuracy.
 
-It's actually focused on 10 classes recognitions [0-9] but can works for 100 classes [0-99] And grayscale as it performe the same on test datasets
+It's actually focused on 10 classes recognitions [0-9] but can works for 100 classes [0-99] And grayscale as it performs the same on test datasets
 
 Grayscale or RGB performs the same on test datasets, but RGB need more resources at image processing level.
 
