@@ -33,39 +33,79 @@ class TFLiteDigitPredictor:
         # Preprocess image
         processed_image = predict_single_image(image)
         
-        # Add batch dimension
-        input_data = np.expand_dims(processed_image, axis=0)
+        print(f"After preprocessing - shape: {processed_image.shape}, dtype: {processed_image.dtype}")
+        
+        # Handle channel mismatch - if model expects 3 channels but we have 1
+        expected_channels = self.input_details[0]['shape'][3]
+        if len(processed_image.shape) == 3 and processed_image.shape[2] == 1 and expected_channels == 3:
+            print("Converting grayscale to 3-channel by repeating channels")
+            processed_image = np.repeat(processed_image, 3, axis=2)
+        
+        # Add batch dimension if not already present
+        if len(processed_image.shape) == 3:
+            input_data = np.expand_dims(processed_image, axis=0)
+        else:
+            input_data = processed_image
+        
+        print(f"After batch dimension - shape: {input_data.shape}, dtype: {input_data.dtype}")
         
         # Handle quantization if needed
         if self.input_details[0]['dtype'] == np.uint8:
             input_data = input_data.astype(np.uint8)
         elif self.input_details[0]['dtype'] == np.int8:
             input_scale, input_zero_point = self.input_details[0]['quantization']
-            input_data = (input_data / input_scale + input_zero_point).astype(np.int8)
+            print(f"Quantization params - scale: {input_scale}, zero_point: {input_zero_point}")
+            # For int8 quantization, we need to quantize the float32 input
+            if input_data.dtype == np.float32:
+                input_data = (input_data / input_scale + input_zero_point).astype(np.int8)
+            else:
+                input_data = input_data.astype(np.int8)
         else:
             input_data = input_data.astype(np.float32)
         
-        # Set input tensor
-        self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
+        print(f"After quantization handling - shape: {input_data.shape}, dtype: {input_data.dtype}")
+        print(f"Expected input shape: {self.input_details[0]['shape']}, dtype: {self.input_details[0]['dtype']}")
         
-        # Run inference
-        self.interpreter.invoke()
+        # Verify shape matches expected input shape
+        expected_shape = self.input_details[0]['shape']
+        if input_data.shape != tuple(expected_shape):
+            print(f"Shape mismatch! Got {input_data.shape}, expected {tuple(expected_shape)}")
+            # Try to reshape if possible
+            if input_data.size == np.prod(expected_shape):
+                input_data = input_data.reshape(expected_shape)
+                print(f"Reshaped to: {input_data.shape}")
+            else:
+                print("Cannot reshape - total elements don't match")
+                # Return default values instead of None
+                return -1, 0.0, np.zeros(10, dtype=np.float32)
         
-        # Get output
-        output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
+        try:
+            # Set input tensor
+            self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
+            
+            # Run inference
+            self.interpreter.invoke()
+            
+            # Get output
+            output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
+            
+            # Handle output quantization if needed
+            if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
+                output_scale, output_zero_point = self.output_details[0]['quantization']
+                output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
+            
+            # Get prediction and confidence
+            prediction = np.argmax(output_data[0])
+            confidence = np.max(output_data[0])
+            
+            return prediction, confidence, output_data[0]
         
-        # Handle output quantization if needed
-        if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
-            output_scale, output_zero_point = self.output_details[0]['quantization']
-            output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
-        
-        # Get prediction and confidence
-        prediction = np.argmax(output_data[0])
-        confidence = np.max(output_data[0])
-        
-        return prediction, confidence, output_data[0]
+        except Exception as e:
+            print(f"Error during inference: {e}")
+            # Return default values instead of None
+            return -1, 0.0, np.zeros(10, dtype=np.float32)
 
-def load_random_image_from_dataset():
+def load_random_image_from_dataset(input_channels):
     """Load a random image from the first available data source"""
     if not params.DATA_SOURCES:
         print("No data sources found in parameters.py")
@@ -96,26 +136,46 @@ def load_random_image_from_dataset():
     random_image_path = np.random.choice(image_paths)
     print(f"Loading random image: {random_image_path}")
     
-    # Load and return the image
-    image = cv2.imread(random_image_path, cv2.IMREAD_GRAYSCALE)
+    # Load image based on model's input requirements
+    if input_channels == 1:
+        # Model expects grayscale - load as 2D array
+        image = cv2.imread(random_image_path, cv2.IMREAD_GRAYSCALE)
+    else:
+        # Model expects color (RGB) - load as 3D array with 3 channels
+        image = cv2.imread(random_image_path, cv2.IMREAD_COLOR)
+        if image is not None:
+            # Convert BGR to RGB
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    
     if image is None:
         print(f"Failed to load image: {random_image_path}")
         return None
     
+    print(f"Loaded image shape: {image.shape}")
     return image
 
-def load_image_from_path(image_path):
-    """Load image from specified path"""
+def load_image_from_path(image_path, input_channels):
+    """Load image from specified path based on model's input requirements"""
     if not os.path.exists(image_path):
         print(f"Image not found: {image_path}")
         return None
     
-    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    # Load image based on model's input requirements
+    if input_channels == 1:
+        # Model expects grayscale - load as 2D array
+        image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    else:
+        # Model expects color (RGB) - load as 3D array with 3 channels
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        if image is not None:
+            # Convert BGR to RGB
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    
     if image is None:
         print(f"Failed to load image: {image_path}")
         return None
     
-    print(f"Loaded image: {image_path}")
+    print(f"Loaded image: {image_path}, shape: {image.shape}")
     return image
 
 def find_model_path(model_name=None):
@@ -237,12 +297,17 @@ def main():
     # Load predictor
     predictor = TFLiteDigitPredictor(model_path)
     
+    # Get model's input requirements
+    input_shape = predictor.input_details[0]['shape']
+    input_channels = input_shape[3]
+    print(f"Model expects input with {input_channels} channel(s)")
+    
     # Load image
     if args.img:
-        image = load_image_from_path(args.img)
+        image = load_image_from_path(args.img, input_channels)
     else:
         print("No image specified, loading random image from dataset...")
-        image = load_random_image_from_dataset()
+        image = load_random_image_from_dataset(input_channels)
     
     if image is None:
         print("Failed to load image")
@@ -254,7 +319,12 @@ def main():
     print(f"\n=== PREDICTION RESULT ===")
     print(f"Predicted digit: {prediction}")
     print(f"Confidence: {confidence:.4f}")
-    print(f"All probabilities: {[f'{x:.4f}' for x in raw_output]}")
+    
+    # Check if raw_output is valid before trying to iterate
+    if raw_output is not None and hasattr(raw_output, '__iter__'):
+        print(f"All probabilities: {[f'{x:.4f}' for x in raw_output]}")
+    else:
+        print("All probabilities: [Prediction failed]")
 
 if __name__ == "__main__":
     main()
