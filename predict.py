@@ -77,7 +77,7 @@ class TFLiteDigitPredictor:
             else:
                 print("Cannot reshape - total elements don't match")
                 # Return default values instead of None
-                return -1, 0.0, np.zeros(10, dtype=np.float32)
+                return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
         
         try:
             # Set input tensor
@@ -103,7 +103,7 @@ class TFLiteDigitPredictor:
         except Exception as e:
             print(f"Error during inference: {e}")
             # Return default values instead of None
-            return -1, 0.0, np.zeros(10, dtype=np.float32)
+            return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
 
 def load_random_image_from_dataset(input_channels):
     """Load a random image from the first available data source"""
