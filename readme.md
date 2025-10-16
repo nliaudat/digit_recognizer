@@ -37,7 +37,9 @@ The project demonstrates that :
  - CPU operations must be also taken into parameters for IOT
  - RGB or grayscale has very same benchmark results, but the processing is not the same as in parameters needed. It also needs a lot of more cpu and memory to process
  
- Every CNN works on Conv2D style : 
+ ## RGB - Grayscale model comparison : 
+ if the modeel use Conv2D (fast all), it flatten all channel, that's why the result are very the same between RGB and grayscale
+ 
  ##### How Conv2D Actually Works with Channels:
 -   **Input**: `(height, width, channels)` - e.g., `(32, 20, 1)` for grayscale or `(32, 20, 3)` for RGB
 -   **Conv2D with 32 filters**: Each filter has shape `(3, 3, channels)` and produces 1 output channel
