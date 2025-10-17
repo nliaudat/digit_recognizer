@@ -5,6 +5,7 @@ import cv2
 import os
 import argparse
 from utils.preprocess import predict_single_image
+from pathlib import Path
 import parameters as params
 
 class TFLiteDigitPredictor:
@@ -105,6 +106,7 @@ class TFLiteDigitPredictor:
             # Return default values instead of None
             return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
 
+
 def load_random_image_from_dataset(input_channels):
     """Load a random image from the first available data source"""
     if not params.DATA_SOURCES:
@@ -114,35 +116,41 @@ def load_random_image_from_dataset(input_channels):
     # Use the first data source
     data_source = params.DATA_SOURCES[0]
     dataset_path = data_source['path']
+    # dataset_type = data_source['type']
     
-    if not os.path.exists(dataset_path):
+    # Convert to Path object for path operations
+    dataset_path = Path(dataset_path)
+    
+    if not dataset_path.exists():
         print(f"Dataset path not found: {dataset_path}")
         return None
     
-    # Collect all images from the dataset
-    image_paths = []
-    for digit in range(10):
-        digit_folder = os.path.join(dataset_path, str(digit))
-        if os.path.exists(digit_folder):
-            for file in os.listdir(digit_folder):
-                if file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    image_paths.append(os.path.join(digit_folder, file))
+    # Collect all images from the dataset and in subfolders
+    # Supported image extensions
+    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']
     
-    if not image_paths:
+    # Find all image files first
+    # print("Scanning for image files...")
+    image_files = []
+    for file_path in dataset_path.rglob('*'):
+        if file_path.is_file() and file_path.suffix.lower() in image_extensions:
+            image_files.append(file_path)
+    
+    if not image_files:  # Fixed variable name - was image_paths
         print(f"No images found in {dataset_path}")
         return None
     
     # Select a random image
-    random_image_path = np.random.choice(image_paths)
+    random_image_path = np.random.choice(image_files)  # Fixed variable name
     print(f"Loading random image: {random_image_path}")
     
     # Load image based on model's input requirements
     if input_channels == 1:
         # Model expects grayscale - load as 2D array
-        image = cv2.imread(random_image_path, cv2.IMREAD_GRAYSCALE)
+        image = cv2.imread(str(random_image_path), cv2.IMREAD_GRAYSCALE)  # Convert Path to string
     else:
         # Model expects color (RGB) - load as 3D array with 3 channels
-        image = cv2.imread(random_image_path, cv2.IMREAD_COLOR)
+        image = cv2.imread(str(random_image_path), cv2.IMREAD_COLOR)  # Convert Path to string
         if image is not None:
             # Convert BGR to RGB
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)

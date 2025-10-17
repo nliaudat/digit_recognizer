@@ -34,7 +34,7 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v6",
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v6"  # Options: practical_tiny_depthwise, simple_cnn, dig_class100_s2, original_haverland, esp_optimized_cnn, esp_ultra_light, esp_quantization_ready, esp_high_capacity, esp_haverland_compatible
+MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the upper list
 
 
 # ==============================================================================
@@ -54,8 +54,19 @@ USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 # DATA SOURCES
 # ==============================================================================
 
+# This is far better to use labels that have been shuffled for training, folder_structure shuffle by batch TF_DATA_SHUFFLE_BUFFER and SHUFFLE_SEED
+
+    # label_file_path = os.path.join(params.DATASET_PATH, 'labels.txt')
+    # images_dir = os.path.join(params.DATASET_PATH, 'images')
+
 # Multiple Data Sources Configuration
 DATA_SOURCES = [ 
+    {
+        'name': 'Tenth-of-step-of-a-meter-digit',
+        'type': 'label_file', # load labels.txt (tab separated) and images folder in path
+        'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
+        'weight': 1.0,
+    },
     # {
         # 'name': 'meterdigits_100',
         # 'type': 'folder_structure',
@@ -68,18 +79,18 @@ DATA_SOURCES = [
         # 'path': 'datasets/meterdigits_10_augmented',
         # 'weight': 0.3,
     # },
-    {
-        'name': 'meterdigits_10',
-        'type': 'folder_structure',
-        'path': 'datasets/meterdigits_10',
-        'weight': 1.0,
-    },
-    {
-        'name': 'meterdigits_10_augmented',
-        'type': 'folder_structure',
-        'path': 'datasets/meterdigits_10_augmented',
-        'weight': 0.3,
-    },
+    # {
+        # 'name': 'meterdigits_10',
+        # 'type': 'folder_structure',
+        # 'path': 'datasets/meterdigits_10',
+        # 'weight': 1.0,
+    # },
+    # {
+        # 'name': 'meterdigits_10_augmented',
+        # 'type': 'folder_structure',
+        # 'path': 'datasets/meterdigits_10_augmented',
+        # 'weight': 0.3,
+    # },
     # {
     #     'name': 'MNIST',
     #     'type': 'folder_structure',
@@ -110,7 +121,7 @@ NB_CLASSES = 10  # [0-9]
 # TFLite Conversion Parameters
 QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
 # ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
-ESP_DL_QUANTIZE = True  # Quantize to int8 range [-128, 127] for ESP-DL
+ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
                          
 # Quantization Aware Training
