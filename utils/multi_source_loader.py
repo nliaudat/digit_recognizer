@@ -133,34 +133,110 @@ class MultiSourceDataLoader:
     def load_label_file_dataset(self, dataset_path):
         """
         Load dataset with label file
+        
+        Args:
+            dataset_path (str): Path to the dataset directory
+            
+        Returns:
+            tuple: (images, labels) as numpy arrays, or empty arrays if loading fails
         """
-        label_file_path = os.path.join(dataset_path, 'labels.txt')
-        images_dir = os.path.join(dataset_path, 'images')
-        
-        if not os.path.exists(label_file_path) or not os.path.exists(images_dir):
-            print(f"  Label file or images directory not found in: {dataset_path}")
-            return np.array([]), np.array([])
-        
-        images = []
-        labels = []
-        
-        with open(label_file_path, 'r') as f:
-            lines = f.readlines()
-        
-        for line in lines:
-            parts = line.strip().split()
-            if len(parts) >= 2:
+        try:
+            label_file_path = os.path.join(dataset_path, 'labels.txt')
+            images_dir = os.path.join(dataset_path, 'images')
+            
+            # Validate inputs
+            if not os.path.exists(dataset_path):
+                print(f"❌ Dataset path does not exist: {dataset_path}")
+                return np.array([]), np.array([])
+            
+            if not os.path.exists(label_file_path):
+                print(f"❌ Label file not found: {label_file_path}")
+                return np.array([]), np.array([])
+                
+            if not os.path.exists(images_dir):
+                print(f"❌ Images directory not found: {images_dir}")
+                return np.array([]), np.array([])
+            
+            images = []
+            labels = []
+            skipped_files = 0
+            valid_files = 0
+            
+            print(f"📁 Loading dataset from: {dataset_path}")
+            
+            with open(label_file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            if not lines:
+                print("⚠️  Label file is empty")
+                return np.array([]), np.array([])
+            
+            print(f"📄 Found {len(lines)} entries in label file")
+            
+            for line_num, line in enumerate(lines, 1):
+                line = line.strip()
+                if not line or line.startswith('#'):  # Skip empty lines and comments
+                    continue
+                    
+                # Split by tab instead of space
+                parts = line.split('\t')
+                # parts = line.split()
+                if len(parts) < 2:
+                    print(f"⚠️  Line {line_num}: Invalid format (expected: filename label), got: '{line}'")
+                    skipped_files += 1
+                    continue
+                
                 filename = parts[0]
-                label = int(parts[1])
+                label_str = parts[1]
+                
+                # Enhanced label validation
+                try:
+                    label = int(label_str)
+                except ValueError as e:
+                    print(f"⚠️  Line {line_num}: Invalid label '{label_str}' for file '{filename}'. Error: {e}")
+                    skipped_files += 1
+                    continue
                 
                 image_path = os.path.join(images_dir, filename)
-                if os.path.exists(image_path):
-                    image = cv2.imread(image_path)
-                    if image is not None:
-                        images.append(image)
-                        labels.append(label)
-        
-        return np.array(images), np.array(labels)
+                
+                if not os.path.exists(image_path):
+                    print(f"⚠️  Line {line_num}: Image file not found: {image_path}")
+                    skipped_files += 1
+                    continue
+                
+                # Load and validate image
+                image = cv2.imread(image_path)
+                if image is None:
+                    print(f"⚠️  Line {line_num}: Failed to load image: {image_path}")
+                    skipped_files += 1
+                    continue
+                
+                if image.size == 0:
+                    print(f"⚠️  Line {line_num}: Empty image: {image_path}")
+                    skipped_files += 1
+                    continue
+                
+                images.append(image)
+                labels.append(label)
+                valid_files += 1
+            
+            # Convert to numpy arrays
+            images_array = np.array(images)
+            labels_array = np.array(labels)
+            
+            print(f"✅ Successfully loaded {valid_files} images, {skipped_files} files skipped")
+            
+            if valid_files == 0:
+                print("❌ No valid images were loaded")
+                return np.array([]), np.array([])
+            
+            print(f"📊 Dataset shape: Images {images_array.shape}, Labels {labels_array.shape}")
+            return images_array, labels_array
+            
+        except Exception as e:
+            print(f"💥 Unexpected error loading dataset: {e}")
+            return np.array([]), np.array([])
+    
     
     def load_mnist_fallback(self):
         """
