@@ -62,8 +62,8 @@ class MultiSourceDataLoader:
             print("-" * 30)
         
         if len(self.all_images) == 0:
-            print("No data sources could be loaded. Using MNIST fallback.")
-            return self.load_mnist_fallback()
+            print("No data sources could be loaded.")
+            return # self.load_mnist_fallback()
         
         # Combine all sources
         combined_images = np.concatenate(self.all_images, axis=0)
@@ -132,13 +132,7 @@ class MultiSourceDataLoader:
     
     def load_label_file_dataset(self, dataset_path):
         """
-        Load dataset with label file
-        
-        Args:
-            dataset_path (str): Path to the dataset directory
-            
-        Returns:
-            tuple: (images, labels) as numpy arrays, or empty arrays if loading fails
+        Load dataset with label file - FIXED VERSION for variable image sizes
         """
         try:
             label_file_path = os.path.join(dataset_path, 'labels.txt')
@@ -180,7 +174,6 @@ class MultiSourceDataLoader:
                     
                 # Split by tab instead of space
                 parts = line.split('\t')
-                # parts = line.split()
                 if len(parts) < 2:
                     print(f"⚠️  Line {line_num}: Invalid format (expected: filename label), got: '{line}'")
                     skipped_files += 1
@@ -192,6 +185,10 @@ class MultiSourceDataLoader:
                 # Enhanced label validation
                 try:
                     label = int(label_str)
+                    if label < 0 or label >= params.NB_CLASSES:
+                        print(f"⚠️  Line {line_num}: Label {label} out of range [0, {params.NB_CLASSES-1}] for file '{filename}'")
+                        skipped_files += 1
+                        continue
                 except ValueError as e:
                     print(f"⚠️  Line {line_num}: Invalid label '{label_str}' for file '{filename}'. Error: {e}")
                     skipped_files += 1
@@ -205,7 +202,7 @@ class MultiSourceDataLoader:
                     continue
                 
                 # Load and validate image
-                image = cv2.imread(image_path)
+                image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE if params.USE_GRAYSCALE else cv2.IMREAD_COLOR)
                 if image is None:
                     print(f"⚠️  Line {line_num}: Failed to load image: {image_path}")
                     skipped_files += 1
@@ -216,25 +213,51 @@ class MultiSourceDataLoader:
                     skipped_files += 1
                     continue
                 
-                images.append(image)
-                labels.append(label)
-                valid_files += 1
-            
-            # Convert to numpy arrays
-            images_array = np.array(images)
-            labels_array = np.array(labels)
-            
-            print(f"✅ Successfully loaded {valid_files} images, {skipped_files} files skipped")
+                # RESIZE ALL IMAGES TO CONSISTENT SIZE
+                try:
+                    image = cv2.resize(image, (params.INPUT_WIDTH, params.INPUT_HEIGHT))
+                    
+                    # Add channel dimension if needed
+                    if params.USE_GRAYSCALE and len(image.shape) == 2:
+                        image = np.expand_dims(image, axis=-1)
+                    elif not params.USE_GRAYSCALE and len(image.shape) == 2:
+                        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+                    
+                    images.append(image)
+                    labels.append(label)
+                    valid_files += 1
+                    
+                    if valid_files % 1000 == 0:
+                        print(f"  Loaded {valid_files} images...")
+                        
+                except Exception as resize_error:
+                    print(f"⚠️  Line {line_num}: Failed to resize image {image_path}: {resize_error}")
+                    skipped_files += 1
+                    continue
             
             if valid_files == 0:
                 print("❌ No valid images were loaded")
                 return np.array([]), np.array([])
             
-            print(f"📊 Dataset shape: Images {images_array.shape}, Labels {labels_array.shape}")
-            return images_array, labels_array
-            
+            # Convert to numpy arrays with explicit dtype and shape validation
+            try:
+                images_array = np.array(images, dtype=np.uint8)
+                labels_array = np.array(labels, dtype=np.int32)
+                
+                print(f"✅ Successfully loaded {valid_files} images, {skipped_files} files skipped")
+                print(f"📊 Dataset shape: Images {images_array.shape}, Labels {labels_array.shape}")
+                
+                return images_array, labels_array
+                
+            except Exception as array_error:
+                print(f"❌ Failed to create numpy arrays: {array_error}")
+                print(f"   Image shapes: {[img.shape for img in images[:10]]}")  # Debug first 10 images
+                return np.array([]), np.array([])
+                
         except Exception as e:
             print(f"💥 Unexpected error loading dataset: {e}")
+            import traceback
+            traceback.print_exc()
             return np.array([]), np.array([])
     
     
