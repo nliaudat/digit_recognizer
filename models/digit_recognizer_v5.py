@@ -39,9 +39,6 @@ def create_digit_recognizer_v5_grayscale():
     """
     Optimized for 20x32 grayscale with class-count awareness
     """
-    def relu6(x, name=None):
-        return tf.clip_by_value(tf.nn.relu(x), 0.0, 6.0, name=name)
-
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # ===== CONVOLUTIONAL BACKBONE (adjusted for 20x32) =====
@@ -51,9 +48,10 @@ def create_digit_recognizer_v5_grayscale():
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
+        activation='relu',
         name='conv1'
     )(inputs)
-    x = relu6(x, name='relu6_1')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_1')(x)
     x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     # After pool: 10x16xfilters
     
@@ -63,9 +61,10 @@ def create_digit_recognizer_v5_grayscale():
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
+        activation='relu',
         name='conv2'
     )(x)
-    x = relu6(x, name='relu6_2')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_2')(x)
     # Current: 10x16xfilters
     
     # Layer 3
@@ -74,9 +73,10 @@ def create_digit_recognizer_v5_grayscale():
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
+        activation='relu',
         name='conv3'
     )(x)
-    x = relu6(x, name='relu6_3')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_3')(x)
     # Current: 10x16xfilters
     
     # Layer 4: More important for 100-class discrimination
@@ -86,23 +86,24 @@ def create_digit_recognizer_v5_grayscale():
             (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
+            activation='relu',
             name='conv5'
         )(x)
-        x = relu6(x, name='relu6_4')
+        x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_4')(x)
     
     # ===== FEATURE REDUCTION AND CLASSIFICATION =====
     x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Dense layer size scales with classification complexity
     dense_units = get_dense_units(64, 128)  # More units for 100 classes
-    x = tf.keras.layers.Dense(dense_units, activation=None, name='feature_dense')(x)
-    x = relu6(x, name='relu6_dense')
+    x = tf.keras.layers.Dense(dense_units, activation='relu', name='feature_dense')(x)
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense')(x)
     
     # Optional: Additional dense layer for complex classification
     if params.NB_CLASSES >= 50:
         dense_units_2 = get_dense_units(48, 96)
-        x = tf.keras.layers.Dense(dense_units_2, activation=None, name='feature_dense2')(x)
-        x = relu6(x, name='relu6_dense2')
+        x = tf.keras.layers.Dense(dense_units_2, activation='relu', name='feature_dense2')(x)
+        x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense2')(x)
     
     # Optional dropout (higher for more classes to prevent overfitting)
     dropout_rate = 0.1 if params.NB_CLASSES <= 10 else 0.2
@@ -121,9 +122,6 @@ def create_digit_recognizer_v5_rgb():
     """
     Optimized for 20x32 RGB with class-count awareness
     """
-    def relu6(x, name=None):
-        return tf.clip_by_value(tf.nn.relu(x), 0.0, 6.0, name=name)
-
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Layer 1: Depthwise separable
@@ -133,9 +131,10 @@ def create_digit_recognizer_v5_rgb():
         depthwise_initializer='he_normal',
         pointwise_initializer='he_normal',
         use_bias=True,
+        activation='relu',
         name='sep_conv1'
     )(inputs)
-    x = relu6(x, name='relu6_1')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_1')(x)
     x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     
     # Layer 2
@@ -144,9 +143,10 @@ def create_digit_recognizer_v5_rgb():
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
+        activation='relu',
         name='conv2'
     )(x)
-    x = relu6(x, name='relu6_2')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_2')(x)
     
     # Layer 3
     x = tf.keras.layers.Conv2D(
@@ -154,9 +154,10 @@ def create_digit_recognizer_v5_rgb():
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
+        activation='relu',
         name='conv3'
     )(x)
-    x = relu6(x, name='relu6_3')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_3')(x)
     
     # Layer 4: For 100-class discrimination
     if params.NB_CLASSES >= 50:
@@ -165,21 +166,22 @@ def create_digit_recognizer_v5_rgb():
             (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
+            activation='relu',
             name='conv5'
         )(x)
-        x = relu6(x, name='relu6_4')
+        x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_4')(x)
     
     # Global pooling
     x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Dense layers scale with class count
     dense_units = get_dense_units(72, 144)
-    x = tf.keras.layers.Dense(dense_units, activation=None, name='feature_dense')(x)
-    x = relu6(x, name='relu6_dense')
+    x = tf.keras.layers.Dense(dense_units, activation='relu', name='feature_dense')(x)
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense')(x)
     
     if params.NB_CLASSES >= 50:
-        x = tf.keras.layers.Dense(get_dense_units(64, 96), activation=None, name='feature_dense2')(x)
-        x = relu6(x, name='relu6_dense2')
+        x = tf.keras.layers.Dense(get_dense_units(64, 96), activation='relu', name='feature_dense2')(x)
+        x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense2')(x)
     
     # Output layer
     outputs = tf.keras.layers.Dense(
@@ -194,9 +196,6 @@ def create_digit_recognizer_v5_compact():
     """
     Ultra-compact version with class-aware optimization
     """
-    def relu6(x, name=None):
-        return tf.clip_by_value(tf.nn.relu(x), 0.0, 6.0, name=name)
-
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
     input_channels = params.INPUT_SHAPE[-1]
     
@@ -207,6 +206,7 @@ def create_digit_recognizer_v5_compact():
             (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
+            activation='relu',
             name='conv1'
         )(inputs)
     else:
@@ -216,10 +216,11 @@ def create_digit_recognizer_v5_compact():
             depthwise_initializer='he_normal',
             pointwise_initializer='he_normal',
             use_bias=True,
+            activation='relu',
             name='sep_conv1'
         )(inputs)
     
-    x = relu6(x, name='relu6_1')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_1')(x)
     x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     
     # Layer 2
@@ -228,9 +229,10 @@ def create_digit_recognizer_v5_compact():
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
+        activation='relu',
         name='conv2'
     )(x)
-    x = relu6(x, name='relu6_2')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_2')(x)
     
     # Layer 3
     x = tf.keras.layers.Conv2D(
@@ -238,9 +240,10 @@ def create_digit_recognizer_v5_compact():
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
+        activation='relu',
         name='conv3'
     )(x)
-    x = relu6(x, name='relu6_3')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_3')(x)
     
     # Optional layer for 100 classes
     if params.NB_CLASSES >= 50:
@@ -249,17 +252,18 @@ def create_digit_recognizer_v5_compact():
             (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
+            activation='relu',
             name='conv5'
         )(x)
-        x = relu6(x, name='relu6_4')
+        x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_4')(x)
     
     # Global pooling
     x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Compact but class-aware dense layer
     dense_units = get_dense_units(48, 64)
-    x = tf.keras.layers.Dense(dense_units, activation=None, name='feature_dense')(x)
-    x = relu6(x, name='relu6_dense')
+    x = tf.keras.layers.Dense(dense_units, activation='relu', name='feature_dense')(x)
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense')(x)
     
     # Output layer
     outputs = tf.keras.layers.Dense(
@@ -317,9 +321,6 @@ def create_digit_recognizer_v5_high_accuracy():
     """
     High-accuracy version for complex classification (100 classes)
     """
-    def relu6(x, name=None):
-        return tf.clip_by_value(tf.nn.relu(x), 0.0, 6.0, name=name)
-
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
     input_channels = params.INPUT_SHAPE[-1]
     
@@ -330,6 +331,7 @@ def create_digit_recognizer_v5_high_accuracy():
             (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
+            activation='relu',
             name='conv1'
         )(inputs)
     else:
@@ -339,10 +341,11 @@ def create_digit_recognizer_v5_high_accuracy():
             depthwise_initializer='he_normal',
             pointwise_initializer='he_normal',
             use_bias=True,
+            activation='relu',
             name='sep_conv1'
         )(inputs)
     
-    x = relu6(x, name='relu6_1')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_1')(x)
     x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     
     # Multiple conv layers for complex features
@@ -351,37 +354,40 @@ def create_digit_recognizer_v5_high_accuracy():
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
+        activation='relu',
         name='conv2'
     )(x)
-    x = relu6(x, name='relu6_2')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_2')(x)
     
     x = tf.keras.layers.Conv2D(
         get_filters(64, 80),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
+        activation='relu',
         name='conv3'
     )(x)
-    x = relu6(x, name='relu6_3')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_3')(x)
     
     x = tf.keras.layers.Conv2D(
         get_filters(72, 96),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
+        activation='relu',
         name='conv5'
     )(x)
-    x = relu6(x, name='relu6_4')
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_4')(x)
     
     # Global pooling
     x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Larger dense layers for 100-class separation
-    x = tf.keras.layers.Dense(get_dense_units(96, 160), activation=None, name='feature_dense1')(x)
-    x = relu6(x, name='relu6_dense1')
+    x = tf.keras.layers.Dense(get_dense_units(96, 160), activation='relu', name='feature_dense1')(x)
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense1')(x)
     
-    x = tf.keras.layers.Dense(get_dense_units(64, 112), activation=None, name='feature_dense2')(x)
-    x = relu6(x, name='relu6_dense2')
+    x = tf.keras.layers.Dense(get_dense_units(64, 112), activation='relu', name='feature_dense2')(x)
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense2')(x)
     
     # Output layer
     outputs = tf.keras.layers.Dense(

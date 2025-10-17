@@ -34,7 +34,7 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v6",
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the upper list
+MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
@@ -305,6 +305,12 @@ AUGMENTATION_ZOOM_RANGE = 0.1
 AUGMENTATION_BRIGHTNESS_RANGE = [0.9, 1.1]
 AUGMENTATION_HORIZONTAL_FLIP = False  # Usually False for digits
 AUGMENTATION_VERTICAL_FLIP = False    # Usually False for digits
+AUGMENTATION_CONTRAST_RANGE = 0.1
+AUGMENTATION_SHEAR_RANGE = 0.0  # Add shear transformation
+AUGMENTATION_SATURATION_RANGE = [0.9, 1.1]  # For color images
+AUGMENTATION_HUE_RANGE = 0.1  # For color images
+AUGMENTATION_BLUR_RANGE = 0.0  # Gaussian blur
+AUGMENTATION_NOISE_STDDEV = 0.0  # Gaussian noise
 
 # ==============================================================================
 # GPU CONFIGURATION

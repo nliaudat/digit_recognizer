@@ -633,13 +633,13 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         )
     
     # Regular checkpoint every epoch
-    callbacks.append(
-        tf.keras.callbacks.ModelCheckpoint(
-            filepath=os.path.join(output_dir, "checkpoints", "epoch_{epoch:03d}.keras"),
-            save_freq='epoch',
-            save_best_only=False,
-            verbose=1 if debug else 0
-        )
+    # callbacks.append(
+        # tf.keras.callbacks.ModelCheckpoint(
+            # filepath=os.path.join(output_dir, "checkpoints", "epoch_{epoch:03d}.keras"),
+            # save_freq='epoch',
+            # save_best_only=False,
+            # verbose=1 if debug else 0
+        # )
     )
     
     # Best model checkpoint
@@ -820,16 +820,14 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     print(f"  Debug mode: {'Enabled' if debug else 'Disabled'}")
 
 def train_model(debug=False):
-    """Main training function with proper QAT workflow"""
+    """Main training function with proper QAT workflow and data augmentation"""
     setup_tensorflow_logging(debug)
     set_all_seeds(params.SHUFFLE_SEED)
     
     print("🔧 Configuring hardware...")
     strategy = setup_gpu()
     
-    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     color_mode = "GR" if params.USE_GRAYSCALE else "RGB"
-    # training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}_{color_mode}_{timestamp}")
     training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}_{color_mode}")
     os.makedirs(training_dir, exist_ok=True)
     
@@ -905,7 +903,6 @@ def train_model(debug=False):
     monitor.set_model(model)
     
     print_training_summary(model, x_train, x_val, x_test, debug)
-    # FIXED: Remove debug parameter from model_summary call
     model_summary(model)
     
     callbacks = create_callbacks(training_dir, tflite_manager, representative_data, params.EPOCHS, monitor, debug)
@@ -915,15 +912,122 @@ def train_model(debug=False):
     
     start_time = datetime.now()
     
-    history = model.fit(
-        x_train, y_train,
-        batch_size=params.BATCH_SIZE,
-        epochs=params.EPOCHS,
-        validation_data=(x_val, y_val),
-        callbacks=callbacks,
-        verbose=0,
-        shuffle=True
-    )
+    # DATA AUGMENTATION PIPELINE
+    if params.USE_DATA_AUGMENTATION:
+        print("🔄 Setting up data augmentation pipeline...")
+        
+        # Create augmentation pipeline using parameters
+        augmentation_layers = []
+        
+        # Rotation - convert degrees to radians
+        if params.AUGMENTATION_ROTATION_RANGE > 0:
+            rotation_factor = params.AUGMENTATION_ROTATION_RANGE / 360.0
+            augmentation_layers.append(
+                tf.keras.layers.RandomRotation(
+                    factor=rotation_factor,
+                    fill_mode='nearest',
+                    name='random_rotation'
+                )
+            )
+        
+        # Translation (width and height shift)
+        if params.AUGMENTATION_WIDTH_SHIFT_RANGE > 0 or params.AUGMENTATION_HEIGHT_SHIFT_RANGE > 0:
+            augmentation_layers.append(
+                tf.keras.layers.RandomTranslation(
+                    height_factor=params.AUGMENTATION_HEIGHT_SHIFT_RANGE,
+                    width_factor=params.AUGMENTATION_WIDTH_SHIFT_RANGE,
+                    fill_mode='nearest',
+                    name='random_translation'
+                )
+            )
+        
+        # Zoom
+        if params.AUGMENTATION_ZOOM_RANGE > 0:
+            augmentation_layers.append(
+                tf.keras.layers.RandomZoom(
+                    height_factor=params.AUGMENTATION_ZOOM_RANGE,
+                    width_factor=params.AUGMENTATION_ZOOM_RANGE,
+                    fill_mode='nearest',
+                    name='random_zoom'
+                )
+            )
+        
+        # Brightness
+        if params.AUGMENTATION_BRIGHTNESS_RANGE != [1.0, 1.0]:
+            # Convert from [0.9, 1.1] to [-0.1, 0.1] for RandomBrightness
+            min_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[0] - 1.0
+            max_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[1] - 1.0
+            augmentation_layers.append(
+                tf.keras.layers.RandomBrightness(
+                    factor=(min_delta, max_delta),
+                    value_range=(0, 1),  # Images are normalized to [0,1]
+                    name='random_brightness'
+                )
+            )
+        
+        # Contrast (add some contrast variation)
+        augmentation_layers.append(
+            tf.keras.layers.RandomContrast(
+                factor=0.1,
+                name='random_contrast'
+            )
+        )
+        
+        # Flips
+        if params.AUGMENTATION_HORIZONTAL_FLIP:
+            augmentation_layers.append(
+                tf.keras.layers.RandomFlip(
+                    mode='horizontal',
+                    name='random_horizontal_flip'
+                )
+            )
+        
+        if params.AUGMENTATION_VERTICAL_FLIP:
+            augmentation_layers.append(
+                tf.keras.layers.RandomFlip(
+                    mode='vertical',
+                    name='random_vertical_flip'
+                )
+            )
+        
+        # Create augmentation pipeline
+        augmentation_pipeline = tf.keras.Sequential(augmentation_layers, name='augmentation_pipeline')
+        
+        print(f"✅ Augmentation pipeline created with {len(augmentation_layers)} layers")
+        
+        # Create tf.data pipeline with augmentation for training
+        train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+        train_dataset = train_dataset.map(
+            lambda x, y: (augmentation_pipeline(x, training=True), y),
+            num_parallel_calls=tf.data.AUTOTUNE
+        )
+        train_dataset = train_dataset.shuffle(1000).batch(params.BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+        
+        # Validation dataset WITHOUT augmentation
+        val_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val))
+        val_dataset = val_dataset.batch(params.BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+        
+        # Train with augmented dataset
+        history = model.fit(
+            train_dataset,
+            epochs=params.EPOCHS,
+            validation_data=val_dataset,
+            callbacks=callbacks,
+            verbose=0
+        )
+        
+    else:
+        # Training without augmentation
+        print("ℹ️  Training without data augmentation")
+        history = model.fit(
+            x_train, y_train,
+            batch_size=params.BATCH_SIZE,
+            epochs=params.EPOCHS,
+            validation_data=(x_val, y_val),
+            callbacks=callbacks,
+            verbose=0,
+            shuffle=True
+        )
     
     training_time = datetime.now() - start_time
     
@@ -1008,6 +1112,7 @@ def train_model(debug=False):
     print(f"   Training log: training_log.csv")
     print(f"   Training plot: training_history.png")
     
+    # Add augmentation info to training config
     save_training_config(training_dir, quantized_size, float_size, tflite_manager,
                         test_accuracy, tflite_accuracy, training_time, debug)
                         
@@ -1018,30 +1123,6 @@ def train_model(debug=False):
         print(f"✅ Final model saved: {final_checkpoint_path}")
     except Exception as e:
         print(f"❌ Final model save failed: {e}")
-        
-    # print("\n💾 Exporting best model to ONNX format...")
-    
-    # # Load the best model for ONNX export
-    # best_model_path = os.path.join(training_dir, "best_model.keras")
-    # if os.path.exists(best_model_path):
-        # try:
-            # best_model = tf.keras.models.load_model(best_model_path)
-            # onnx_path, onnx_size = tflite_manager.export_to_onnx(best_model, "best_model.onnx")
-            
-            # if onnx_path:
-                # print(f"✅ ONNX model exported: {onnx_path} ({onnx_size:.1f} KB)")
-                
-                # # Update training config with ONNX info
-                # config_path = os.path.join(training_dir, "training_config.txt")
-                # if os.path.exists(config_path):
-                    # with open(config_path, 'a') as f:
-                        # f.write(f"\nONNX Export:\n")
-                        # f.write(f"  ONNX Model Size: {onnx_size:.1f} KB\n")
-                        # f.write(f"  ONNX File: {os.path.basename(onnx_path)}\n")
-        # except Exception as e:
-            # print(f"❌ ONNX export failed: {e}")
-    # else:
-        # print("⚠️  Best model not found for ONNX export")
     
     # Also export the current model
     try:
@@ -1336,10 +1417,106 @@ def train_specific_models(models_to_train, debug=False):
             print(f"{i:2d}. {model_name:35} -> Keras: {metrics['keras_test_accuracy']:.4f} | TFLite: {metrics['tflite_accuracy']:.4f} | Params: {metrics['params']:,}")
     
     return results
+    
+    
+def create_augmentation_pipeline():
+    """Complete augmentation pipeline with all available options"""
+    augmentation_layers = []
+    
+    if not params.USE_DATA_AUGMENTATION:
+        return tf.keras.Sequential([tf.keras.layers.Lambda(lambda x: x)])
+    
+    # Geometric transformations
+    if params.AUGMENTATION_ROTATION_RANGE > 0:
+        rotation_factor = params.AUGMENTATION_ROTATION_RANGE / 360.0
+        augmentation_layers.append(
+            tf.keras.layers.RandomRotation(
+                factor=rotation_factor,
+                fill_mode='nearest',
+                interpolation='bilinear',
+                name='random_rotation'
+            )
+        )
+    
+    if params.AUGMENTATION_WIDTH_SHIFT_RANGE > 0 or params.AUGMENTATION_HEIGHT_SHIFT_RANGE > 0:
+        augmentation_layers.append(
+            tf.keras.layers.RandomTranslation(
+                height_factor=params.AUGMENTATION_HEIGHT_SHIFT_RANGE,
+                width_factor=params.AUGMENTATION_WIDTH_SHIFT_RANGE,
+                fill_mode='nearest',
+                interpolation='bilinear',
+                name='random_translation'
+            )
+        )
+    
+    if params.AUGMENTATION_ZOOM_RANGE > 0:
+        augmentation_layers.append(
+            tf.keras.layers.RandomZoom(
+                height_factor=params.AUGMENTATION_ZOOM_RANGE,
+                width_factor=params.AUGMENTATION_ZOOM_RANGE,
+                fill_mode='nearest',
+                interpolation='bilinear',
+                name='random_zoom'
+            )
+        )
+    
+    # Flips
+    if params.AUGMENTATION_HORIZONTAL_FLIP:
+        augmentation_layers.append(
+            tf.keras.layers.RandomFlip(
+                mode='horizontal',
+                name='random_horizontal_flip'
+            )
+        )
+    
+    if params.AUGMENTATION_VERTICAL_FLIP:
+        augmentation_layers.append(
+            tf.keras.layers.RandomFlip(
+                mode='vertical',
+                name='random_vertical_flip'
+            )
+        )
+    
+    # Color transformations
+    if params.AUGMENTATION_BRIGHTNESS_RANGE != [1.0, 1.0]:
+        min_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[0] - 1.0
+        max_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[1] - 1.0
+        augmentation_layers.append(
+            tf.keras.layers.RandomBrightness(
+                factor=(min_delta, max_delta),
+                value_range=(0, 1),
+                name='random_brightness'
+            )
+        )
+    
+    # Contrast (add AUGMENTATION_CONTRAST_RANGE to parameters.py)
+    contrast_factor = getattr(params, 'AUGMENTATION_CONTRAST_RANGE', 0.1)
+    if contrast_factor > 0:
+        augmentation_layers.append(
+            tf.keras.layers.RandomContrast(
+                factor=contrast_factor,
+                name='random_contrast'
+            )
+        )
+    
+    # For RGB images - saturation and hue
+    if not params.USE_GRAYSCALE:
+        saturation_range = getattr(params, 'AUGMENTATION_SATURATION_RANGE', [0.9, 1.1])
+        if saturation_range != [1.0, 1.0]:
+            # Note: RandomSaturation is not available in core Keras, would need custom layer
+            pass
+        
+        hue_range = getattr(params, 'AUGMENTATION_HUE_RANGE', 0.1)
+        if hue_range > 0:
+            # Note: RandomHue is not available in core Keras, would need custom layer
+            pass
+    
+    return tf.keras.Sequential(augmentation_layers, name='augmentation_pipeline')
 
 def main():
     """Main entry point"""
     args = parse_arguments()
+    tflite_checkpoint_callback = None  # Store reference to the callback
     
     try:
         # Load data first for all operations
@@ -1484,6 +1661,9 @@ def main():
         else:
             # NORMAL SINGLE MODEL TRAINING MODE
             print(f"🚀 Training single model: {params.MODEL_ARCHITECTURE}")
+            
+            # We need to modify train_model to return the TFLiteCheckpoint callback
+            # For now, let's handle cleanup differently
             model, history, output_dir = train_model(debug=args.debug)
             print(f"\n✅ Training completed successfully!")
             print(f"📁 Output directory: {output_dir}")
@@ -1493,7 +1673,7 @@ def main():
                 final_val_acc = history.history['val_accuracy'][-1] if 'val_accuracy' in history.history else 0
                 final_train_acc = history.history['accuracy'][-1] if 'accuracy' in history.history else 0
                 print(f"📊 Final metrics - Train: {final_train_acc:.4f}, Val: {final_val_acc:.4f}")
-        
+    
     except KeyboardInterrupt:
         print("\n⚠️  Operation interrupted by user")
         
@@ -1523,6 +1703,42 @@ def main():
             print("   - Data preprocessing steps")
     
     finally:
+        # CLEANUP: Delete checkpoints if not in debug mode
+        if not args.debug:
+            print("\n🧹 Cleaning up intermediate checkpoints...")
+            try:
+                # Clean up checkpoint directories and files
+                if 'output_dir' in locals() and os.path.exists(output_dir):
+                    checkpoints_dir = os.path.join(output_dir, "checkpoints")
+                    if os.path.exists(checkpoints_dir):
+                        import shutil
+                        shutil.rmtree(checkpoints_dir)
+                        print("🗑️  Deleted checkpoints directory")
+                    
+                    # Also delete individual checkpoint files in the main directory
+                    for file in os.listdir(output_dir):
+                        if file.startswith("checkpoint_epoch_") and file.endswith(".keras"):
+                            file_path = os.path.join(output_dir, file)
+                            os.remove(file_path)
+                            print(f"🗑️  Deleted checkpoint: {file}")
+                
+                # Also clean up from any training that happened in train_specific_models
+                if 'results' in locals():
+                    for model_name, metrics in results.items():
+                        if 'output_dir' in metrics and os.path.exists(metrics['output_dir']):
+                            checkpoints_dir = os.path.join(metrics['output_dir'], "checkpoints")
+                            if os.path.exists(checkpoints_dir):
+                                import shutil
+                                shutil.rmtree(checkpoints_dir)
+                            
+                            # Delete individual checkpoint files
+                            for file in os.listdir(metrics['output_dir']):
+                                if file.startswith("checkpoint_epoch_") and file.endswith(".keras"):
+                                    file_path = os.path.join(metrics['output_dir'], file)
+                                    os.remove(file_path)
+            except Exception as e:
+                print(f"⚠️  Cleanup failed: {e}")
+        
         # Cleanup and final message
         print("\n" + "="*60)
         print("🏁 Program finished")

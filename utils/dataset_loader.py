@@ -10,8 +10,8 @@ def load_custom_dataset():
     """
     if not os.path.exists(params.DATASET_PATH):
         print(f"Dataset path not found: {params.DATASET_PATH}")
-        print("Using MNIST as fallback...")
-        return load_mnist_fallback()
+        # print("Using MNIST as fallback...")
+        return #load_mnist_fallback()
     
     if params.DATASET_TYPE == "folder_structure":
         images, labels = load_folder_structure_dataset()
@@ -51,8 +51,8 @@ def load_folder_structure_dataset():
                 labels.append(class_label)
     
     if len(images) == 0:
-        print("No images found in dataset directory. Using MNIST fallback.")
-        return load_mnist_fallback()
+        print("No images found in dataset directory")
+        return #load_mnist_fallback()
     
     print(f"Loaded {len(images)} images from folder structure")
     return np.array(images), np.array(labels)
@@ -68,8 +68,8 @@ def load_label_file_dataset():
     images_dir = os.path.join(params.DATASET_PATH, 'images')
     
     if not os.path.exists(label_file_path) or not os.path.exists(images_dir):
-        print("Label file or images directory not found. Using MNIST fallback.")
-        return load_mnist_fallback()
+        print("Label file or images directory not found.")
+        return #load_mnist_fallback()
     
     # Read labels file
     with open(label_file_path, 'r') as f:
