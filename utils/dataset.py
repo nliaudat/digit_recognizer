@@ -37,7 +37,7 @@ def get_data_splits():
     x_train, x_val, y_train, y_val = train_test_split(
         x_train, y_train, 
         test_size=params.VALIDATION_SPLIT, 
-        random_state=42
+        random_state=params.SHUFFLE_SEED
     )
     
     print(f"Data splits:")
