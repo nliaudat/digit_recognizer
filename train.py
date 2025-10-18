@@ -84,7 +84,8 @@ def setup_tensorflow_logging(debug=False):
         tf.autograph.set_verbosity(0)
         
         # Suppress ALL TensorFlow C++ logs including warnings and errors
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' ## 0 = all logs, 3 = errors only
+        os.environ['TF_CPP_MAX_VLOG_LEVEL'] = '0'
         
         # Suppress absl logging
         import absl.logging
@@ -856,6 +857,24 @@ def train_model(debug=False):
     color_mode = "GR" if params.USE_GRAYSCALE else "RGB"
     training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}_{color_mode}")
     os.makedirs(training_dir, exist_ok=True)
+    
+    
+    # QAT Compatibility Check
+    if params.USE_QAT:
+        from utils.preprocess import check_qat_compatibility
+        qat_ok, qat_issues = check_qat_compatibility()
+        if not qat_ok:
+            print("❌ QAT Compatibility Issues:")
+            for issue in qat_issues:
+                print(f"   - {issue}")
+            print("🔄 Disabling QAT...")
+            params.USE_QAT = False
+    
+    # Validate preprocessing consistency
+    from utils.preprocess import validate_preprocessing_consistency
+    if not validate_preprocessing_consistency():
+        print("❌ Preprocessing validation failed!")
+        return None, None, None 
     
     print("🚀 Starting Digit Recognition Training")
     if debug:
