@@ -1,3 +1,4 @@
+# preprocess.py
 import cv2
 import numpy as np
 import tensorflow as tf
@@ -41,10 +42,8 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
     # TFLite converter will handle the quantization scaling
     processed_images = processed_images / 255.0
     
-    # Ensure correct shape
-    if grayscale and processed_images.shape[-1] != 1:
-        processed_images = np.expand_dims(processed_images, axis=-1)
-        processed_images = processed_images.mean(axis=-1, keepdims=True)
+    # DEBUG: Print data range
+    print(f"🔍 Preprocessing - Range: [{processed_images.min():.3f}, {processed_images.max():.3f}], Shape: {processed_images.shape}")
     
     return processed_images
     
@@ -53,4 +52,3 @@ def predict_single_image(image):
     Preprocess a single image for inference
     """
     return preprocess_images([image])[0]
-
