@@ -12,7 +12,14 @@ from contextlib import contextmanager
 from models import create_model, compile_model, model_summary
 # from models.model_factory import print_hyperparameter_summary
 from utils import get_data_splits, preprocess_images
+from utils.preprocess import check_qat_compatibility, validate_preprocessing_consistency
+from utils.data_pipeline import create_tf_dataset_from_arrays
+from analyse import evaluate_tflite_model, analyze_quantization_impact, debug_tflite_model, training_diagnostics, verify_model_predictions, debug_model_architecture
+from tuner import run_architecture_tuning
+from parameters import get_hyperparameter_summary_text
 import parameters as params
+
+# import tensorflow_model_optimization as tfmot
 
 # QAT imports
 try:
@@ -21,6 +28,7 @@ try:
 except ImportError:
     print("⚠️  tensorflow-model-optimization not available. Install with: pip install tensorflow-model-optimization")
     QAT_AVAILABLE = False
+    tfmot = None 
     
 # try:
     # import onnx
@@ -653,7 +661,8 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
                 monitor=params.EARLY_STOPPING_MONITOR,
                 patience=params.EARLY_STOPPING_PATIENCE,
                 min_delta=params.EARLY_STOPPING_MIN_DELTA,
-                restore_best_weights=getattr(params, 'RESTORE_BEST_WEIGHTS', True),
+                # restore_best_weights=getattr(params, 'RESTORE_BEST_WEIGHTS', True),
+                restore_best_weights=params.RESTORE_BEST_WEIGHTS,
                 mode=mode,
                 verbose=1 if debug else 0
             )
@@ -683,10 +692,10 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     # Learning rate scheduler
     callbacks.append(
         tf.keras.callbacks.ReduceLROnPlateau(
-            monitor=getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss'),
-            factor=getattr(params, 'LR_SCHEDULER_FACTOR', 0.5),
-            patience=getattr(params, 'LR_SCHEDULER_PATIENCE', 3),
-            min_lr=getattr(params, 'LR_SCHEDULER_MIN_LR', 1e-7),
+            monitor=params.LR_SCHEDULER_MONITOR,
+            factor=params.LR_SCHEDULER_FACTOR,
+            patience=params.LR_SCHEDULER_PATIENCE,
+            min_lr=params.LR_SCHEDULER_MIN_LR,
             verbose=1 if debug else 0
         )
     )
@@ -841,10 +850,11 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     print(f"  Epochs: {params.EPOCHS}")
     print(f"  Learning rate: {params.LEARNING_RATE}")
     print(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}")
-    print(f"  Quantization: {params.QUANTIZE_MODEL}")
-    print(f"  QAT: {'Enabled' if (params.QUANTIZE_MODEL and getattr(params, 'USE_QAT', False)) else 'Disabled'}")
+    print(f"  Quantization: {'Enabled' if params.QUANTIZE_MODEL else 'Disabled'}")
+    print(f"  QAT: {'Enabled' if params.USE_QAT else 'Disabled'}")
     print(f"  ESP-DL Quantization: {params.ESP_DL_QUANTIZE}")
     print(f"  Debug mode: {'Enabled' if debug else 'Disabled'}")
+    
 
 def train_model(debug=False):
     """Main training function with proper data handling and verification"""
@@ -861,17 +871,30 @@ def train_model(debug=False):
     
     # QAT Compatibility Check
     if params.USE_QAT:
-        from utils.preprocess import check_qat_compatibility
-        qat_ok, qat_issues = check_qat_compatibility()
+        # from utils.preprocess import check_qat_compatibility
+        qat_ok, qat_warnings, qat_errors, qat_info = check_qat_compatibility(QAT_AVAILABLE)
+        
         if not qat_ok:
-            print("❌ QAT Compatibility Issues:")
-            for issue in qat_issues:
-                print(f"   - {issue}")
+            print("❌ QAT Compatibility Errors:")
+            for error in qat_errors:
+                print(f"   - {error}")
             print("🔄 Disabling QAT...")
             params.USE_QAT = False
+        else:
+            # Show warnings but don't disable QAT
+            if qat_warnings:
+                print("⚠️  QAT Warnings:")
+                for warning in qat_warnings:
+                    print(f"   - {warning}")
+            
+            # Show info messages
+            if qat_info:
+                print("💡 QAT Info:")
+                for info_msg in qat_info:
+                    print(f"   - {info_msg}")
     
     # Validate preprocessing consistency
-    from utils.preprocess import validate_preprocessing_consistency
+    # from utils.preprocess import validate_preprocessing_consistency
     if not validate_preprocessing_consistency():
         print("❌ Preprocessing validation failed!")
         return None, None, None 
@@ -934,7 +957,8 @@ def train_model(debug=False):
     
     representative_data = create_qat_representative_dataset(x_train)
     
-    use_qat = params.QUANTIZE_MODEL and getattr(params, 'USE_QAT', False) and QAT_AVAILABLE
+    # use_qat = params.QUANTIZE_MODEL and getattr(params, 'USE_QAT', False) and QAT_AVAILABLE
+    use_qat = params.USE_QAT and QAT_AVAILABLE
     
     # Model creation and compilation
     if use_qat:
@@ -1073,9 +1097,9 @@ def train_model(debug=False):
         
         print(f"✅ Augmentation pipeline created with {len(augmentation_layers)} layers")
         
-        if getattr(params, 'USE_TF_DATA_PIPELINE', False):
+        if params.USE_TF_DATA_PIPELINE:
             print("🔧 Using tf.data pipeline with separate augmentation...")
-            from data_pipeline import create_tf_dataset_from_arrays
+            # from data_pipeline import create_tf_dataset_from_arrays
             
             # Create datasets from PREPROCESSED arrays (NO additional preprocessing)
             train_dataset = create_tf_dataset_from_arrays(x_train, y_train_final, training=True)
@@ -1141,7 +1165,7 @@ def train_model(debug=False):
         
         if getattr(params, 'USE_TF_DATA_PIPELINE', False):
             print("🔧 Using tf.data pipeline without augmentation...")
-            from data_pipeline import create_tf_dataset_from_arrays
+            # from data_pipeline import create_tf_dataset_from_arrays
             
             # Create datasets from PREPROCESSED arrays
             train_dataset = create_tf_dataset_from_arrays(x_train, y_train_final, training=True)
@@ -1335,10 +1359,10 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
             f.write(f"    Min delta: {params.EARLY_STOPPING_MIN_DELTA}\n")
         
         f.write(f"  Learning rate scheduler:\n")
-        f.write(f"    Monitor: {getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss')}\n")
-        f.write(f"    Patience: {getattr(params, 'LR_SCHEDULER_PATIENCE', 3)}\n")
-        f.write(f"    Factor: {getattr(params, 'LR_SCHEDULER_FACTOR', 0.5)}\n")
-        f.write(f"    Min LR: {getattr(params, 'LR_SCHEDULER_MIN_LR', 1e-7)}\n")
+        f.write(f"    Monitor: {params.LR_SCHEDULER_MONITOR}\n")
+        f.write(f"    Patience: {params.LR_SCHEDULER_PATIENCE}\n")
+        f.write(f"    Factor: {params.LR_SCHEDULER_FACTOR}\n")
+        f.write(f"    Min LR: {params.LR_SCHEDULER_MIN_LR}\n")
         
         f.write(f"  Quantization: {params.QUANTIZE_MODEL}\n")
         if params.QUANTIZE_MODEL:
@@ -1390,9 +1414,9 @@ def save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
         f.write(f"use_early_stopping,{params.USE_EARLY_STOPPING}\n")
         f.write(f"early_stopping_monitor,{params.EARLY_STOPPING_MONITOR}\n")
         f.write(f"early_stopping_patience,{params.EARLY_STOPPING_PATIENCE}\n")
-        f.write(f"lr_scheduler_monitor,{getattr(params, 'LR_SCHEDULER_MONITOR', 'val_loss')}\n")
-        f.write(f"lr_scheduler_patience,{getattr(params, 'LR_SCHEDULER_PATIENCE', 3)}\n")
-        f.write(f"lr_scheduler_factor,{getattr(params, 'LR_SCHEDULER_FACTOR', 0.5)}\n")
+        f.write(f"lr_scheduler_monitor,{params.LR_SCHEDULER_MONITOR}\n")
+        f.write(f"lr_scheduler_patience,{params.LR_SCHEDULER_PATIENCE}\n")
+        f.write(f"lr_scheduler_factor,{params.LR_SCHEDULER_FACTOR}\n")
         f.write(f"QUANTIZE_MODEL,{params.QUANTIZE_MODEL}\n")
         f.write(f"esp_dl_quantize,{params.ESP_DL_QUANTIZE}\n")
         f.write(f"quantize_num_samples,{params.QUANTIZE_NUM_SAMPLES}\n")

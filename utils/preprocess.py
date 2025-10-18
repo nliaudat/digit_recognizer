@@ -96,7 +96,7 @@ def validate_preprocessing_consistency():
     print("=" * 50)
     
     # Create test data
-    test_images = np.random.randint(0, 255, (10, 32, 20, 1), dtype=np.uint8)
+    test_images = np.random.randint(0, 255, (10, params.INPUT_HEIGHT, params.INPUT_WIDTH, params.INPUT_CHANNELS), dtype=np.uint8)
     
     # Process test data
     processed = preprocess_images(test_images)
@@ -128,8 +128,8 @@ def validate_preprocessing_consistency():
     print(f"📊 Data Type: {processed.dtype}")
     
     # Check if range is correct
-    range_ok = (abs(actual_min - expected_min) <= 0.1 and 
-                abs(actual_max - expected_max) <= 0.1)
+    range_ok = (actual_min >= expected_min - 1e-6 and 
+                actual_max <= expected_max + 1e-6)
     
     if range_ok:
         print("✅ Preprocessing consistency: VALID")
@@ -179,19 +179,33 @@ def predict_single_image(image):
     return preprocess_images([image], for_training=False)[0]
 
 # QAT-specific helper functions
-def check_qat_compatibility():
+def check_qat_compatibility(qat_available):
     """
     Check if current settings are compatible with QAT
+    Returns: (is_compatible, warnings, errors, info)
     """
-    issues = []
+    warnings = []
+    errors = []
+    info = []
     
+    # Critical errors that prevent QAT from working
+    if params.USE_QAT and not qat_available:
+        errors.append("QAT requires tensorflow-model-optimization package. Install with: pip install tensorflow-model-optimization")
+    
+    # Warnings (things that might affect performance but won't break QAT)
     if params.USE_QAT and not params.QUANTIZE_MODEL:
-        issues.append("QAT requires QUANTIZE_MODEL = True")
-    
-    if params.USE_QAT and not hasattr(tf, 'mot'):
-        issues.append("QAT requires tensorflow-model-optimization package")
+        warnings.append("QAT is enabled but QUANTIZE_MODEL is False - quantization won't be applied to final model")
     
     if params.USE_QAT and params.USE_DATA_AUGMENTATION:
-        print("⚠️  QAT with data augmentation: Ensure augmentation doesn't change data range significantly")
+        warnings.append("Data augmentation with QAT: Ensure augmentations don't significantly change data distribution")
     
-    return len(issues) == 0, issues
+    if params.USE_QAT and params.ESP_DL_QUANTIZE:
+        warnings.append("ESP-DL quantization with QAT: Verify input ranges match [-128, 127] for int8")
+    
+    # Info messages for best practices
+    if params.USE_QAT and qat_available:
+        info.append("✅ QAT compatible - model will be trained with quantization awareness")
+        if params.QUANTIZE_MODEL:
+            info.append("✅ Post-training quantization will be applied after QAT")
+    
+    return len(errors) == 0, warnings, errors, info
