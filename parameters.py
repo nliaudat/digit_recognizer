@@ -61,12 +61,12 @@ USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 
 # Multiple Data Sources Configuration
 DATA_SOURCES = [ 
-    {
-        'name': 'Tenth-of-step-of-a-meter-digit',
-        'type': 'label_file', # load labels.txt (tab separated) and images folder in path
-        'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
-        'weight': 1.0,
-    },
+    # {
+        # 'name': 'Tenth-of-step-of-a-meter-digit',
+        # 'type': 'label_file', # load labels.txt (tab separated) and images folder in path
+        # 'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
+        # 'weight': 1.0,
+    # },
     # {
         # 'name': 'meterdigits_100',
         # 'type': 'folder_structure',
@@ -79,12 +79,12 @@ DATA_SOURCES = [
         # 'path': 'datasets/meterdigits_10_augmented',
         # 'weight': 0.3,
     # },
-    # {
-        # 'name': 'meterdigits_10',
-        # 'type': 'folder_structure',
-        # 'path': 'datasets/meterdigits_10',
-        # 'weight': 1.0,
-    # },
+    {
+        'name': 'meterdigits_10',
+        'type': 'folder_structure',
+        'path': 'datasets/meterdigits_10',
+        'weight': 1.0,
+    },
     # {
         # 'name': 'meterdigits_10_augmented',
         # 'type': 'folder_structure',
