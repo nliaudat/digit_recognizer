@@ -640,7 +640,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
             # save_best_only=False,
             # verbose=1 if debug else 0
         # )
-    )
+    # )
     
     # Best model checkpoint
     callbacks.append(
