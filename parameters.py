@@ -61,12 +61,12 @@ USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 
 # Multiple Data Sources Configuration
 DATA_SOURCES = [ 
-    {
-        'name': 'Tenth-of-step-of-a-meter-digit',
-        'type': 'label_file', # load labels.txt (tab separated) and images folder in path
-        'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
-        'weight': 1.0,
-    },
+    # {
+        # 'name': 'Tenth-of-step-of-a-meter-digit',
+        # 'type': 'label_file', # load labels.txt (tab separated) and images folder in path
+        # 'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
+        # 'weight': 1.0,
+    # },
     # {
         # 'name': 'meterdigits_100',
         # 'type': 'folder_structure',
@@ -79,12 +79,12 @@ DATA_SOURCES = [
         # 'path': 'datasets/meterdigits_10_augmented',
         # 'weight': 0.3,
     # },
-    # {
-        # 'name': 'meterdigits_10',
-        # 'type': 'folder_structure',
-        # 'path': 'datasets/meterdigits_10',
-        # 'weight': 1.0,
-    # },
+    {
+        'name': 'meterdigits_10',
+        'type': 'folder_structure',
+        'path': 'datasets/meterdigits_10',
+        'weight': 1.0,
+    },
     # {
         # 'name': 'meterdigits_10_augmented',
         # 'type': 'folder_structure',
@@ -128,6 +128,13 @@ ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
 USE_QAT = True  # Enable Quantization Aware Training
 QAT_QUANTIZE_ALL = True  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
+
+# Data pipeline configuration
+# numpy array or tensorflow datapipeline (still bugs on it)
+USE_TF_DATA_PIPELINE = False
+TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
+TF_DATA_SHUFFLE_BUFFER = 1000
+TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
 
 # File Paths
 MODEL_FILENAME = MODEL_ARCHITECTURE
@@ -285,11 +292,11 @@ RESTORE_BEST_WEIGHTS = True
 # Model Checkpoint
 SAVE_CHECKPOINTS = True
 CHECKPOINT_FREQUENCY = 5
-SAVE_BEST_ONLY = False
+SAVE_BEST_ONLY = True
 CHECKPOINT_MONITOR = 'val_accuracy'
 
 # TensorBoard
-USE_TENSORBOARD = True
+USE_TENSORBOARD = False
 TENSORBOARD_UPDATE_FREQ = 'epoch'
 TENSORBOARD_WRITE_GRAPHS = True
 
@@ -297,7 +304,7 @@ TENSORBOARD_WRITE_GRAPHS = True
 # DATA AUGMENTATION HYPERPARAMETERS
 # ==============================================================================
 
-USE_DATA_AUGMENTATION = True
+USE_DATA_AUGMENTATION = False
 AUGMENTATION_ROTATION_RANGE = 10
 AUGMENTATION_WIDTH_SHIFT_RANGE = 0.1
 AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.1
@@ -328,10 +335,10 @@ GPU_MEMORY_LIMIT = None  # Set specific memory limit in MB, or None for no limit
 # ==============================================================================
 
 # TF.DATA CONFIGURATION
-USE_TF_DATA = True
-TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
-TF_DATA_SHUFFLE_BUFFER = 1000
-TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
+# USE_TF_DATA = True
+# TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
+# TF_DATA_SHUFFLE_BUFFER = 1000
+# TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
 
 # ADVANCED TRAINING
 USE_MIXED_PRECISION = False
