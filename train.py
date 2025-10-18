@@ -850,17 +850,25 @@ def train_model(debug=False):
     print(f"   Val range: [{x_val.min():.3f}, {x_val.max():.3f}]")
     print(f"   Shapes - Train: {x_train.shape}, Val: {x_val.shape}")
     
-    # FIXED: Consistent label handling for original_haverland model
+    # Always create NEW variables to avoid confusion
     if params.MODEL_ARCHITECTURE == "original_haverland":
-        print("🔧 Converting labels to categorical format for Haverland model...")
-        y_train_cat = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
-        y_val_cat = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES) 
-        y_test_cat = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+        # Haverland model needs categorical labels (one-hot encoded)
+        y_train_final = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
+        y_val_final = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES) 
+        y_test_final = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+        loss_type = 'categorical_crossentropy'
+        print(f"✅ Using categorical labels (one-hot) for Haverland model")
     else:
-        print("🔧 Using sparse categorical labels for other models...")
-        y_train_cat = y_train
-        y_val_cat = y_val
-        y_test_cat = y_test
+        # Other models use sparse categorical labels (integer labels)
+        y_train_final = y_train.copy()  # Explicit copy to avoid aliasing
+        y_val_final = y_val.copy()
+        y_test_final = y_test.copy() 
+        loss_type = 'sparse_categorical_crossentropy'
+        print(f"✅ Using sparse categorical labels for {params.MODEL_ARCHITECTURE}")
+
+    print(f"   Loss function: {loss_type}")
+    print(f"   y_train_final shape: {y_train_final.shape}")
+    print(f"   Sample labels: {y_train_final[:3]}")
     
     # VERIFY DATA BEFORE TRAINING
     print("🔍 Verifying data consistency...")
@@ -869,6 +877,15 @@ def train_model(debug=False):
     
     if sample_image.max() < 0.1:
         print("❌ WARNING: Data appears to be over-normalized! Check for double preprocessing.")
+        
+    print(f"✅ Preprocessing verification:")
+    print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
+    print(f"   Mean: {x_train.mean():.3f}, Std: {x_train.std():.3f}")
+    print(f"   Unique values in first 10 samples: {len(np.unique(x_train[:10]))}")
+
+    # Check if data is all zeros or constant
+    if x_train.std() < 0.01:
+        print("❌ WARNING: Data has very low variance - might be over-normalized!")
     
     representative_data = create_qat_representative_dataset(x_train)
     
@@ -1016,7 +1033,7 @@ def train_model(debug=False):
             from data_pipeline import create_tf_dataset_from_arrays
             
             # Create datasets from PREPROCESSED arrays (NO additional preprocessing)
-            train_dataset = create_tf_dataset_from_arrays(x_train, y_train_cat, training=True)
+            train_dataset = create_tf_dataset_from_arrays(x_train, y_train_final, training=True)
             
             # Apply augmentation separately to training dataset only
             train_dataset = train_dataset.map(
@@ -1025,7 +1042,7 @@ def train_model(debug=False):
             )
             
             # Validation dataset WITHOUT augmentation
-            val_dataset = create_tf_dataset_from_arrays(x_val, y_val_cat, training=False)
+            val_dataset = create_tf_dataset_from_arrays(x_val, y_val_final, training=False)
             
             # TEMPORARY VERIFICATION
             print("🧪 Testing data pipeline...")
@@ -1046,7 +1063,7 @@ def train_model(debug=False):
         else:
             print("🔧 Using standard arrays with augmentation...")
             # Create tf.data pipeline with augmentation for training
-            train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train_cat))
+            train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train_final))
             train_dataset = train_dataset.map(
                 lambda x, y: (augmentation_pipeline(x, training=True), y),
                 num_parallel_calls=tf.data.AUTOTUNE
@@ -1054,7 +1071,7 @@ def train_model(debug=False):
             train_dataset = train_dataset.shuffle(1000).batch(params.BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
             
             # Validation dataset WITHOUT augmentation
-            val_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val_cat))
+            val_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val_final))
             val_dataset = val_dataset.batch(params.BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
             
             # TEMPORARY VERIFICATION
@@ -1082,8 +1099,8 @@ def train_model(debug=False):
             from data_pipeline import create_tf_dataset_from_arrays
             
             # Create datasets from PREPROCESSED arrays
-            train_dataset = create_tf_dataset_from_arrays(x_train, y_train_cat, training=True)
-            val_dataset = create_tf_dataset_from_arrays(x_val, y_val_cat, training=False)
+            train_dataset = create_tf_dataset_from_arrays(x_train, y_train_final, training=True)
+            val_dataset = create_tf_dataset_from_arrays(x_val, y_val_final, training=False)
             
             # TEMPORARY VERIFICATION
             print("🧪 Testing data pipeline...")
@@ -1104,15 +1121,15 @@ def train_model(debug=False):
             
             # TEMPORARY VERIFICATION
             print("🧪 Testing data pipeline...")
-            sample_x, sample_y = x_train[:1], y_train_cat[:1]
+            sample_x, sample_y = x_train[:1], y_train_final[:1]
             print(f"   Sample batch - X range: [{sample_x.min():.3f}, {sample_x.max():.3f}]")
             print(f"   Sample batch - Y shape: {sample_y.shape}")
             
             history = model.fit(
-                x_train, y_train_cat,
+                x_train, y_train_final,
                 batch_size=params.BATCH_SIZE,
                 epochs=params.EPOCHS,
-                validation_data=(x_val, y_val_cat),
+                validation_data=(x_val, y_val_final),
                 callbacks=callbacks,
                 verbose=0,
                 shuffle=True
@@ -1156,9 +1173,9 @@ def train_model(debug=False):
     
     try:
         # Use the correct labels for evaluation
-        train_accuracy = model.evaluate(x_train, y_train_cat, verbose=0)[1]
-        val_accuracy = model.evaluate(x_val, y_val_cat, verbose=0)[1]
-        test_accuracy = model.evaluate(x_test, y_test_cat, verbose=0)[1]
+        train_accuracy = model.evaluate(x_train, y_train_final, verbose=0)[1]
+        val_accuracy = model.evaluate(x_val, y_val_final, verbose=0)[1]
+        test_accuracy = model.evaluate(x_test, y_test_final, verbose=0)[1]
     except Exception as e:
         print(f"❌ Keras model evaluation failed: {e}")
         train_accuracy = val_accuracy = test_accuracy = 0.0
@@ -1170,11 +1187,11 @@ def train_model(debug=False):
             # For TFLite evaluation, use the correct label format
             if params.MODEL_ARCHITECTURE == "original_haverland":
                 # TFLite model expects categorical output, but evaluate_tflite_model might need sparse labels
-                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test)
+                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test_final)
             else:
-                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test)
+                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test_final)
             
-            analyze_quantization_impact(model, x_test, y_test_cat, quantized_tflite_path)
+            analyze_quantization_impact(model, x_test, y_test_final, quantized_tflite_path)
         except Exception as e:
             print(f"❌ TFLite evaluation failed: {e}")
     
@@ -1182,8 +1199,8 @@ def train_model(debug=False):
     
     try:
         from analyse import training_diagnostics, verify_model_predictions, debug_model_architecture
-        training_diagnostics(model, x_train, y_train_cat, x_val, y_val_cat, debug=debug)
-        verify_model_predictions(model, x_train[:100], y_train_cat[:100])
+        training_diagnostics(model, x_train, y_train_final, x_val, y_val_final, debug=debug)
+        verify_model_predictions(model, x_train[:100], y_train_final[:100])
         
         if debug:
             debug_model_architecture(model, x_train[:10])
@@ -1371,11 +1388,11 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
             
             if model_name == "original_haverland":
                 loss_fn = 'categorical_crossentropy'
-                y_train_cat = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
+                y_train = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
                 y_val_cat = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES)
             else:
                 loss_fn = 'sparse_categorical_crossentropy'
-                y_train_cat = y_train
+                y_train = y_train
                 y_val_cat = y_val
             
             model.compile(
@@ -1388,7 +1405,7 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
             val_samples = min(200, len(x_val))
             
             history = model.fit(
-                x_train[:train_samples], y_train_cat[:train_samples],
+                x_train[:train_samples], y_train[:train_samples],
                 validation_data=(x_val[:val_samples], y_val_cat[:val_samples]),
                 epochs=5,
                 batch_size=32,
