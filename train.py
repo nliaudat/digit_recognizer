@@ -82,15 +82,25 @@ def setup_tensorflow_logging(debug=False):
         # Suppress TensorFlow info and warning messages
         tf.get_logger().setLevel('ERROR')
         tf.autograph.set_verbosity(0)
-        # Also suppress other noisy libraries
+        
+        # Suppress ALL TensorFlow C++ logs including warnings and errors
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+        
         # Suppress absl logging
         import absl.logging
         absl.logging.set_verbosity(absl.logging.ERROR)
+        
+        # Suppress specific TensorFlow warnings that still get through
+        import warnings
+        warnings.filterwarnings('ignore', category=UserWarning, module='tensorflow')
+        warnings.filterwarnings('ignore', category=FutureWarning, module='tensorflow')
+        
+        # Also suppress deprecation warnings
+        warnings.filterwarnings('ignore', category=DeprecationWarning, module='tensorflow')
 
 @contextmanager
 def suppress_all_output(debug=False):
-    """Completely suppress all output during TFLite conversion"""
+    """Completely suppress all output during TFLite conversion and other noisy operations"""
     if debug:
         # Don't suppress anything in debug mode
         yield
@@ -126,11 +136,27 @@ def suppress_all_output(debug=False):
         # Suppress all Python logging
         logging.disable(logging.CRITICAL)
         
+        # Additional TensorFlow-specific suppression
+        import warnings
+        original_warnings = warnings.showwarning
+        warnings.showwarning = lambda *args, **kwargs: None
+        
+        # Set TensorFlow to maximum suppression
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+        tf.get_logger().setLevel('ERROR')
+        
+        try:
+            import absl.logging
+            absl.logging.set_verbosity(absl.logging.ERROR)
+        except ImportError:
+            pass
+        
         try:
             yield
         finally:
             # Restore everything
             logging.disable(logging.NOTSET)
+            warnings.showwarning = original_warnings
             
             sys.stdout = original_stdout
             sys.stderr = original_stderr
@@ -838,12 +864,12 @@ def train_model(debug=False):
     
     # LOAD AND PREPROCESS DATA ONLY ONCE
     print("📊 Loading dataset from multiple sources...")
-    (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
+    (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
     
     print("🔄 Preprocessing images...")
-    x_train = preprocess_images(x_train, for_training=True)
-    x_val = preprocess_images(x_val, for_training=True)  
-    x_test = preprocess_images(x_test, for_training=True)
+    x_train = preprocess_images(x_train_raw, for_training=True)
+    x_val = preprocess_images(x_val_raw, for_training=True)  
+    x_test = preprocess_images(x_test_raw, for_training=True)
     
     print(f"✅ Preprocessing complete:")
     print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
@@ -853,16 +879,16 @@ def train_model(debug=False):
     # Always create NEW variables to avoid confusion
     if params.MODEL_ARCHITECTURE == "original_haverland":
         # Haverland model needs categorical labels (one-hot encoded)
-        y_train_final = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
-        y_val_final = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES) 
-        y_test_final = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+        y_train_final = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
+        y_val_final = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES) 
+        y_test_final = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)
         loss_type = 'categorical_crossentropy'
         print(f"✅ Using categorical labels (one-hot) for Haverland model")
     else:
         # Other models use sparse categorical labels (integer labels)
-        y_train_final = y_train.copy()  # Explicit copy to avoid aliasing
-        y_val_final = y_val.copy()
-        y_test_final = y_test.copy() 
+        y_train_final = y_train_raw.copy()  # Explicit copy to avoid aliasing
+        y_val_final = y_val_raw.copy()
+        y_test_final = y_test_raw.copy() 
         loss_type = 'sparse_categorical_crossentropy'
         print(f"✅ Using sparse categorical labels for {params.MODEL_ARCHITECTURE}")
 
@@ -1248,7 +1274,6 @@ def train_model(debug=False):
     return model, history, training_dir
     
 
-
 def save_training_config(training_dir, quantized_size, float_size, tflite_manager, 
                         test_accuracy, tflite_accuracy, training_time, debug=False):
     """Save training configuration and results to file with enhanced parameters"""
@@ -1309,8 +1334,6 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
             f.write(f"  Memory growth: {params.GPU_MEMORY_GROWTH}\n")
             f.write(f"  Memory limit: {params.GPU_MEMORY_LIMIT} MB\n")
         
-        
-        
         # Add hyperparameter summary
         try:
             from parameters import get_hyperparameter_summary_text
@@ -1364,7 +1387,7 @@ def save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
         f.write(f"optimizer,{params.OPTIMIZER_TYPE}\n")
         #f.write(f"model_parameters,{model.count_params()}\n")
 
-def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=False):
+def test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, models_to_test=None, debug=False):
     """Test all available model architectures or specific models"""
     original_model = params.MODEL_ARCHITECTURE
     results = {}
@@ -1388,12 +1411,12 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
             
             if model_name == "original_haverland":
                 loss_fn = 'categorical_crossentropy'
-                y_train = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
-                y_val_cat = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES)
+                y_train_current = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)  # ✅ NEW VARIABLE
+                y_val_current = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES)      # ✅ NEW VARIABLE
             else:
                 loss_fn = 'sparse_categorical_crossentropy'
-                y_train = y_train
-                y_val_cat = y_val
+                y_train_current = y_train_raw  # ✅ NEW VARIABLE
+                y_val_current = y_val_raw      # ✅ NEW VARIABLE
             
             model.compile(
                 optimizer='adam',
@@ -1401,12 +1424,12 @@ def test_all_models(x_train, y_train, x_val, y_val, models_to_test=None, debug=F
                 metrics=['accuracy']
             )
             
-            train_samples = min(1000, len(x_train))
-            val_samples = min(200, len(x_val))
+            train_samples = min(1000, len(x_train_raw))
+            val_samples = min(200, len(x_val_raw))
             
             history = model.fit(
-                x_train[:train_samples], y_train[:train_samples],
-                validation_data=(x_val[:val_samples], y_val_cat[:val_samples]),
+                x_train_raw[:train_samples], y_train_current[:train_samples],  # ✅ USE NEW VARIABLE
+                validation_data=(x_val_raw[:val_samples], y_val_current[:val_samples]),  # ✅ USE NEW VARIABLE
                 epochs=5,
                 batch_size=32,
                 verbose=1 if debug else 0
@@ -1476,18 +1499,20 @@ def train_specific_models(models_to_train, debug=False):
             quantized_tflite_path = os.path.join(output_dir, params.TFLITE_FILENAME)
             
             # Load test data for evaluation
-            (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
-            x_test = preprocess_images(x_test)
+            (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
+            x_test = preprocess_images(x_test_raw)
             
             if model_name == "original_haverland":
-                y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+                y_test_current = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)  # ✅ NEW VARIABLE
+            else:
+                y_test_current = y_test_raw  # ✅ NEW VARIABLE
             
             # Evaluate models
-            keras_test_accuracy = model.evaluate(x_test, y_test, verbose=0)[1]
+            keras_test_accuracy = model.evaluate(x_test, y_test_current, verbose=0)[1]  # ✅ USE NEW VARIABLE
             
             tflite_accuracy = 0.0
             if os.path.exists(quantized_tflite_path):
-                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test)
+                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test_current)  # ✅ USE NEW VARIABLE
             
             results[model_name] = {
                 'keras_test_accuracy': keras_test_accuracy,
@@ -1534,99 +1559,99 @@ def train_specific_models(models_to_train, debug=False):
     return results
     
     
-def create_augmentation_pipeline():
-    """Complete augmentation pipeline with all available options"""
-    augmentation_layers = []
+# def create_augmentation_pipeline():
+    # """Complete augmentation pipeline with all available options"""
+    # augmentation_layers = []
     
-    if not params.USE_DATA_AUGMENTATION:
-        return tf.keras.Sequential([tf.keras.layers.Lambda(lambda x: x)])
+    # if not params.USE_DATA_AUGMENTATION:
+        # return tf.keras.Sequential([tf.keras.layers.Lambda(lambda x: x)])
     
-    # Geometric transformations
-    if params.AUGMENTATION_ROTATION_RANGE > 0:
-        rotation_factor = params.AUGMENTATION_ROTATION_RANGE / 360.0
-        augmentation_layers.append(
-            tf.keras.layers.RandomRotation(
-                factor=rotation_factor,
-                fill_mode='nearest',
-                interpolation='bilinear',
-                name='random_rotation'
-            )
-        )
+    # # Geometric transformations
+    # if params.AUGMENTATION_ROTATION_RANGE > 0:
+        # rotation_factor = params.AUGMENTATION_ROTATION_RANGE / 360.0
+        # augmentation_layers.append(
+            # tf.keras.layers.RandomRotation(
+                # factor=rotation_factor,
+                # fill_mode='nearest',
+                # interpolation='bilinear',
+                # name='random_rotation'
+            # )
+        # )
     
-    if params.AUGMENTATION_WIDTH_SHIFT_RANGE > 0 or params.AUGMENTATION_HEIGHT_SHIFT_RANGE > 0:
-        augmentation_layers.append(
-            tf.keras.layers.RandomTranslation(
-                height_factor=params.AUGMENTATION_HEIGHT_SHIFT_RANGE,
-                width_factor=params.AUGMENTATION_WIDTH_SHIFT_RANGE,
-                fill_mode='nearest',
-                interpolation='bilinear',
-                name='random_translation'
-            )
-        )
+    # if params.AUGMENTATION_WIDTH_SHIFT_RANGE > 0 or params.AUGMENTATION_HEIGHT_SHIFT_RANGE > 0:
+        # augmentation_layers.append(
+            # tf.keras.layers.RandomTranslation(
+                # height_factor=params.AUGMENTATION_HEIGHT_SHIFT_RANGE,
+                # width_factor=params.AUGMENTATION_WIDTH_SHIFT_RANGE,
+                # fill_mode='nearest',
+                # interpolation='bilinear',
+                # name='random_translation'
+            # )
+        # )
     
-    if params.AUGMENTATION_ZOOM_RANGE > 0:
-        augmentation_layers.append(
-            tf.keras.layers.RandomZoom(
-                height_factor=params.AUGMENTATION_ZOOM_RANGE,
-                width_factor=params.AUGMENTATION_ZOOM_RANGE,
-                fill_mode='nearest',
-                interpolation='bilinear',
-                name='random_zoom'
-            )
-        )
+    # if params.AUGMENTATION_ZOOM_RANGE > 0:
+        # augmentation_layers.append(
+            # tf.keras.layers.RandomZoom(
+                # height_factor=params.AUGMENTATION_ZOOM_RANGE,
+                # width_factor=params.AUGMENTATION_ZOOM_RANGE,
+                # fill_mode='nearest',
+                # interpolation='bilinear',
+                # name='random_zoom'
+            # )
+        # )
     
-    # Flips
-    if params.AUGMENTATION_HORIZONTAL_FLIP:
-        augmentation_layers.append(
-            tf.keras.layers.RandomFlip(
-                mode='horizontal',
-                name='random_horizontal_flip'
-            )
-        )
+    # # Flips
+    # if params.AUGMENTATION_HORIZONTAL_FLIP:
+        # augmentation_layers.append(
+            # tf.keras.layers.RandomFlip(
+                # mode='horizontal',
+                # name='random_horizontal_flip'
+            # )
+        # )
     
-    if params.AUGMENTATION_VERTICAL_FLIP:
-        augmentation_layers.append(
-            tf.keras.layers.RandomFlip(
-                mode='vertical',
-                name='random_vertical_flip'
-            )
-        )
+    # if params.AUGMENTATION_VERTICAL_FLIP:
+        # augmentation_layers.append(
+            # tf.keras.layers.RandomFlip(
+                # mode='vertical',
+                # name='random_vertical_flip'
+            # )
+        # )
     
-    # Color transformations
-    if params.AUGMENTATION_BRIGHTNESS_RANGE != [1.0, 1.0]:
-        min_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[0] - 1.0
-        max_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[1] - 1.0
-        augmentation_layers.append(
-            tf.keras.layers.RandomBrightness(
-                factor=(min_delta, max_delta),
-                value_range=(0, 1),
-                name='random_brightness'
-            )
-        )
+    # # Color transformations
+    # if params.AUGMENTATION_BRIGHTNESS_RANGE != [1.0, 1.0]:
+        # min_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[0] - 1.0
+        # max_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[1] - 1.0
+        # augmentation_layers.append(
+            # tf.keras.layers.RandomBrightness(
+                # factor=(min_delta, max_delta),
+                # value_range=(0, 1),
+                # name='random_brightness'
+            # )
+        # )
     
-    # Contrast (add AUGMENTATION_CONTRAST_RANGE to parameters.py)
-    contrast_factor = getattr(params, 'AUGMENTATION_CONTRAST_RANGE', 0.1)
-    if contrast_factor > 0:
-        augmentation_layers.append(
-            tf.keras.layers.RandomContrast(
-                factor=contrast_factor,
-                name='random_contrast'
-            )
-        )
+    # # Contrast (add AUGMENTATION_CONTRAST_RANGE to parameters.py)
+    # contrast_factor = getattr(params, 'AUGMENTATION_CONTRAST_RANGE', 0.1)
+    # if contrast_factor > 0:
+        # augmentation_layers.append(
+            # tf.keras.layers.RandomContrast(
+                # factor=contrast_factor,
+                # name='random_contrast'
+            # )
+        # )
     
-    # For RGB images - saturation and hue
-    if not params.USE_GRAYSCALE:
-        saturation_range = getattr(params, 'AUGMENTATION_SATURATION_RANGE', [0.9, 1.1])
-        if saturation_range != [1.0, 1.0]:
-            # Note: RandomSaturation is not available in core Keras, would need custom layer
-            pass
+    # # For RGB images - saturation and hue
+    # if not params.USE_GRAYSCALE:
+        # saturation_range = getattr(params, 'AUGMENTATION_SATURATION_RANGE', [0.9, 1.1])
+        # if saturation_range != [1.0, 1.0]:
+            # # Note: RandomSaturation is not available in core Keras, would need custom layer
+            # pass
         
-        hue_range = getattr(params, 'AUGMENTATION_HUE_RANGE', 0.1)
-        if hue_range > 0:
-            # Note: RandomHue is not available in core Keras, would need custom layer
-            pass
+        # hue_range = getattr(params, 'AUGMENTATION_HUE_RANGE', 0.1)
+        # if hue_range > 0:
+            # # Note: RandomHue is not available in core Keras, would need custom layer
+            # pass
     
-    return tf.keras.Sequential(augmentation_layers, name='augmentation_pipeline')
+    # return tf.keras.Sequential(augmentation_layers, name='augmentation_pipeline')
 
 def main():
     """Main entry point"""
@@ -1636,7 +1661,7 @@ def main():
     try:
         # Load data first for all operations
         print("📊 Loading dataset from multiple sources...")
-        (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
+        (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
         
         # Preprocess data for training/tuning operations
         if any([getattr(args, 'use_tuner', False), 
@@ -1645,20 +1670,24 @@ def main():
                 getattr(args, 'train_all', False)]):
             
             print("🔄 Preprocessing images...")
-            x_train = preprocess_images(x_train, for_training=True)
-            x_val = preprocess_images(x_val, for_training=True)
-            x_test = preprocess_images(x_test, for_training=True)
+            x_train = preprocess_images(x_train_raw, for_training=True)
+            x_val = preprocess_images(x_val_raw, for_training=True)
+            x_test = preprocess_images(x_test_raw, for_training=True)
             
-            # Handle label conversion for models that need it
+            # Handle label conversion for models that need it - CREATE NEW VARIABLES
             if any([getattr(args, 'use_tuner', False),
                     getattr(args, 'train_all', False),
                     getattr(args, 'train', None) is not None]):
                 
-                # For test_all_models, conversion happens inside the function
+                # Create processed versions without overwriting originals
+                y_train_processed = y_train_raw.copy()
+                y_val_processed = y_val_raw.copy()
+                y_test_processed = y_test_raw.copy()
+                
                 if params.MODEL_ARCHITECTURE == "original_haverland":
-                    y_train = tf.keras.utils.to_categorical(y_train, params.NB_CLASSES)
-                    y_val = tf.keras.utils.to_categorical(y_val, params.NB_CLASSES)
-                    y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+                    y_train_processed = tf.keras.utils.to_categorical(y_train_processed, params.NB_CLASSES)  # ✅ NEW VARIABLE
+                    y_val_processed = tf.keras.utils.to_categorical(y_val_processed, params.NB_CLASSES)      # ✅ NEW VARIABLE
+                    y_test_processed = tf.keras.utils.to_categorical(y_test_processed, params.NB_CLASSES)    # ✅ NEW VARIABLE
         
         # DEBUG: Print arguments
         if args.debug:
@@ -1681,7 +1710,7 @@ def main():
                 from tuner import run_architecture_tuning
                 
                 best_model, best_hps, history, tuner = run_architecture_tuning(
-                    x_train, y_train, x_val, y_val,
+                    x_train, y_train_processed, x_val, y_val_processed,  # ✅ USE PROCESSED
                     num_trials=getattr(args, 'num_trials', 5),
                     debug=args.debug
                 )
@@ -1743,7 +1772,7 @@ def main():
         elif args.test_all_models:
             # TEST ALL MODELS MODE
             print("🧪 Testing all available models...")
-            test_all_models(x_train, y_train, x_val, y_val, debug=args.debug)
+            test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, debug=args.debug)  # ✅ USE RAW DATA
             
         elif getattr(args, 'train', None) is not None:
             # TRAIN SPECIFIC MODELS MODE
