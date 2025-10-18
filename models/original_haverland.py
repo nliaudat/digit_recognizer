@@ -11,5 +11,5 @@ def get_model_info():
         "input_shape": params.INPUT_SHAPE,
         "nb_classes": params.NB_CLASSES,
         "compiler": "RMSprop(lr=0.001)",
-        "loss": "CategoricalCrossentropy(from_logits=False)"  # Updated to False
+        "loss": "CategoricalCrossentropy(from_logits=True)"
     }

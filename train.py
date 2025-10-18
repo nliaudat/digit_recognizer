@@ -9,13 +9,12 @@ import sys
 from tqdm.auto import tqdm
 import logging
 from contextlib import contextmanager
-from models import create_model, compile_model, model_summary
-# from models.model_factory import print_hyperparameter_summary
+from models import *
 from utils import get_data_splits, preprocess_images
-from utils.preprocess import check_qat_compatibility, validate_preprocessing_consistency
-from utils.data_pipeline import create_tf_dataset_from_arrays
-from analyse import evaluate_tflite_model, analyze_quantization_impact, debug_tflite_model, training_diagnostics, verify_model_predictions, debug_model_architecture
-from tuner import run_architecture_tuning
+from utils.preprocess import *
+from utils.data_pipeline import *
+from analyse import *
+from tuner import *
 from parameters import get_hyperparameter_summary_text
 import parameters as params
 
@@ -857,21 +856,49 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     
 
 def train_model(debug=False):
-    """Main training function with proper data handling and verification"""
+    """Main training function with comprehensive handling of all 9 quantization cases"""
     setup_tensorflow_logging(debug)
     set_all_seeds(params.SHUFFLE_SEED)
     
+    print("🎯 TRAINING CONFIGURATION:")
+    print("=" * 60)
+    print(f"   MODEL_ARCHITECTURE: {params.MODEL_ARCHITECTURE}")
+    print(f"   QUANTIZE_MODEL: {params.QUANTIZE_MODEL}")
+    print(f"   USE_QAT: {params.USE_QAT}")
+    print(f"   ESP_DL_QUANTIZE: {params.ESP_DL_QUANTIZE}")
+    
+    # Validate quantization combination first
+    is_valid, msg = validate_quantization_combination()
+    if not is_valid:
+        print(f"❌ {msg}")
+        print("💡 Fix the quantization parameters in parameters.py")
+        return None, None, None
+    
+    print(f"✅ {msg}")
+    
+    # Setup hardware
     print("🔧 Configuring hardware...")
     strategy = setup_gpu()
     
-    color_mode = "GR" if params.USE_GRAYSCALE else "RGB"
-    training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}_{color_mode}")
-    os.makedirs(training_dir, exist_ok=True)
+    # Create output directory
+    color_mode = "GRAY" if params.USE_GRAYSCALE else "RGB"
+    quantization_mode = ""
+    if params.USE_QAT:
+        quantization_mode = "_QAT"
+    if params.ESP_DL_QUANTIZE:
+        quantization_mode += "_ESP-DL"
+    elif params.QUANTIZE_MODEL:
+        quantization_mode += "_QUANT"
     
+    training_dir = os.path.join(
+        params.OUTPUT_DIR, 
+        f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls{quantization_mode}_{color_mode}_{datetime.now().strftime('%m%d_%H%M')}"
+    )
+    os.makedirs(training_dir, exist_ok=True)
+    print(f"📁 Output directory: {training_dir}")
     
     # QAT Compatibility Check
     if params.USE_QAT:
-        # from utils.preprocess import check_qat_compatibility
         qat_ok, qat_warnings, qat_errors, qat_info = check_qat_compatibility(QAT_AVAILABLE)
         
         if not qat_ok:
@@ -880,6 +907,9 @@ def train_model(debug=False):
                 print(f"   - {error}")
             print("🔄 Disabling QAT...")
             params.USE_QAT = False
+            # Re-validate after disabling QAT
+            is_valid, msg = validate_quantization_combination()
+            print(f"🔄 New configuration: {msg}")
         else:
             # Show warnings but don't disable QAT
             if qat_warnings:
@@ -894,18 +924,12 @@ def train_model(debug=False):
                     print(f"   - {info_msg}")
     
     # Validate preprocessing consistency
-    # from utils.preprocess import validate_preprocessing_consistency
     if not validate_preprocessing_consistency():
         print("❌ Preprocessing validation failed!")
-        return None, None, None 
+        return None, None, None
     
-    print("🚀 Starting Digit Recognition Training")
-    if debug:
-        print("🔍 DEBUG MODE ENABLED - Verbose logging active")
-    print("="*60)
-    
-    # LOAD AND PREPROCESS DATA ONLY ONCE
-    print("📊 Loading dataset from multiple sources...")
+    # LOAD AND PREPROCESS DATA
+    print("\n📊 Loading dataset from multiple sources...")
     (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
     
     print("🔄 Preprocessing images...")
@@ -918,7 +942,7 @@ def train_model(debug=False):
     print(f"   Val range: [{x_val.min():.3f}, {x_val.max():.3f}]")
     print(f"   Shapes - Train: {x_train.shape}, Val: {x_val.shape}")
     
-    # Always create NEW variables to avoid confusion
+    # Handle labels based on model type
     if params.MODEL_ARCHITECTURE == "original_haverland":
         # Haverland model needs categorical labels (one-hot encoded)
         y_train_final = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
@@ -928,64 +952,65 @@ def train_model(debug=False):
         print(f"✅ Using categorical labels (one-hot) for Haverland model")
     else:
         # Other models use sparse categorical labels (integer labels)
-        y_train_final = y_train_raw.copy()  # Explicit copy to avoid aliasing
+        y_train_final = y_train_raw.copy()
         y_val_final = y_val_raw.copy()
-        y_test_final = y_test_raw.copy() 
+        y_test_final = y_test_raw.copy()
         loss_type = 'sparse_categorical_crossentropy'
         print(f"✅ Using sparse categorical labels for {params.MODEL_ARCHITECTURE}")
-
+    
     print(f"   Loss function: {loss_type}")
-    print(f"   y_train_final shape: {y_train_final.shape}")
-    print(f"   Sample labels: {y_train_final[:3]}")
+    print(f"   y_train shape: {y_train_final.shape}")
     
     # VERIFY DATA BEFORE TRAINING
-    print("🔍 Verifying data consistency...")
+    print("\n🔍 Verifying data consistency...")
     sample_image = x_train[0]
     print(f"   Sample image - Range: [{sample_image.min():.3f}, {sample_image.max():.3f}], Shape: {sample_image.shape}")
     
     if sample_image.max() < 0.1:
         print("❌ WARNING: Data appears to be over-normalized! Check for double preprocessing.")
         
-    print(f"✅ Preprocessing verification:")
+    print(f"✅ Data verification:")
     print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
     print(f"   Mean: {x_train.mean():.3f}, Std: {x_train.std():.3f}")
-    print(f"   Unique values in first 10 samples: {len(np.unique(x_train[:10]))}")
-
-    # Check if data is all zeros or constant
+    
     if x_train.std() < 0.01:
         print("❌ WARNING: Data has very low variance - might be over-normalized!")
     
+    # Create representative dataset for quantization
     representative_data = create_qat_representative_dataset(x_train)
     
-    # use_qat = params.QUANTIZE_MODEL and getattr(params, 'USE_QAT', False) and QAT_AVAILABLE
+    # MODEL CREATION WITH QUANTIZATION AWARENESS
     use_qat = params.USE_QAT and QAT_AVAILABLE
     
-    # Model creation and compilation
+    print(f"\n🔧 Creating model...")
+    print(f"   Using QAT: {use_qat}")
+    print(f"   Strategy: {'Multi-GPU' if strategy else 'Single device'}")
+    
     if use_qat:
+        print("🎯 Creating model with Quantization Aware Training...")
         if strategy:
             with strategy.scope():
                 model = create_qat_model()
-                loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'
                 model = compile_model(model, loss_type=loss_type)
         else:
             model = create_qat_model()
-            loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'
             model = compile_model(model, loss_type=loss_type)
     else:
+        print("🔧 Creating standard model...")
         if strategy:
             with strategy.scope():
                 model = create_model()
-                loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'
                 model = compile_model(model, loss_type=loss_type)
         else:
             model = create_model()
-            loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'
             model = compile_model(model, loss_type=loss_type)
     
+    # Build model with explicit input shape
     print("🔧 Building model with explicit input shape...")
     model.build(input_shape=(None,) + params.INPUT_SHAPE)
     print(f"✅ Model built with input shape: {model.input_shape}")
-
+    
+    # Verify model can forward pass
     print("🔍 Verifying model can forward pass...")
     try:
         test_input = tf.random.normal([1] + list(params.INPUT_SHAPE))
@@ -1000,13 +1025,16 @@ def train_model(debug=False):
         print(f"❌ Model verification failed: {e}")
         raise
     
+    # Setup training components
     tflite_manager = TFLiteModelManager(training_dir, debug)
     monitor = TrainingMonitor(training_dir, debug)
     monitor.set_model(model)
     
+    # Print comprehensive training summary
     print_training_summary(model, x_train, x_val, x_test, debug)
     model_summary(model)
     
+    # Create callbacks
     callbacks = create_callbacks(training_dir, tflite_manager, representative_data, params.EPOCHS, monitor, debug)
     
     print("\n🎯 Starting training...")
@@ -1014,14 +1042,14 @@ def train_model(debug=False):
     
     start_time = datetime.now()
     
-    # DATA AUGMENTATION PIPELINE - using PREPROCESSED data
+    # DATA AUGMENTATION PIPELINE
     if params.USE_DATA_AUGMENTATION:
         print("🔄 Setting up data augmentation pipeline...")
         
         # Create augmentation pipeline using parameters
         augmentation_layers = []
         
-        # Rotation - convert degrees to radians
+        # Rotation
         if params.AUGMENTATION_ROTATION_RANGE > 0:
             rotation_factor = params.AUGMENTATION_ROTATION_RANGE / 360.0
             augmentation_layers.append(
@@ -1032,7 +1060,7 @@ def train_model(debug=False):
                 )
             )
         
-        # Translation (width and height shift)
+        # Translation
         if params.AUGMENTATION_WIDTH_SHIFT_RANGE > 0 or params.AUGMENTATION_HEIGHT_SHIFT_RANGE > 0:
             augmentation_layers.append(
                 tf.keras.layers.RandomTranslation(
@@ -1056,18 +1084,17 @@ def train_model(debug=False):
         
         # Brightness
         if params.AUGMENTATION_BRIGHTNESS_RANGE != [1.0, 1.0]:
-            # Convert from [0.9, 1.1] to [-0.1, 0.1] for RandomBrightness
             min_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[0] - 1.0
             max_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[1] - 1.0
             augmentation_layers.append(
                 tf.keras.layers.RandomBrightness(
                     factor=(min_delta, max_delta),
-                    value_range=(0, 1),  # Images are normalized to [0,1]
+                    value_range=(0, 1),
                     name='random_brightness'
                 )
             )
         
-        # Contrast (add some contrast variation)
+        # Contrast
         augmentation_layers.append(
             tf.keras.layers.RandomContrast(
                 factor=0.1,
@@ -1098,13 +1125,10 @@ def train_model(debug=False):
         print(f"✅ Augmentation pipeline created with {len(augmentation_layers)} layers")
         
         if params.USE_TF_DATA_PIPELINE:
-            print("🔧 Using tf.data pipeline with separate augmentation...")
-            # from data_pipeline import create_tf_dataset_from_arrays
-            
-            # Create datasets from PREPROCESSED arrays (NO additional preprocessing)
+            print("🔧 Using tf.data pipeline with augmentation...")
             train_dataset = create_tf_dataset_from_arrays(x_train, y_train_final, training=True)
             
-            # Apply augmentation separately to training dataset only
+            # Apply augmentation to training dataset only
             train_dataset = train_dataset.map(
                 lambda x, y: (augmentation_pipeline(x, training=True), y),
                 num_parallel_calls=tf.data.AUTOTUNE
@@ -1112,13 +1136,6 @@ def train_model(debug=False):
             
             # Validation dataset WITHOUT augmentation
             val_dataset = create_tf_dataset_from_arrays(x_val, y_val_final, training=False)
-            
-            # TEMPORARY VERIFICATION
-            print("🧪 Testing data pipeline...")
-            sample_batch = next(iter(train_dataset))
-            sample_x, sample_y = sample_batch
-            print(f"   Sample batch - X range: [{sample_x.numpy().min():.3f}, {sample_x.numpy().max():.3f}]")
-            print(f"   Sample batch - Y shape: {sample_y.numpy().shape}")
             
             # Train with augmented dataset
             history = model.fit(
@@ -1131,7 +1148,6 @@ def train_model(debug=False):
             
         else:
             print("🔧 Using standard arrays with augmentation...")
-            # Create tf.data pipeline with augmentation for training
             train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train_final))
             train_dataset = train_dataset.map(
                 lambda x, y: (augmentation_pipeline(x, training=True), y),
@@ -1143,14 +1159,6 @@ def train_model(debug=False):
             val_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val_final))
             val_dataset = val_dataset.batch(params.BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
             
-            # TEMPORARY VERIFICATION
-            print("🧪 Testing data pipeline...")
-            sample_batch = next(iter(train_dataset))
-            sample_x, sample_y = sample_batch
-            print(f"   Sample batch - X range: [{sample_x.numpy().min():.3f}, {sample_x.numpy().max():.3f}]")
-            print(f"   Sample batch - Y shape: {sample_y.numpy().shape}")
-            
-            # Train with augmented dataset
             history = model.fit(
                 train_dataset,
                 epochs=params.EPOCHS,
@@ -1165,18 +1173,8 @@ def train_model(debug=False):
         
         if getattr(params, 'USE_TF_DATA_PIPELINE', False):
             print("🔧 Using tf.data pipeline without augmentation...")
-            # from data_pipeline import create_tf_dataset_from_arrays
-            
-            # Create datasets from PREPROCESSED arrays
             train_dataset = create_tf_dataset_from_arrays(x_train, y_train_final, training=True)
             val_dataset = create_tf_dataset_from_arrays(x_val, y_val_final, training=False)
-            
-            # TEMPORARY VERIFICATION
-            print("🧪 Testing data pipeline...")
-            sample_batch = next(iter(train_dataset))
-            sample_x, sample_y = sample_batch
-            print(f"   Sample batch - X range: [{sample_x.numpy().min():.3f}, {sample_x.numpy().max():.3f}]")
-            print(f"   Sample batch - Y shape: {sample_y.numpy().shape}")
             
             history = model.fit(
                 train_dataset,
@@ -1187,13 +1185,6 @@ def train_model(debug=False):
             )
         else:
             print("🔧 Using standard arrays without augmentation...")
-            
-            # TEMPORARY VERIFICATION
-            print("🧪 Testing data pipeline...")
-            sample_x, sample_y = x_train[:1], y_train_final[:1]
-            print(f"   Sample batch - X range: [{sample_x.min():.3f}, {sample_x.max():.3f}]")
-            print(f"   Sample batch - Y shape: {sample_y.shape}")
-            
             history = model.fit(
                 x_train, y_train_final,
                 batch_size=params.BATCH_SIZE,
@@ -1206,68 +1197,67 @@ def train_model(debug=False):
     
     training_time = datetime.now() - start_time
     
-    if debug:
-        print("\n💾 Saving final TFLite models...")
+    # FINAL MODEL SAVING AND EVALUATION
+    print("\n💾 Saving final models...")
+    
+    # Save final TFLite models based on quantization settings
+    final_quantized_size = 0
+    final_float_size = 0
+    
+    if params.QUANTIZE_MODEL:
+        try:
+            final_quantized, final_quantized_size = tflite_manager.save_as_tflite(
+                model, "final_quantized.tflite", quantize=True, representative_data=representative_data
+            )
+            print(f"✅ Final quantized model saved: {final_quantized_size:.1f} KB")
+        except Exception as e:
+            print(f"❌ Final quantized TFLite save failed: {e}")
     
     try:
-        final_quantized, quantized_size = tflite_manager.save_as_tflite(
-            model, "final_quantized.tflite", quantize=True, representative_data=representative_data
-        )
-    except Exception as e:
-        print(f"❌ Quantized TFLite save failed: {e}")
-        quantized_size = 0
-    
-    try:
-        final_float, float_size = tflite_manager.save_as_tflite(
+        final_float, final_float_size = tflite_manager.save_as_tflite(
             model, "final_float.tflite", quantize=False
         )
+        print(f"✅ Final float model saved: {final_float_size:.1f} KB")
     except Exception as e:
-        print(f"❌ Float TFLite save failed: {e}")
-        float_size = 0
+        print(f"❌ Final float TFLite save failed: {e}")
     
+    # MODEL EVALUATION
     print("\n📈 Evaluating models...")
     
     try:
-        from analyse import evaluate_tflite_model, analyze_quantization_impact, debug_tflite_model
-    except ImportError:
-        print("⚠️  Analysis module not available")
-        evaluate_tflite_model = lambda *args: 0.0
-        analyze_quantization_impact = lambda *args: None
-        debug_tflite_model = lambda *args: None
-    
-    if debug:
-        quantized_tflite_path = os.path.join(training_dir, params.TFLITE_FILENAME)
-        if os.path.exists(quantized_tflite_path):
-            debug_tflite_model(quantized_tflite_path, x_test[:1])
-    
-    try:
-        # Use the correct labels for evaluation
+        # Evaluate Keras model
         train_accuracy = model.evaluate(x_train, y_train_final, verbose=0)[1]
         val_accuracy = model.evaluate(x_val, y_val_final, verbose=0)[1]
         test_accuracy = model.evaluate(x_test, y_test_final, verbose=0)[1]
+        
+        print(f"✅ Keras Model Evaluation:")
+        print(f"   Train Accuracy: {train_accuracy:.4f}")
+        print(f"   Val Accuracy: {val_accuracy:.4f}")
+        print(f"   Test Accuracy: {test_accuracy:.4f}")
+        
     except Exception as e:
         print(f"❌ Keras model evaluation failed: {e}")
         train_accuracy = val_accuracy = test_accuracy = 0.0
     
+    # TFLite model evaluation
     tflite_accuracy = 0.0
     quantized_tflite_path = os.path.join(training_dir, params.TFLITE_FILENAME)
-    if os.path.exists(quantized_tflite_path):
+    if os.path.exists(quantized_tflite_path) and params.QUANTIZE_MODEL:
         try:
-            # For TFLite evaluation, use the correct label format
-            if params.MODEL_ARCHITECTURE == "original_haverland":
-                # TFLite model expects categorical output, but evaluate_tflite_model might need sparse labels
-                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test_final)
-            else:
-                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test_final)
+            tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test_final)
+            print(f"✅ TFLite Model Evaluation:")
+            print(f"   Test Accuracy: {tflite_accuracy:.4f}")
             
+            # Analyze quantization impact
             analyze_quantization_impact(model, x_test, y_test_final, quantized_tflite_path)
         except Exception as e:
             print(f"❌ TFLite evaluation failed: {e}")
     
+    # Save training plots
     monitor.save_training_plots()
     
+    # Run diagnostics
     try:
-        from analyse import training_diagnostics, verify_model_predictions, debug_model_architecture
         training_diagnostics(model, x_train, y_train_final, x_val, y_val_final, debug=debug)
         verify_model_predictions(model, x_train[:100], y_train_final[:100])
         
@@ -1276,28 +1266,31 @@ def train_model(debug=False):
     except Exception as e:
         print(f"⚠️  Diagnostics failed: {e}")
     
+    # FINAL SUMMARY
     print("\n" + "="*60)
     print("🏁 TRAINING COMPLETED")
     print("="*60)
     print(f"⏱️  Training time: {training_time}")
     print(f"📊 Final Results:")
-    print(f"   Keras Model - Test Accuracy: {test_accuracy:.4f}")
-    print(f"   TFLite Model - Test Accuracy: {tflite_accuracy:.4f}")
     print(f"   Best Validation Accuracy: {tflite_manager.best_accuracy:.4f}")
-    print(f"   Quantized Model Size: {quantized_size:.1f} KB")
-    print(f"   Float Model Size: {float_size:.1f} KB")
+    print(f"   Test Accuracy - Keras: {test_accuracy:.4f}")
+    print(f"   Test Accuracy - TFLite: {tflite_accuracy:.4f}")
+    print(f"   Quantized Model Size: {final_quantized_size:.1f} KB")
+    print(f"   Float Model Size: {final_float_size:.1f} KB")
     
     print(f"\n💾 Models saved to: {training_dir}")
-    print(f"   Best quantized: {params.TFLITE_FILENAME}")
-    print(f"   Final quantized: final_quantized.tflite")
+    if params.QUANTIZE_MODEL:
+        print(f"   Best quantized: {params.TFLITE_FILENAME}")
+        print(f"   Final quantized: final_quantized.tflite")
     print(f"   Final float: final_float.tflite")
     print(f"   Training log: training_log.csv")
     print(f"   Training plot: training_history.png")
     
-    # Add augmentation info to training config
-    save_training_config(training_dir, quantized_size, float_size, tflite_manager,
+    # Save training configuration
+    save_training_config(training_dir, final_quantized_size, final_float_size, tflite_manager,
                         test_accuracy, tflite_accuracy, training_time, debug)
                         
+    # Save final model checkpoint
     print("💾 Saving final model checkpoint...")
     final_checkpoint_path = os.path.join(training_dir, "final_model.keras")
     try:
@@ -1306,13 +1299,27 @@ def train_model(debug=False):
     except Exception as e:
         print(f"❌ Final model save failed: {e}")
     
-    # Also export the current model
+    # Export to ONNX if available
     try:
         onnx_path, onnx_size = tflite_manager.export_to_onnx(model, "final_model.onnx")
         if onnx_path:
             print(f"✅ Final model exported to ONNX: {onnx_path} ({onnx_size:.1f} KB)")
     except Exception as e:
-        print(f"❌ Final model ONNX export failed: {e}")
+        print(f"❌ ONNX export failed: {e}")
+    
+    # Print quantization summary
+    print(f"\n🎯 Quantization Summary:")
+    print(f"   QAT Used: {use_qat}")
+    print(f"   ESP-DL Mode: {params.ESP_DL_QUANTIZE}")
+    print(f"   Final Quantization: {params.QUANTIZE_MODEL}")
+    
+    if use_qat and params.QUANTIZE_MODEL:
+        accuracy_drop = test_accuracy - tflite_accuracy if tflite_accuracy > 0 else 0
+        print(f"   QAT Effectiveness - Accuracy drop: {accuracy_drop:.4f}")
+        if accuracy_drop < 0.02:
+            print("   ✅ QAT performed well (minimal accuracy drop)")
+        else:
+            print("   ⚠️  QAT may need tuning (significant accuracy drop)")
     
     return model, history, training_dir
     
