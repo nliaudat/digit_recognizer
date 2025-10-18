@@ -42,6 +42,11 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
     # TFLite converter will handle the quantization scaling
     processed_images = processed_images / 255.0
     
+    # Add data validation
+    if processed_images.std() < 0.01:
+        print(f"⚠️  WARNING: Low data variance - std={processed_images.std():.6f}")
+        print(f"   Sample values: {processed_images[0].flatten()[:10]}")
+    
     # DEBUG: Print data range
     print(f"🔍 Preprocessing - Range: [{processed_images.min():.3f}, {processed_images.max():.3f}], Shape: {processed_images.shape}")
     
