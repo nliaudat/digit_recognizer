@@ -11,10 +11,14 @@ def representative_dataset():
     (x_train, _), _ = load_digit_dataset()
     
     # Use ESP-DL specific preprocessing for quantization calibration
-    if params.ESP_DL_QUANTIZE:
-        x_train = preprocess_images_esp_dl(x_train)
-    else:
-        x_train = preprocess_images(x_train)
+    # if params.ESP_DL_QUANTIZE:
+        # x_train = preprocess_images_esp_dl(x_train)
+    # else:
+        # x_train = preprocess_images(x_train)
+        
+    # CRITICAL: Always use the SAME preprocessing as training
+    # regardless of ESP_DL_QUANTIZE setting
+    x_train = preprocess_images(x_train)
     
     # Use more diverse samples for better quantization
     num_samples = min(params.QUANTIZE_NUM_SAMPLES, len(x_train))

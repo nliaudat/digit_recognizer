@@ -61,12 +61,12 @@ USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 
 # Multiple Data Sources Configuration
 DATA_SOURCES = [ 
-    # {
-        # 'name': 'Tenth-of-step-of-a-meter-digit',
-        # 'type': 'label_file', # load labels.txt (tab separated) and images folder in path
-        # 'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
-        # 'weight': 1.0,
-    # },
+    {
+        'name': 'Tenth-of-step-of-a-meter-digit',
+        'type': 'label_file', # load labels.txt (tab separated) and images folder in path
+        'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
+        'weight': 1.0,
+    },
     # {
         # 'name': 'meterdigits_100',
         # 'type': 'folder_structure',
@@ -79,12 +79,12 @@ DATA_SOURCES = [
         # 'path': 'datasets/meterdigits_10_augmented',
         # 'weight': 0.3,
     # },
-    {
-        'name': 'meterdigits_10',
-        'type': 'folder_structure',
-        'path': 'datasets/meterdigits_10',
-        'weight': 1.0,
-    },
+    # {
+        # 'name': 'meterdigits_10',
+        # 'type': 'folder_structure',
+        # 'path': 'datasets/meterdigits_10',
+        # 'weight': 1.0,
+    # },
     # {
         # 'name': 'meterdigits_10_augmented',
         # 'type': 'folder_structure',
@@ -121,7 +121,7 @@ NB_CLASSES = 10  # [0-9]
 # TFLite Conversion Parameters
 QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
 # ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
-ESP_DL_QUANTIZE = True  # Quantize to int8 range [-128, 127] for ESP-DL
+ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
                          
 # Quantization Aware Training
@@ -304,7 +304,7 @@ TENSORBOARD_WRITE_GRAPHS = True
 # DATA AUGMENTATION HYPERPARAMETERS
 # ==============================================================================
 
-USE_DATA_AUGMENTATION = False
+USE_DATA_AUGMENTATION = True
 AUGMENTATION_ROTATION_RANGE = 10
 AUGMENTATION_WIDTH_SHIFT_RANGE = 0.1
 AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.1
@@ -316,8 +316,8 @@ AUGMENTATION_CONTRAST_RANGE = 0.1
 AUGMENTATION_SHEAR_RANGE = 0.0  # Add shear transformation
 AUGMENTATION_SATURATION_RANGE = [0.9, 1.1]  # For color images
 AUGMENTATION_HUE_RANGE = 0.1  # For color images
-AUGMENTATION_BLUR_RANGE = 0.0  # Gaussian blur
-AUGMENTATION_NOISE_STDDEV = 0.0  # Gaussian noise
+AUGMENTATION_BLUR_RANGE = 0.1  # Gaussian blur
+AUGMENTATION_NOISE_STDDEV = 0.1  # Gaussian noise
 
 # ==============================================================================
 # GPU CONFIGURATION
