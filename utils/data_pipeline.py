@@ -1,92 +1,75 @@
 # data_pipeline.py
 import tensorflow as tf
 import numpy as np
+import os
 from utils import preprocess_images
 import parameters as params
 
-def create_tf_dataset(images, labels, training=True, batch_size=None):
-    """Create optimized tf.data.Dataset pipeline"""
+def create_tf_dataset_from_arrays(x_data, y_data, training=True, batch_size=None):
+    """Create tf.data.Dataset from pre-loaded arrays"""
     if batch_size is None:
         batch_size = params.BATCH_SIZE
     
     # Convert to tensors
-    dataset = tf.data.Dataset.from_tensor_slices((images, labels))
+    dataset = tf.data.Dataset.from_tensor_slices((x_data, y_data))
     
-    # Apply preprocessing
+    # Apply consistent preprocessing (NO AUGMENTATION)
     def preprocess_fn(image, label):
-        # Ensure proper preprocessing
+        # Ensure proper data type
         image = tf.cast(image, tf.float32)
         
-        # Apply model-specific preprocessing
-        if params.ESP_DL_QUANTIZE:
-            # Normalize to [-1, 1] for ESP-DL
-            image = (image / 127.5) - 1.0
-        else:
-            # Normalize to [0, 1]
-            image = image / 255.0
+        # Use the SAME normalization as preprocess_images
+        image = image / 255.0  # Consistent with preprocess_images
         
         # Ensure correct shape
         if len(image.shape) == 2:  # Grayscale without channel
             image = tf.expand_dims(image, axis=-1)
+        elif len(image.shape) == 3 and image.shape[-1] == 3 and params.USE_GRAYSCALE:
+            # Convert RGB to grayscale if needed
+            image = tf.image.rgb_to_grayscale(image)
         
         return image, label
     
-    dataset = dataset.map(preprocess_fn, num_parallel_calls=params.TF_DATA_PARALLEL_CALLS)
-    
-    # Training-specific augmentations
-    if training and params.USE_DATA_AUGMENTATION:
-        dataset = dataset.map(augment_image, num_parallel_calls=params.TF_DATA_PARALLEL_CALLS)
+    dataset = dataset.map(preprocess_fn, num_parallel_calls=tf.data.AUTOTUNE)
     
     # Shuffle and batch
     if training:
         dataset = dataset.shuffle(params.TF_DATA_SHUFFLE_BUFFER)
     
     dataset = dataset.batch(batch_size)
-    dataset = dataset.prefetch(params.TF_DATA_PREFETCH_SIZE)
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
     
     return dataset
 
-def augment_image(image, label):
-    """Apply data augmentation using tf.image operations"""
-    # Random rotations
-    angle = tf.random.uniform([], -0.1, 0.1)  # ±5.7 degrees
-    image = tfa.image.rotate(image, angles=angle)
+def get_tf_data_splits_from_arrays(x_train, y_train, x_val, y_val, x_test, y_test):
+    """Get data splits as tf.data.Dataset objects from pre-loaded arrays"""
+    # Convert to tf.data.Dataset
+    train_dataset = create_tf_dataset_from_arrays(x_train, y_train, training=True)
+    val_dataset = create_tf_dataset_from_arrays(x_val, y_val, training=False)
+    test_dataset = create_tf_dataset_from_arrays(x_test, y_test, training=False)
     
-    # Random zoom
-    scale = tf.random.uniform([], 0.9, 1.1)
-    new_size = tf.cast(tf.shape(image)[:2] * scale, tf.int32)
-    image = tf.image.resize(image, new_size)
-    image = tf.image.resize_with_crop_or_pad(image, tf.shape(image)[0], tf.shape(image)[1])
+    print(f"📊 TF.Data Pipeline Created from arrays:")
+    print(f"   Training samples: {len(x_train)}")
+    print(f"   Validation samples: {len(x_val)}")
+    print(f"   Test samples: {len(x_test)}")
     
-    # Random brightness
-    image = tf.image.random_brightness(image, max_delta=0.1)
-    
-    # Random contrast
-    image = tf.image.random_contrast(image, lower=0.9, upper=1.1)
-    
-    # Ensure values are still in valid range
-    image = tf.clip_by_value(image, -1.0 if params.ESP_DL_QUANTIZE else 0.0, 1.0)
-    
-    return image, label
+    return train_dataset, val_dataset, test_dataset
 
+# Keep the original function for backward compatibility
 def get_tf_data_splits():
-    """Get data splits as tf.data.Dataset objects"""
+    """Legacy function - loads data internally (not recommended)"""
+    print("⚠️  Using legacy data loading in data_pipeline.py")
     from utils import get_data_splits
     
     # Get original splits
     (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
     
-    # Convert to tf.data.Dataset
-    train_dataset = create_tf_dataset(x_train, y_train, training=True)
-    val_dataset = create_tf_dataset(x_val, y_val, training=False)
-    test_dataset = create_tf_dataset(x_test, y_test, training=False)
+    # Apply preprocessing
+    x_train = preprocess_images(x_train, for_training=True)
+    x_val = preprocess_images(x_val, for_training=True)
+    x_test = preprocess_images(x_test, for_training=True)
     
-    print(f"📊 TF.Data Pipeline Created:")
-    print(f"   Training batches: {len(list(train_dataset))}")
-    print(f"   Validation batches: {len(list(val_dataset))}")
-    print(f"   Test batches: {len(list(test_dataset))}")
-    
-    return train_dataset, val_dataset, test_dataset
+    return get_tf_data_splits_from_arrays(x_train, y_train, x_val, y_val, x_test, y_test)
 
 class DataPipeline:
     """Advanced data pipeline with caching and optimization"""
@@ -96,9 +79,11 @@ class DataPipeline:
         self.val_dataset = None
         self.test_dataset = None
     
-    def build_pipeline(self, cache_dir=None):
-        """Build optimized data pipeline"""
-        train_ds, val_ds, test_ds = get_tf_data_splits()
+    def build_pipeline_from_arrays(self, x_train, y_train, x_val, y_val, x_test, y_test, cache_dir=None):
+        """Build optimized data pipeline from pre-loaded arrays"""
+        train_ds, val_ds, test_ds = get_tf_data_splits_from_arrays(
+            x_train, y_train, x_val, y_val, x_test, y_test
+        )
         
         # Cache datasets for performance
         if cache_dir:

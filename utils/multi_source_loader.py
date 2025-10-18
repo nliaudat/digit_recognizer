@@ -1,8 +1,12 @@
+# multi_source_loader.py
 import os
 import cv2
 import numpy as np
 from sklearn.model_selection import train_test_split
 import parameters as params
+
+# Global variable to cache loaded data
+_loaded_data = None
 
 class MultiSourceDataLoader:
     def __init__(self):
@@ -14,6 +18,13 @@ class MultiSourceDataLoader:
         """
         Load and combine all data sources
         """
+        global _loaded_data
+        
+        # Return cached data if available
+        if _loaded_data is not None:
+            print("📊 Using cached dataset...")
+            return _loaded_data
+        
         print("Loading multiple data sources...")
         print("=" * 50)
         
@@ -63,22 +74,24 @@ class MultiSourceDataLoader:
         
         if len(self.all_images) == 0:
             print("No data sources could be loaded.")
-            return # self.load_mnist_fallback()
+            images, labels = self.load_mnist_fallback()
+        else:
+            # Combine all sources
+            images = np.concatenate(self.all_images, axis=0)
+            labels = np.concatenate(self.all_labels, axis=0)
         
-        # Combine all sources
-        combined_images = np.concatenate(self.all_images, axis=0)
-        combined_labels = np.concatenate(self.all_labels, axis=0)
+        # Cache the loaded data
+        _loaded_data = (images, labels)
         
         print(f"\nCombined dataset:")
-        print(f"  Total images: {len(combined_images)}")
+        print(f"  Total images: {len(images)}")
         print(f"  Sources: {list(self.source_stats.keys())}")
         
-        return combined_images, combined_labels
+        return images, labels
     
+    # ... keep the rest of the MultiSourceDataLoader methods the same ...
     def load_builtin_dataset(self, dataset_name):
-        """
-        Load built-in datasets
-        """
+        """Load built-in datasets"""
         if dataset_name.lower() == 'mnist':
             import tensorflow as tf
             (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
@@ -99,9 +112,7 @@ class MultiSourceDataLoader:
             return np.array([]), np.array([])
     
     def load_folder_structure(self, dataset_path):
-        """
-        Load dataset from folder structure
-        """
+        """Load dataset from folder structure"""
         if not os.path.exists(dataset_path):
             print(f"  Dataset path not found: {dataset_path}")
             return np.array([]), np.array([])
@@ -131,14 +142,11 @@ class MultiSourceDataLoader:
         return np.array(images), np.array(labels)
     
     def load_label_file_dataset(self, dataset_path):
-        """
-        Load dataset with label file - FIXED VERSION for variable image sizes
-        """
+        """Load dataset with label file"""
         try:
             label_file_path = os.path.join(dataset_path, 'labels.txt')
             images_dir = os.path.join(dataset_path, 'images')
             
-            # Validate inputs
             if not os.path.exists(dataset_path):
                 print(f"❌ Dataset path does not exist: {dataset_path}")
                 return np.array([]), np.array([])
@@ -169,20 +177,20 @@ class MultiSourceDataLoader:
             
             for line_num, line in enumerate(lines, 1):
                 line = line.strip()
-                if not line or line.startswith('#'):  # Skip empty lines and comments
+                if not line or line.startswith('#'):
                     continue
                     
-                # Split by tab instead of space
                 parts = line.split('\t')
                 if len(parts) < 2:
-                    print(f"⚠️  Line {line_num}: Invalid format (expected: filename label), got: '{line}'")
-                    skipped_files += 1
-                    continue
+                    parts = line.split()
+                    if len(parts) < 2:
+                        print(f"⚠️  Line {line_num}: Invalid format, got: '{line}'")
+                        skipped_files += 1
+                        continue
                 
                 filename = parts[0]
                 label_str = parts[1]
                 
-                # Enhanced label validation
                 try:
                     label = int(label_str)
                     if label < 0 or label >= params.NB_CLASSES:
@@ -201,7 +209,6 @@ class MultiSourceDataLoader:
                     skipped_files += 1
                     continue
                 
-                # Load and validate image
                 image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE if params.USE_GRAYSCALE else cv2.IMREAD_COLOR)
                 if image is None:
                     print(f"⚠️  Line {line_num}: Failed to load image: {image_path}")
@@ -213,11 +220,9 @@ class MultiSourceDataLoader:
                     skipped_files += 1
                     continue
                 
-                # RESIZE ALL IMAGES TO CONSISTENT SIZE
                 try:
                     image = cv2.resize(image, (params.INPUT_WIDTH, params.INPUT_HEIGHT))
                     
-                    # Add channel dimension if needed
                     if params.USE_GRAYSCALE and len(image.shape) == 2:
                         image = np.expand_dims(image, axis=-1)
                     elif not params.USE_GRAYSCALE and len(image.shape) == 2:
@@ -239,7 +244,6 @@ class MultiSourceDataLoader:
                 print("❌ No valid images were loaded")
                 return np.array([]), np.array([])
             
-            # Convert to numpy arrays with explicit dtype and shape validation
             try:
                 images_array = np.array(images, dtype=np.uint8)
                 labels_array = np.array(labels, dtype=np.int32)
@@ -251,7 +255,6 @@ class MultiSourceDataLoader:
                 
             except Exception as array_error:
                 print(f"❌ Failed to create numpy arrays: {array_error}")
-                print(f"   Image shapes: {[img.shape for img in images[:10]]}")  # Debug first 10 images
                 return np.array([]), np.array([])
                 
         except Exception as e:
@@ -260,17 +263,12 @@ class MultiSourceDataLoader:
             traceback.print_exc()
             return np.array([]), np.array([])
     
-    
     def load_mnist_fallback(self):
-        """
-        Fallback to MNIST if no sources work
-        """
+        """Fallback to MNIST if no sources work"""
         return self.load_builtin_dataset('mnist')
     
     def get_class_distribution(self, labels):
-        """
-        Get distribution of classes
-        """
+        """Get distribution of classes"""
         distribution = {}
         for i in range(params.NB_CLASSES):
             count = np.sum(labels == i)
@@ -279,9 +277,7 @@ class MultiSourceDataLoader:
         return distribution
     
     def print_detailed_stats(self):
-        """
-        Print detailed statistics about loaded data
-        """
+        """Print detailed statistics about loaded data"""
         print("\n" + "=" * 50)
         print("DATA SOURCE STATISTICS")
         print("=" * 50)
@@ -293,7 +289,6 @@ class MultiSourceDataLoader:
             for class_id, count in stats['class_distribution'].items():
                 print(f"    Class {class_id}: {count} images")
         
-        # Combined statistics
         if len(self.all_images) > 0:
             combined_images = np.concatenate(self.all_images, axis=0)
             combined_labels = np.concatenate(self.all_labels, axis=0)
@@ -307,17 +302,19 @@ class MultiSourceDataLoader:
                 print(f"    Class {i}: {count} images ({percentage:.1f}%)")
 
 def shuffle_dataset(images, labels, seed=params.SHUFFLE_SEED):
-    """
-    Shuffle images and labels together
-    """
+    """Shuffle images and labels together"""
     np.random.seed(seed)
     indices = np.random.permutation(len(images))
     return images[indices], labels[indices]
 
 def load_combined_dataset():
-    """
-    Main function to load all data sources
-    """
+    """Main function to load all data sources"""
+    global _loaded_data
+    
+    if _loaded_data is not None:
+        print("📊 Using cached dataset...")
+        return _loaded_data
+    
     loader = MultiSourceDataLoader()
     images, labels = loader.load_all_sources()
     loader.print_detailed_stats()
@@ -380,3 +377,9 @@ def get_data_splits():
                 print(f"    Class {i}: {count} ({percentage:.1f}%)")
     
     return (x_train, y_train), (x_val, y_val), (x_test, y_test)
+
+def clear_cache():
+    """Clear the cached dataset"""
+    global _loaded_data
+    _loaded_data = None
+    print("🧹 Cleared dataset cache")

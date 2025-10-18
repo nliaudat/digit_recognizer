@@ -129,6 +129,13 @@ USE_QAT = True  # Enable Quantization Aware Training
 QAT_QUANTIZE_ALL = True  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
 
+# Data pipeline configuration
+# numpy array or tensorflow datapipeline (still bugs on it)
+USE_TF_DATA_PIPELINE = False
+TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
+TF_DATA_SHUFFLE_BUFFER = 1000
+TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
+
 # File Paths
 MODEL_FILENAME = MODEL_ARCHITECTURE
 OUTPUT_DIR = "exported_models"
@@ -285,11 +292,11 @@ RESTORE_BEST_WEIGHTS = True
 # Model Checkpoint
 SAVE_CHECKPOINTS = True
 CHECKPOINT_FREQUENCY = 5
-SAVE_BEST_ONLY = False
+SAVE_BEST_ONLY = True
 CHECKPOINT_MONITOR = 'val_accuracy'
 
 # TensorBoard
-USE_TENSORBOARD = True
+USE_TENSORBOARD = False
 TENSORBOARD_UPDATE_FREQ = 'epoch'
 TENSORBOARD_WRITE_GRAPHS = True
 
@@ -297,7 +304,7 @@ TENSORBOARD_WRITE_GRAPHS = True
 # DATA AUGMENTATION HYPERPARAMETERS
 # ==============================================================================
 
-USE_DATA_AUGMENTATION = True
+USE_DATA_AUGMENTATION = False
 AUGMENTATION_ROTATION_RANGE = 10
 AUGMENTATION_WIDTH_SHIFT_RANGE = 0.1
 AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.1
@@ -328,10 +335,10 @@ GPU_MEMORY_LIMIT = None  # Set specific memory limit in MB, or None for no limit
 # ==============================================================================
 
 # TF.DATA CONFIGURATION
-USE_TF_DATA = True
-TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
-TF_DATA_SHUFFLE_BUFFER = 1000
-TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
+# USE_TF_DATA = True
+# TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
+# TF_DATA_SHUFFLE_BUFFER = 1000
+# TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
 
 # ADVANCED TRAINING
 USE_MIXED_PRECISION = False
