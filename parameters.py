@@ -61,12 +61,12 @@ USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 
 # Multiple Data Sources Configuration
 DATA_SOURCES = [ 
-    {
-        'name': 'Tenth-of-step-of-a-meter-digit',
-        'type': 'label_file', # load labels.txt (tab separated) and images folder in path
-        'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
-        'weight': 1.0,
-    },
+    # {
+        # 'name': 'Tenth-of-step-of-a-meter-digit',
+        # 'type': 'label_file', # load labels.txt (tab separated) and images folder in path
+        # 'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
+        # 'weight': 1.0,
+    # },
     # {
         # 'name': 'meterdigits_100',
         # 'type': 'folder_structure',
@@ -79,12 +79,12 @@ DATA_SOURCES = [
         # 'path': 'datasets/meterdigits_10_augmented',
         # 'weight': 0.3,
     # },
-    # {
-        # 'name': 'meterdigits_10',
-        # 'type': 'folder_structure',
-        # 'path': 'datasets/meterdigits_10',
-        # 'weight': 1.0,
-    # },
+    {
+        'name': 'meterdigits_10',
+        'type': 'folder_structure',
+        'path': 'datasets/meterdigits_10',
+        'weight': 1.0,
+    },
     # {
         # 'name': 'meterdigits_10_augmented',
         # 'type': 'folder_structure',
@@ -118,10 +118,36 @@ DATA_SOURCES = [
 # Model Parameters
 NB_CLASSES = 10  # [0-9]
 
+# QUANTIZATION MODES (9 possible combinations):
+
+# 1. QUANTIZE_MODEL=False, USE_QAT=False, ESP_DL_QUANTIZE=False
+   # → Float32 training & inference
+
+# 2. QUANTIZE_MODEL=False, USE_QAT=False, ESP_DL_QUANTIZE=True  
+   # → INVALID (ESP_DL requires quantization)
+
+# 3. QUANTIZE_MODEL=False, USE_QAT=True, ESP_DL_QUANTIZE=False
+   # → QAT training, float32 inference
+
+# 4. QUANTIZE_MODEL=False, USE_QAT=True, ESP_DL_QUANTIZE=True
+   # → INVALID (ESP_DL requires quantization)
+
+# 5. QUANTIZE_MODEL=True, USE_QAT=False, ESP_DL_QUANTIZE=False
+   # → Standard training, UINT8 post-quantization
+
+# 6. QUANTIZE_MODEL=True, USE_QAT=False, ESP_DL_QUANTIZE=True
+   # → Standard training, INT8 post-quantization (ESP-DL)
+
+# 7. QUANTIZE_MODEL=True, USE_QAT=True, ESP_DL_QUANTIZE=False  
+   # → QAT training, UINT8 quantization
+
+# 8. QUANTIZE_MODEL=True, USE_QAT=True, ESP_DL_QUANTIZE=True
+   # → QAT training, INT8 quantization (ESP-DL)
+
 # TFLite Conversion Parameters
 QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
 # ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
-ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
+ESP_DL_QUANTIZE = True  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
                          
 # Quantization Aware Training
@@ -304,7 +330,7 @@ TENSORBOARD_WRITE_GRAPHS = True
 # DATA AUGMENTATION HYPERPARAMETERS
 # ==============================================================================
 
-USE_DATA_AUGMENTATION = True
+USE_DATA_AUGMENTATION = False
 AUGMENTATION_ROTATION_RANGE = 10
 AUGMENTATION_WIDTH_SHIFT_RANGE = 0.1
 AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.1
@@ -402,16 +428,58 @@ def validate_hyperparameters():
     print("✅ All hyperparameters validated successfully!")
 
 def validate_quantization_parameters():
-    """Validate quantization parameters for consistency"""
-    if QUANTIZE_MODEL and not ESP_DL_QUANTIZE:
-        print("⚠️  Warning: Using UINT8 quantization. For ESP-DL, set ESP_DL_QUANTIZE = True")
+    """
+    Validate and correct quantization parameter combinations
+    Returns: (is_valid, corrected_params, message)
+    """
+    original_params = {
+        'QUANTIZE_MODEL': QUANTIZE_MODEL,
+        'USE_QAT': USE_QAT, 
+        'ESP_DL_QUANTIZE': ESP_DL_QUANTIZE
+    }
     
+    corrected_params = original_params.copy()
+    messages = []
+    
+    # Rule 1: ESP_DL_QUANTIZE requires QUANTIZE_MODEL
     if ESP_DL_QUANTIZE and not QUANTIZE_MODEL:
-        raise ValueError("❌ Error: ESP_DL_QUANTIZE requires QUANTIZE_MODEL = True")
+        messages.append("❌ ESP_DL_QUANTIZE=True requires QUANTIZE_MODEL=True")
+        # Auto-correct: Enable quantization
+        corrected_params['QUANTIZE_MODEL'] = True
+        messages.append("✅ Auto-corrected: Set QUANTIZE_MODEL=True")
     
-    # Validate input normalization
-    if ESP_DL_QUANTIZE:
-        print("💡 ESP-DL INT8 quantization: Inputs should be normalized to [-1, 1] range")
+    # Rule 2: USE_QAT requires QUANTIZE_MODEL  
+    if USE_QAT and not QUANTIZE_MODEL:
+        messages.append("❌ USE_QAT=True requires QUANTIZE_MODEL=True")
+        # Auto-correct: Enable quantization
+        corrected_params['QUANTIZE_MODEL'] = True
+        messages.append("✅ Auto-corrected: Set QUANTIZE_MODEL=True")
+    
+    # Rule 3: QAT + ESP-DL is valid but needs special handling
+    if USE_QAT and ESP_DL_QUANTIZE:
+        messages.append("💡 Using QAT + ESP-DL quantization (INT8)")
+    
+    # Determine the final mode
+    if not corrected_params['QUANTIZE_MODEL']:
+        mode = "Float32 training & inference"
+    else:
+        if corrected_params['USE_QAT']:
+            if corrected_params['ESP_DL_QUANTIZE']:
+                mode = "QAT + INT8 quantization for ESP-DL"
+            else:
+                mode = "QAT + UINT8 quantization"
+        else:
+            if corrected_params['ESP_DL_QUANTIZE']:
+                mode = "Standard training + INT8 post-quantization (ESP-DL)"
+            else:
+                mode = "Standard training + UINT8 post-quantization"
+    
+    messages.append(f"✅ Final mode: {mode}")
+    
+    # Check if any corrections were made
+    needs_correction = any(original_params[k] != corrected_params[k] for k in original_params)
+    
+    return not needs_correction, corrected_params, "\n".join(messages)
 
 def get_hyperparameter_summary():
     """Return a comprehensive summary of all hyperparameter settings"""

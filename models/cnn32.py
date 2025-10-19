@@ -19,14 +19,14 @@ def CNN_s2(input_shape=None, nb_classes=params.NB_CLASSES, activation_top='softm
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Activation('relu')(x)
     x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)
-    x = tf.keras.layers.Dropout(0.25)(x)
+    x = tf.keras.layers.Dropout(0.2)(x)
     
     # Second conv block  
     x = tf.keras.layers.Conv2D(64, (3, 3), padding='same')(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Activation('relu')(x)
     x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)
-    x = tf.keras.layers.Dropout(0.25)(x)
+    x = tf.keras.layers.Dropout(0.2)(x)
     
     # Third conv block
     x = tf.keras.layers.Conv2D(64, (3, 3), padding='same')(x)
@@ -36,9 +36,9 @@ def CNN_s2(input_shape=None, nb_classes=params.NB_CLASSES, activation_top='softm
     
     # Flatten and dense layers
     x = tf.keras.layers.Flatten()(x)
-    x = tf.keras.layers.Dropout(0.5)(x)
+    x = tf.keras.layers.Dropout(0.4)(x)
     x = tf.keras.layers.Dense(256, activation='relu')(x)
-    x = tf.keras.layers.Dropout(0.5)(x)
+    x = tf.keras.layers.Dropout(0.4)(x)
     
     # Output layer
     if activation_top is None:

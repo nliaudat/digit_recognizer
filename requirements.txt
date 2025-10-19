@@ -11,3 +11,4 @@ keras-tuner==1.4.7
 onnx
 tf2onnx
 onnxruntime
+tensorflow-model-optimization

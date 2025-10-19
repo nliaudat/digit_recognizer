@@ -6,7 +6,7 @@ from sklearn.model_selection import train_test_split
 import parameters as params
 
 # Global variable to cache loaded data
-_loaded_data = None
+# _loaded_data = None
 
 class MultiSourceDataLoader:
     def __init__(self):
@@ -18,12 +18,12 @@ class MultiSourceDataLoader:
         """
         Load and combine all data sources
         """
-        global _loaded_data
+        # global _loaded_data
         
-        # Return cached data if available
-        if _loaded_data is not None:
-            print("📊 Using cached dataset...")
-            return _loaded_data
+        # # Return cached data if available
+        # if _loaded_data is not None:
+            # print("📊 Using cached dataset...")
+            # return _loaded_data
         
         print("Loading multiple data sources...")
         print("=" * 50)
@@ -81,7 +81,7 @@ class MultiSourceDataLoader:
             labels = np.concatenate(self.all_labels, axis=0)
         
         # Cache the loaded data
-        _loaded_data = (images, labels)
+        # _loaded_data = (images, labels)
         
         print(f"\nCombined dataset:")
         print(f"  Total images: {len(images)}")
@@ -309,11 +309,11 @@ def shuffle_dataset(images, labels, seed=params.SHUFFLE_SEED):
 
 def load_combined_dataset():
     """Main function to load all data sources"""
-    global _loaded_data
+    # global _loaded_data
     
-    if _loaded_data is not None:
-        print("📊 Using cached dataset...")
-        return _loaded_data
+    # if _loaded_data is not None:
+        # print("📊 Using cached dataset...")
+        # return _loaded_data
     
     loader = MultiSourceDataLoader()
     images, labels = loader.load_all_sources()
@@ -378,8 +378,8 @@ def get_data_splits():
     
     return (x_train, y_train), (x_val, y_val), (x_test, y_test)
 
-def clear_cache():
-    """Clear the cached dataset"""
-    global _loaded_data
-    _loaded_data = None
-    print("🧹 Cleared dataset cache")
+# def clear_cache():
+    # """Clear the cached dataset"""
+    # global _loaded_data
+    # _loaded_data = None
+    # print("🧹 Cleared dataset cache")
