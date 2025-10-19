@@ -64,13 +64,16 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
     # CORRECTED QUANTIZATION LOGIC
     if params.QUANTIZE_MODEL:
         if params.ESP_DL_QUANTIZE:
-            # ESP-DL INT8 quantization: Keep as UINT8 [0, 255]
-            # ESP-DL handles the internal UINT8 → INT8 conversion
-            processed_images = processed_images.astype(np.uint8)
+            # ESP-DL INT8 quantization: Ensure UINT8 [0, 255]
+            if processed_images.dtype != np.uint8 or processed_images.max() <= 1.0:
+                # Convert from float [0,1] to uint8 [0,255] if needed
+                if processed_images.max() <= 1.0:
+                    processed_images = (processed_images * 255).astype(np.uint8)
+                else:
+                    processed_images = processed_images.astype(np.uint8)
             quantization_info = "UINT8 [0, 255] → ESP-DL INT8"
         else:
             # Standard TFLite UINT8 quantization: Normalize to [0, 1]
-            # TFLite will convert this to UINT8 [0, 255] during quantization
             processed_images = processed_images.astype(np.float32) / 255.0
             quantization_info = "Float32 [0, 1] → TFLite UINT8"
     else:
