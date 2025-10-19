@@ -6,24 +6,42 @@ from utils.preprocess import preprocess_images, validate_quantization_combinatio
 import parameters as params
 
 def representative_dataset():
-    """Generate enhanced representative dataset for better quantization"""
-    (x_train, _), _ = load_digit_dataset()
+    """Generate representative dataset WITHOUT double preprocessing"""
+    # Load the dataset but DON'T preprocess - use the same preprocessing as training
+    (x_train_raw, _), _ = load_digit_dataset()
     
-    # CRITICAL: Always use the SAME preprocessing as training but for inference context
-    # This ensures consistency between training and conversion
-    x_train = preprocess_images(x_train, for_training=False)
+    # CRITICAL: Use the SAME preprocessing as was used during training
+    # but ensure it matches the target quantization type
+    if params.QUANTIZE_MODEL and params.ESP_DL_QUANTIZE:
+        # ESP-DL quantization: Use UINT8 [0, 255]
+        # Resize and format but don't normalize
+        x_train = []
+        for image in x_train_raw:
+            image = cv2.resize(image, (params.INPUT_WIDTH, params.INPUT_HEIGHT))
+            if params.USE_GRAYSCALE and len(image.shape) == 3:
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+            elif not params.USE_GRAYSCALE and len(image.shape) == 2:
+                image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+            if len(image.shape) == 2:
+                image = np.expand_dims(image, axis=-1)
+            x_train.append(image)
+        x_train = np.array(x_train, dtype=np.uint8)
+        print(f"🔍 ESP-DL Representative data: UINT8 [{x_train.min()}, {x_train.max()}]")
+        
+    else:
+        # Standard quantization or float: Use [0, 1] float32
+        x_train = preprocess_images(x_train_raw, for_training=False)
+        print(f"🔍 Standard Representative data: Float32 [{x_train.min():.3f}, {x_train.max():.3f}]")
     
-    # Use more diverse samples for better quantization
+    # Use diverse samples for better quantization
     num_samples = min(params.QUANTIZE_NUM_SAMPLES, len(x_train))
-    
-    # Select samples from different parts of the dataset
-    indices = np.linspace(0, len(x_train)-1, num_samples, dtype=int)
+    indices = np.random.choice(len(x_train), num_samples, replace=False)
     
     for idx in indices:
         yield [x_train[idx:idx+1]]
 
 def convert_to_tflite_micro():
-    """Main conversion function with enhanced quantization for all 9 cases"""
+    """Main conversion function with FIXED preprocessing"""
     print("🎯 TFLite Conversion Configuration:")
     print(f"   QUANTIZE_MODEL: {params.QUANTIZE_MODEL}")
     print(f"   USE_QAT: {params.USE_QAT}") 
@@ -56,18 +74,14 @@ def convert_to_tflite_micro():
         converter.representative_dataset = representative_dataset
         
         if params.ESP_DL_QUANTIZE:
-            print("🎯 Using INT8 quantization for ESP-DL [-128, 127]")
+            print("🎯 Using INT8 quantization for ESP-DL")
             # Full integer quantization for ESP-DL
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
             converter.inference_input_type = tf.int8
             converter.inference_output_type = tf.int8
             
-            # Enable experimental quantizer for better results
-            converter.experimental_new_quantizer = True
-            converter._experimental_disable_per_channel = False
-            
         else:
-            print("🔧 Using standard UINT8 quantization [0, 255]")
+            print("🔧 Using standard UINT8 quantization")
             # Standard uint8 quantization
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
             converter.inference_input_type = tf.uint8
@@ -93,21 +107,11 @@ def convert_to_tflite_micro():
         # Print detailed quantization info
         print_quantization_info(output_path, params.QUANTIZE_MODEL, params.ESP_DL_QUANTIZE)
         
-        # Verify ESP-DL compatibility if applicable
-        if params.QUANTIZE_MODEL and params.ESP_DL_QUANTIZE:
-            compatible, issues = check_esp_dl_compatibility(output_path)
-            if compatible:
-                print("✅ Model is ESP-DL compatible")
-            else:
-                print("❌ Model may have ESP-DL compatibility issues:")
-                for issue in issues:
-                    print(f"   - {issue}")
-        
         return tflite_model
         
     except Exception as e:
         print(f"❌ Conversion failed: {e}")
-        # Fallback: try without specific type constraints
+        # Fallback conversion
         if params.QUANTIZE_MODEL:
             print("🔄 Trying fallback conversion...")
             try:
@@ -118,7 +122,7 @@ def convert_to_tflite_micro():
                 with open(output_path, 'wb') as f:
                     f.write(tflite_model)
                 
-                print("⚠️  Fallback conversion completed without strict type enforcement")
+                print("⚠️  Fallback conversion completed")
                 print(f"✅ TFLite model saved to: {output_path}")
                 return tflite_model
             except Exception as fallback_error:

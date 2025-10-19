@@ -5,7 +5,7 @@ import tensorflow as tf
 import parameters as params
 
 def validate_quantization_combination():
-    """Validate all 9 possible combinations of quantization parameters"""
+    """Validate quantization parameters with CORRECTED ESP-DL understanding"""
     valid = True
     message = ""
     
@@ -16,30 +16,24 @@ def validate_quantization_combination():
         elif params.USE_QAT:
             message = "⚠️  QAT training but no quantization applied (QUANTIZE_MODEL=False)"
         else:
-            message = "✅ Float32 training & inference"
+            message = "✅ Float32 training & inference [0, 1]"
     else:
         if params.USE_QAT:
             if params.ESP_DL_QUANTIZE:
-                message = "✅ QAT + INT8 quantization for ESP-DL"
+                message = "✅ QAT + INT8 quantization for ESP-DL [0, 255]"
             else:
-                message = "✅ QAT + UINT8 quantization"
+                message = "✅ QAT + UINT8 quantization [0, 1]"
         else:
             if params.ESP_DL_QUANTIZE:
-                message = "✅ Standard training + INT8 post-quantization (ESP-DL)"
+                message = "✅ Standard training + INT8 post-quantization (ESP-DL) [0, 255]"
             else:
-                message = "✅ Standard training + UINT8 post-quantization"
+                message = "✅ Standard training + UINT8 post-quantization [0, 1]"
     
     return valid, message
 
 def preprocess_images(images, target_size=None, grayscale=None, for_training=True):
     """
-    Universal preprocessing that handles all 9 quantization combinations
-    
-    Args:
-        images: Input images (numpy array)
-        target_size: Target image size (width, height)
-        grayscale: Convert to grayscale
-        for_training: True for training, False for inference/conversion
+    CORRECTED preprocessing for all quantization scenarios
     """
     if target_size is None:
         target_size = (params.INPUT_WIDTH, params.INPUT_HEIGHT)
@@ -65,51 +59,59 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
         processed_images.append(image)
     
     # Convert to numpy array
-    processed_images = np.array(processed_images, dtype=np.float32)
+    processed_images = np.array(processed_images)
     
-    # UNIVERSAL PREPROCESSING LOGIC FOR ALL 9 CASES
-    if for_training:
-        # TRAINING: Handle QAT vs standard training
-        if params.USE_QAT and params.ESP_DL_QUANTIZE:
-            # QAT + ESP-DL: Use [-1, 1] for consistent quantization simulation
-            processed_images = (processed_images / 127.5) - 1.0
-            quantization_info = "QAT + ESP-DL Training [-1, 1]"
-        elif params.USE_QAT and not params.ESP_DL_QUANTIZE:
-            # QAT + Standard: Use [0, 1] for consistent quantization simulation
-            processed_images = processed_images / 255.0
-            quantization_info = "QAT + Standard Training [0, 1]"
+    # CORRECTED QUANTIZATION LOGIC
+    if params.QUANTIZE_MODEL:
+        if params.ESP_DL_QUANTIZE:
+            # ESP-DL INT8 quantization: Keep as UINT8 [0, 255]
+            # ESP-DL handles the internal UINT8 → INT8 conversion
+            processed_images = processed_images.astype(np.uint8)
+            quantization_info = "UINT8 [0, 255] → ESP-DL INT8"
         else:
-            # Standard training (no QAT): Always use [0, 1]
-            processed_images = processed_images / 255.0
-            quantization_info = "Standard Training [0, 1]"
+            # Standard TFLite UINT8 quantization: Normalize to [0, 1]
+            # TFLite will convert this to UINT8 [0, 255] during quantization
+            processed_images = processed_images.astype(np.float32) / 255.0
+            quantization_info = "Float32 [0, 1] → TFLite UINT8"
     else:
-        # INFERENCE/CONVERSION: Adjust based on target quantization
-        if params.QUANTIZE_MODEL and params.ESP_DL_QUANTIZE:
-            # ESP-DL INT8: [-1, 1] range
-            processed_images = (processed_images / 127.5) - 1.0
-            quantization_info = "ESP-DL INT8 Inference [-1, 1]"
-        else:
-            # Standard UINT8 or Float32: [0, 1] range  
-            processed_images = processed_images / 255.0
-            quantization_info = "Standard Inference [0, 1]"
-    
-    # Add data validation
-    if processed_images.std() < 0.01:
-        print(f"⚠️  WARNING: Low data variance - std={processed_images.std():.6f}")
+        # No quantization: Use float32 [0, 1]
+        processed_images = processed_images.astype(np.float32) / 255.0
+        quantization_info = "Float32 [0, 1] (No quantization)"
     
     print(f"🔍 Preprocessing - {quantization_info}")
-    print(f"   QAT: {params.USE_QAT}, ESP-DL: {params.ESP_DL_QUANTIZE}, Quantize: {params.QUANTIZE_MODEL}")
     print(f"   Range: [{processed_images.min():.3f}, {processed_images.max():.3f}]")
-    print(f"   Shape: {processed_images.shape}, Mean: {processed_images.mean():.3f}")
+    print(f"   dtype: {processed_images.dtype}")
     
     return processed_images
 
 def preprocess_images_esp_dl(images):
     """
-    ESP-DL specific preprocessing for INT8 quantization
-    Explicit function for conversion pipeline
+    ESP-DL specific preprocessing - CORRECTED
+    Returns UINT8 [0, 255] images as ESP-DL expects
     """
-    return preprocess_images(images, for_training=False)
+    if target_size is None:
+        target_size = (params.INPUT_WIDTH, params.INPUT_HEIGHT)
+    
+    processed_images = []
+    
+    for image in images:
+        # Resize to target size
+        image = cv2.resize(image, target_size)
+        
+        # Convert to grayscale if required
+        if params.USE_GRAYSCALE and len(image.shape) == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        elif not params.USE_GRAYSCALE and len(image.shape) == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        
+        # Add channel dimension if missing
+        if len(image.shape) == 2:
+            image = np.expand_dims(image, axis=-1)
+        
+        processed_images.append(image)
+    
+    # ESP-DL expects UINT8 [0, 255]
+    return np.array(processed_images, dtype=np.uint8)
 
 def preprocess_images_for_qat_calibration(images):
     """
