@@ -5,23 +5,18 @@ import os
 import parameters as params
 
 def create_tf_dataset_from_arrays(x_data, y_data, training=True, batch_size=None):
-    """Create tf.data.Dataset from PREPROCESSED arrays (no additional preprocessing)"""
+    """Create tf.data.Dataset from PREPROCESSED arrays (NO additional preprocessing)"""
     if batch_size is None:
         batch_size = params.BATCH_SIZE
     
     # Convert to tensors - data is already preprocessed in train.py
     dataset = tf.data.Dataset.from_tensor_slices((x_data, y_data))
     
-    # NO ADDITIONAL PREPROCESSING - data is already normalized to [0,1]
-    # Just ensure correct data types and shapes
+    # NO ADDITIONAL PREPROCESSING - data is already normalized to correct range
+    # Just ensure correct data types
     def ensure_correct_format(image, label):
         # Ensure proper data type
         image = tf.cast(image, tf.float32)
-        
-        # Ensure correct shape (data should already be correct from preprocess_images)
-        if len(image.shape) == 2:  # Grayscale without channel
-            image = tf.expand_dims(image, axis=-1)
-        
         return image, label
     
     dataset = dataset.map(ensure_correct_format, num_parallel_calls=tf.data.AUTOTUNE)
@@ -47,10 +42,6 @@ def get_tf_data_splits_from_arrays(x_train, y_train, x_val, y_val, x_test, y_tes
     test_dataset = create_tf_dataset_from_arrays(x_test, y_test, training=False)
     
     return train_dataset, val_dataset, test_dataset
-
-# Remove the legacy function that reloads data
-# def get_tf_data_splits():
-#     """This function causes double preprocessing - DO NOT USE"""
 
 class DataPipeline:
     """Advanced data pipeline with caching and optimization"""

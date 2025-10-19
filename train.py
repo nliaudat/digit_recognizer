@@ -204,6 +204,10 @@ def create_qat_model():
         print("🎯 Building model with Quantization Aware Training...")
         model = create_model()
         qat_model = tfmot.quantization.keras.quantize_model(model)
+        # qat_model = tfmot.quantization.keras.quantize_model(
+        # model,
+        # quantize_config=tfmot.quantization.keras.QuantizeConfig()
+    # )
         print("✅ QAT model created successfully")
         return qat_model
     except Exception as e:
@@ -980,9 +984,24 @@ def train_model(debug=False):
     print("\n🔍 Verifying data consistency...")
     sample_image = x_train[0]
     print(f"   Sample image - Range: [{sample_image.min():.3f}, {sample_image.max():.3f}], Shape: {sample_image.shape}")
-    
-    if sample_image.max() < 0.1:
+
+    # Check for double preprocessing
+    if sample_image.max() <= 0.1:
         print("❌ WARNING: Data appears to be over-normalized! Check for double preprocessing.")
+        print("   This might indicate double preprocessing. Data should be in appropriate range:")
+        if params.QUANTIZE_MODEL and params.ESP_DL_QUANTIZE:
+            print("   Expected: UINT8 [0, 255] for ESP-DL quantization")
+        elif params.QUANTIZE_MODEL:
+            print("   Expected: Float32 [0, 1] for standard quantization")  
+        else:
+            print("   Expected: Float32 [0, 1] for float32 training")
+
+    print(f"✅ Data verification:")
+    print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
+    print(f"   Mean: {x_train.mean():.3f}, Std: {x_train.std():.3f}")
+
+    if x_train.std() < 0.01:
+        print("❌ WARNING: Data has very low variance - might be over-normalized!")
         
     print(f"✅ Data verification:")
     print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
@@ -995,7 +1014,7 @@ def train_model(debug=False):
     representative_data = create_qat_representative_dataset(x_train)
     
     # MODEL CREATION WITH QUANTIZATION AWARENESS
-    use_qat = params.USE_QAT and QAT_AVAILABLE
+    use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
     
     print(f"\n🔧 Creating model...")
     print(f"   Using QAT: {use_qat}")
@@ -1006,18 +1025,22 @@ def train_model(debug=False):
         if strategy:
             with strategy.scope():
                 model = create_qat_model()
+                loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'                                                                                            
                 model = compile_model(model, loss_type=loss_type)
         else:
             model = create_qat_model()
+            loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'                                                                                            
             model = compile_model(model, loss_type=loss_type)
     else:
         print("🔧 Creating standard model...")
         if strategy:
             with strategy.scope():
                 model = create_model()
+                loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'                                                                                            
                 model = compile_model(model, loss_type=loss_type)
         else:
             model = create_model()
+            loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'                                                                                            
             model = compile_model(model, loss_type=loss_type)
     
     # Build model with explicit input shape
@@ -1048,6 +1071,30 @@ def train_model(debug=False):
     # Print comprehensive training summary
     print_training_summary(model, x_train, x_val, x_test, debug)
     model_summary(model)
+    
+    # from utils.preprocess import debug_preprocessing_flow
+    # Debug the preprocessing flow
+    debug_preprocessing_flow()
+    
+    # FINAL VERIFICATION - Check for any remaining double processing
+    print("\n🔍 FINAL DOUBLE PROCESSING CHECK:")
+    print("=" * 40)
+
+    # Check if data was accidentally processed twice
+    if x_train.max() < 0.1:
+        print("❌ DOUBLE PROCESSING DETECTED!")
+        print("   Data range indicates double normalization")
+        print("   Expected: [0, 1], Got: [{:.4f}, {:.4f}]".format(x_train.min(), x_train.max()))
+    else:
+        print("✅ No double processing detected")
+        print("   Data range: [{:.3f}, {:.3f}]".format(x_train.min(), x_train.max()))
+
+    # Check data pipeline doesn't reprocess
+    print("\n🔍 Checking data pipeline...")
+    sample_batch = next(iter(create_tf_dataset_from_arrays(x_train[:1], y_train_final[:1], training=False)))
+    pipeline_image, pipeline_label = sample_batch
+    print("   Data pipeline output range: [{:.3f}, {:.3f}]".format(
+        pipeline_image.numpy().min(), pipeline_image.numpy().max()))
     
     # Create callbacks
     callbacks = create_callbacks(training_dir, tflite_manager, representative_data, params.EPOCHS, monitor, debug)
@@ -1152,6 +1199,13 @@ def train_model(debug=False):
             # Validation dataset WITHOUT augmentation
             val_dataset = create_tf_dataset_from_arrays(x_val, y_val_final, training=False)
             
+            # TEMPORARY VERIFICATION
+            print("🧪 Testing data pipeline...")
+            sample_batch = next(iter(train_dataset))
+            sample_x, sample_y = sample_batch
+            print(f"   Sample batch - X range: [{sample_x.numpy().min():.3f}, {sample_x.numpy().max():.3f}]")
+            print(f"   Sample batch - Y shape: {sample_y.numpy().shape}")   
+            
             # Train with augmented dataset
             history = model.fit(
                 train_dataset,
@@ -1174,6 +1228,13 @@ def train_model(debug=False):
             val_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val_final))
             val_dataset = val_dataset.batch(params.BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
             
+            # TEMPORARY VERIFICATION
+            print("🧪 Testing data pipeline...")
+            sample_batch = next(iter(train_dataset))
+            sample_x, sample_y = sample_batch
+            print(f"   Sample batch - X range: [{sample_x.numpy().min():.3f}, {sample_x.numpy().max():.3f}]")
+            print(f"   Sample batch - Y shape: {sample_y.numpy().shape}")        
+            
             history = model.fit(
                 train_dataset,
                 epochs=params.EPOCHS,
@@ -1191,6 +1252,13 @@ def train_model(debug=False):
             train_dataset = create_tf_dataset_from_arrays(x_train, y_train_final, training=True)
             val_dataset = create_tf_dataset_from_arrays(x_val, y_val_final, training=False)
             
+            # TEMPORARY VERIFICATION
+            print("🧪 Testing data pipeline...")
+            sample_batch = next(iter(train_dataset))
+            sample_x, sample_y = sample_batch
+            print(f"   Sample batch - X range: [{sample_x.numpy().min():.3f}, {sample_x.numpy().max():.3f}]")
+            print(f"   Sample batch - Y shape: {sample_y.numpy().shape}")         
+            
             history = model.fit(
                 train_dataset,
                 epochs=params.EPOCHS,
@@ -1200,6 +1268,11 @@ def train_model(debug=False):
             )
         else:
             print("🔧 Using standard arrays without augmentation...")
+            # TEMPORARY VERIFICATION
+            print("🧪 Testing data pipeline...")
+            sample_x, sample_y = x_train[:1], y_train_final[:1]
+            print(f"   Sample batch - X range: [{sample_x.min():.3f}, {sample_x.max():.3f}]")
+            print(f"   Sample batch - Y shape: {sample_y.shape}")                                    
             history = model.fit(
                 x_train, y_train_final,
                 batch_size=params.BATCH_SIZE,
@@ -1210,6 +1283,7 @@ def train_model(debug=False):
                 shuffle=True
             )
     
+        
     training_time = datetime.now() - start_time
     
     # FINAL MODEL SAVING AND EVALUATION

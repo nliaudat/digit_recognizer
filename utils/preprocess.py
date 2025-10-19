@@ -59,26 +59,27 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
         processed_images.append(image)
     
     # Convert to numpy array
-    processed_images = np.array(processed_images)
+    processed_images = np.array(processed_images, dtype=np.float32)
     
-    # CORRECTED QUANTIZATION LOGIC
+    # CRITICAL FIX: Clear logic for all cases
     if params.QUANTIZE_MODEL:
         if params.ESP_DL_QUANTIZE:
-            # ESP-DL INT8 quantization: Ensure UINT8 [0, 255]
-            if processed_images.dtype != np.uint8 or processed_images.max() <= 1.0:
-                # Convert from float [0,1] to uint8 [0,255] if needed
-                if processed_images.max() <= 1.0:
-                    processed_images = (processed_images * 255).astype(np.uint8)
-                else:
-                    processed_images = processed_images.astype(np.uint8)
+            # ESP-DL INT8 quantization: Use UINT8 [0, 255]
+            # Convert from float32 [0,1] to uint8 [0,255]
+            if processed_images.max() <= 1.0:
+                processed_images = (processed_images * 255).astype(np.uint8)
+            else:
+                processed_images = processed_images.astype(np.uint8)
             quantization_info = "UINT8 [0, 255] → ESP-DL INT8"
         else:
-            # Standard TFLite UINT8 quantization: Normalize to [0, 1]
-            processed_images = processed_images.astype(np.float32) / 255.0
+            # Standard TFLite UINT8 quantization: Use float32 [0, 1]
+            if processed_images.max() > 1.0:
+                processed_images = processed_images / 255.0
             quantization_info = "Float32 [0, 1] → TFLite UINT8"
     else:
         # No quantization: Use float32 [0, 1]
-        processed_images = processed_images.astype(np.float32) / 255.0
+        if processed_images.max() > 1.0:
+            processed_images = processed_images / 255.0
         quantization_info = "Float32 [0, 1] (No quantization)"
     
     print(f"🔍 Preprocessing - {quantization_info}")
@@ -421,3 +422,49 @@ def diagnose_quantization_settings():
         print("\n✅ No parameter conflicts detected")
     
     return len(issues) == 0
+    
+
+def debug_preprocessing_flow():
+    """Debug function to trace preprocessing flow and detect double processing"""
+    print("\n🔍 DEBUG: Tracing Preprocessing Flow")
+    print("=" * 50)
+    
+    # Create test data
+    test_images_raw = np.random.randint(0, 255, (2, 28, 28, 1), dtype=np.uint8)
+    print(f"Raw data range: [{test_images_raw.min()}, {test_images_raw.max()}]")
+    print(f"Raw data dtype: {test_images_raw.dtype}")
+    
+    # Simulate preprocessing
+    test_processed = preprocess_images(test_images_raw, for_training=True)
+    print(f"After preprocessing: [{test_processed.min():.3f}, {test_processed.max():.3f}]")
+    print(f"After preprocessing dtype: {test_processed.dtype}")
+    
+    # Check if this matches expected range
+    expected_range = ""
+    if params.QUANTIZE_MODEL and params.ESP_DL_QUANTIZE:
+        expected_range = "UINT8 [0, 255]"
+        if test_processed.dtype == np.uint8 and test_processed.max() > 1.0:
+            print("✅ Preprocessing correct for ESP-DL quantization")
+        else:
+            print("❌ Preprocessing incorrect for ESP-DL quantization")
+    elif params.QUANTIZE_MODEL:
+        expected_range = "Float32 [0, 1]"
+        if test_processed.dtype == np.float32 and test_processed.max() <= 1.0:
+            print("✅ Preprocessing correct for standard quantization")
+        else:
+            print("❌ Preprocessing incorrect for standard quantization")
+    else:
+        expected_range = "Float32 [0, 1]"
+        if test_processed.dtype == np.float32 and test_processed.max() <= 1.0:
+            print("✅ Preprocessing correct for float32 training")
+        else:
+            print("❌ Preprocessing incorrect for float32 training")
+    
+    print(f"Expected range: {expected_range}")
+    
+    # Additional check for double preprocessing
+    if test_processed.max() < 0.1 and test_processed.dtype == np.float32:
+        print("🚨 WARNING: Possible double preprocessing detected!")
+        print("   Data range suggests over-normalization (should be [0, 1], not [0, ~0.0039])")
+    
+    return test_processed
