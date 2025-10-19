@@ -31,9 +31,70 @@ def validate_quantization_combination():
     
     return valid, message
 
+
 def preprocess_images(images, target_size=None, grayscale=None, for_training=True):
     """
-    CORRECTED preprocessing for all quantization scenarios
+    Preprocess images for digit recognition training and inference.
+    
+    This function handles all quantization scenarios by separating training 
+    and inference preprocessing logic. Training always uses a consistent 
+    format, while inference format depends on the target quantization.
+    
+    Args:
+        images (numpy.ndarray): Input images in any format (uint8/float32)
+        target_size (tuple, optional): Target size (width, height). 
+            Defaults to parameters.INPUT_WIDTH, parameters.INPUT_HEIGHT
+        grayscale (bool, optional): Convert to grayscale. 
+            Defaults to parameters.USE_GRAYSCALE
+        for_training (bool): Determines preprocessing mode:
+            - True: Training mode - consistent format for stable training
+            - False: Inference mode - format optimized for target deployment
+    
+    Returns:
+        numpy.ndarray: Preprocessed images in the appropriate format
+        
+    Preprocessing Behavior:
+    
+    for_training=True (Training Mode):
+        - Always returns float32 [0, 1] regardless of quantization settings
+        - Ensures stable and consistent training across all configurations
+        - Used during model training and validation
+        - Format: float32, range [0.0, 1.0]
+    
+    for_training=False (Inference Mode):
+        Returns format based on quantization target:
+        
+        - ESP-DL Quantization (QUANTIZE_MODEL=True, ESP_DL_QUANTIZE=True):
+          Format: uint8 [0, 255]
+          Used for: ESP-DL microcontroller deployment with INT8 quantization
+        
+        - Standard Quantization (QUANTIZE_MODEL=True, ESP_DL_QUANTIZE=False):
+          Format: float32 [0, 1] 
+          Used for: Standard TFLite UINT8 quantization
+        
+        - No Quantization (QUANTIZE_MODEL=False):
+          Format: float32 [0, 1]
+          Used for: Float32 TFLite models or direct inference
+    
+    Examples:
+        >>> # Training data preprocessing
+        >>> x_train = preprocess_images(x_train_raw, for_training=True)
+        >>> print(f"Training range: [{x_train.min():.3f}, {x_train.max():.3f}]")
+        Training range: [0.000, 1.000]
+        
+        >>> # Inference data preprocessing for ESP-DL
+        >>> x_infer = preprocess_images(x_test_raw, for_training=False)
+        >>> print(f"ESP-DL range: [{x_infer.min()}, {x_infer.max()}]")
+        ESP-DL range: [0, 255]
+        
+        >>> # Representative dataset for quantization
+        >>> rep_data = preprocess_images(calib_data, for_training=False)
+    
+    Notes:
+        - Prevents double preprocessing by using consistent logic
+        - Maintains compatibility with QAT (Quantization Aware Training)
+        - Handles both grayscale and RGB input formats
+        - Automatically resizes images to target dimensions
     """
     if target_size is None:
         target_size = (params.INPUT_WIDTH, params.INPUT_HEIGHT)
@@ -58,35 +119,53 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
         
         processed_images.append(image)
     
-    # Convert to numpy array
-    processed_images = np.array(processed_images, dtype=np.float32)
+    # Convert to numpy array first
+    processed_images = np.array(processed_images)
     
-    # CRITICAL FIX: Clear logic for all cases
-    if params.QUANTIZE_MODEL:
-        if params.ESP_DL_QUANTIZE:
-            # ESP-DL INT8 quantization: Use UINT8 [0, 255]
-            # Convert from float32 [0,1] to uint8 [0,255]
-            if processed_images.max() <= 1.0:
-                processed_images = (processed_images * 255).astype(np.uint8)
-            else:
-                processed_images = processed_images.astype(np.uint8)
-            quantization_info = "UINT8 [0, 255] → ESP-DL INT8"
-        else:
-            # Standard TFLite UINT8 quantization: Use float32 [0, 1]
-            if processed_images.max() > 1.0:
-                processed_images = processed_images / 255.0
-            quantization_info = "Float32 [0, 1] → TFLite UINT8"
-    else:
-        # No quantization: Use float32 [0, 1]
+    # CRITICAL: Use for_training parameter to determine preprocessing
+    if for_training:
+        # TRAINING DATA - Always use float32 [0, 1] regardless of quantization settings
+        if processed_images.dtype != np.float32:
+            processed_images = processed_images.astype(np.float32)
         if processed_images.max() > 1.0:
             processed_images = processed_images / 255.0
-        quantization_info = "Float32 [0, 1] (No quantization)"
+        
+        quantization_info = "Float32 [0, 1] (Training)"
+        
+    else:
+        # INFERENCE DATA - Depends on quantization target
+        if params.QUANTIZE_MODEL:
+            if params.ESP_DL_QUANTIZE:
+                # ESP-DL INT8 quantization: Use UINT8 [0, 255]
+                if processed_images.dtype != np.uint8:
+                    if processed_images.max() <= 1.0:
+                        processed_images = (processed_images * 255).astype(np.uint8)
+                    else:
+                        processed_images = processed_images.astype(np.uint8)
+                quantization_info = "UINT8 [0, 255] → ESP-DL INT8"
+            else:
+                # Standard TFLite UINT8 quantization: Use float32 [0, 1]
+                if processed_images.dtype != np.float32:
+                    processed_images = processed_images.astype(np.float32)
+                if processed_images.max() > 1.0:
+                    processed_images = processed_images / 255.0
+                quantization_info = "Float32 [0, 1] → TFLite UINT8"
+        else:
+            # No quantization: Use float32 [0, 1]
+            if processed_images.dtype != np.float32:
+                processed_images = processed_images.astype(np.float32)
+            if processed_images.max() > 1.0:
+                processed_images = processed_images / 255.0
+            quantization_info = "Float32 [0, 1] (No quantization)"
     
-    print(f"🔍 Preprocessing - {quantization_info}")
+    print(f"DEBUG: Preprocessing - {quantization_info}")
     print(f"   Range: [{processed_images.min():.3f}, {processed_images.max():.3f}]")
     print(f"   dtype: {processed_images.dtype}")
     
     return processed_images
+
+
+
 
 def preprocess_images_esp_dl(images):
     """

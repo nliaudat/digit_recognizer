@@ -756,11 +756,12 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     return callbacks
 
 def create_qat_representative_dataset(x_train, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    """Create representative dataset for QAT model conversion"""
+    """Create representative dataset for QAT model conversion using INFERENCE preprocessing"""
     def representative_dataset():
-        # Use actual training data for better calibration
-        for i in range(min(num_samples, len(x_train))):
-            yield [x_train[i:i+1].astype(np.float32)]
+        # Use inference preprocessing for calibration
+        x_calibration = preprocess_images(x_train[:num_samples], for_training=False)
+        for i in range(len(x_calibration)):
+            yield [x_calibration[i:i+1].astype(np.float32)]
     return representative_dataset
     
 def setup_gpu():
@@ -1011,7 +1012,7 @@ def train_model(debug=False):
         print("❌ WARNING: Data has very low variance - might be over-normalized!")
     
     # Create representative dataset for quantization
-    representative_data = create_qat_representative_dataset(x_train)
+    representative_data = create_qat_representative_dataset(x_train) ## This should use for_training=False internally
     
     # MODEL CREATION WITH QUANTIZATION AWARENESS
     use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
