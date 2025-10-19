@@ -9,13 +9,14 @@ import sys
 from tqdm.auto import tqdm
 import logging
 from contextlib import contextmanager
-from models import *
+from models import create_model, compile_model, model_summary
+# from models.model_factory import print_hyperparameter_summary
 from utils import get_data_splits, preprocess_images
 from utils.preprocess import *
 from utils.data_pipeline import *
 from analyse import *
 from tuner import *
-from parameters import get_hyperparameter_summary_text
+from parameters import get_hyperparameter_summary_text, validate_quantization_parameters
 import parameters as params
 
 # import tensorflow_model_optimization as tfmot
@@ -859,6 +860,20 @@ def train_model(debug=False):
     """Main training function with comprehensive handling of all 9 quantization cases"""
     setup_tensorflow_logging(debug)
     set_all_seeds(params.SHUFFLE_SEED)
+    
+    # VALIDATE AND CORRECT QUANTIZATION PARAMETERS FIRST
+    print("🎯 VALIDATING QUANTIZATION PARAMETERS...")
+    is_valid, corrected_params, message = validate_quantization_parameters()
+    
+    print(message)
+    
+    # Apply corrections if needed
+    if not is_valid:
+        print("🔄 Applying parameter corrections...")
+        params.QUANTIZE_MODEL = corrected_params['QUANTIZE_MODEL']
+        params.USE_QAT = corrected_params['USE_QAT']
+        params.ESP_DL_QUANTIZE = corrected_params['ESP_DL_QUANTIZE']
+        print(f"✅ Corrected parameters applied")
     
     print("🎯 TRAINING CONFIGURATION:")
     print("=" * 60)
@@ -1707,6 +1722,19 @@ def main():
     """Main entry point"""
     args = parse_arguments()
     tflite_checkpoint_callback = None  # Store reference to the callback
+    
+    diagnose_quantization_settings()
+
+    # Validate and correct parameters
+    is_valid, corrected_params, message = validate_quantization_parameters()
+    print(message)
+    
+    if not is_valid:
+        # Apply corrections
+        params.QUANTIZE_MODEL = corrected_params['QUANTIZE_MODEL']
+        params.USE_QAT = corrected_params['USE_QAT'] 
+        params.ESP_DL_QUANTIZE = corrected_params['ESP_DL_QUANTIZE']
+        print("✅ Parameters corrected automatically")
     
     try:
         # Load data first for all operations

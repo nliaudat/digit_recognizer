@@ -366,3 +366,53 @@ if __name__ == "__main__":
     
     if args.test_all:
         test_all_preprocessing_combinations()
+        
+def diagnose_quantization_settings():
+    """Diagnose current quantization settings and suggest fixes"""
+    print("\n🔍 QUANTIZATION SETTINGS DIAGNOSIS")
+    print("=" * 50)
+    
+    issues = []
+    suggestions = []
+    
+    # Check individual parameters
+    print(f"QUANTIZE_MODEL: {params.QUANTIZE_MODEL}")
+    print(f"USE_QAT: {params.USE_QAT}")
+    print(f"ESP_DL_QUANTIZE: {params.ESP_DL_QUANTIZE}")
+    
+    # Check combinations
+    if params.ESP_DL_QUANTIZE and not params.QUANTIZE_MODEL:
+        issues.append("ESP_DL_QUANTIZE requires QUANTIZE_MODEL")
+        suggestions.append("Set QUANTIZE_MODEL = True")
+    
+    if params.USE_QAT and not params.QUANTIZE_MODEL:
+        issues.append("USE_QAT requires QUANTIZE_MODEL")
+        suggestions.append("Set QUANTIZE_MODEL = True")
+    
+    if params.USE_QAT and params.ESP_DL_QUANTIZE:
+        print("✅ QAT + ESP-DL: Training for INT8 quantization")
+    
+    elif params.USE_QAT and not params.ESP_DL_QUANTIZE:
+        print("✅ QAT only: Training for UINT8 quantization")
+    
+    elif not params.USE_QAT and params.ESP_DL_QUANTIZE:
+        print("✅ ESP-DL only: Standard training + INT8 post-quantization")
+    
+    elif not params.USE_QAT and params.QUANTIZE_MODEL and not params.ESP_DL_QUANTIZE:
+        print("✅ Standard quantization: Training + UINT8 post-quantization")
+    
+    else:
+        print("✅ Float32: No quantization")
+    
+    # Print issues and suggestions
+    if issues:
+        print("\n❌ ISSUES FOUND:")
+        for issue in issues:
+            print(f"   - {issue}")
+        print("\n💡 SUGGESTIONS:")
+        for suggestion in suggestions:
+            print(f"   - {suggestion}")
+    else:
+        print("\n✅ No parameter conflicts detected")
+    
+    return len(issues) == 0
