@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import os
+import cv2
 from utils.dataset import load_digit_dataset
 from utils.preprocess import preprocess_images, validate_quantization_combination
 import parameters as params
@@ -26,12 +27,12 @@ def representative_dataset():
                 image = np.expand_dims(image, axis=-1)
             x_train.append(image)
         x_train = np.array(x_train, dtype=np.uint8)
-        print(f"🔍 ESP-DL Representative data: UINT8 [{x_train.min()}, {x_train.max()}]")
+        print(f"ESP-DL Representative data: UINT8 [{x_train.min()}, {x_train.max()}]")
         
     else:
         # Standard quantization or float: Use [0, 1] float32
         x_train = preprocess_images(x_train_raw, for_training=False)
-        print(f"🔍 Standard Representative data: Float32 [{x_train.min():.3f}, {x_train.max():.3f}]")
+        print(f"Standard Representative data: Float32 [{x_train.min():.3f}, {x_train.max():.3f}]")
     
     # Use diverse samples for better quantization
     num_samples = min(params.QUANTIZE_NUM_SAMPLES, len(x_train))
@@ -42,7 +43,7 @@ def representative_dataset():
 
 def convert_to_tflite_micro():
     """Main conversion function with FIXED preprocessing"""
-    print("🎯 TFLite Conversion Configuration:")
+    print("TFLite Conversion Configuration:")
     print(f"   QUANTIZE_MODEL: {params.QUANTIZE_MODEL}")
     print(f"   USE_QAT: {params.USE_QAT}") 
     print(f"   ESP_DL_QUANTIZE: {params.ESP_DL_QUANTIZE}")
@@ -59,7 +60,7 @@ def convert_to_tflite_micro():
     output_path = os.path.join(params.OUTPUT_DIR, params.TFLITE_FILENAME)
     
     # Load model
-    print(f"📦 Loading model from: {model_path}")
+    print(f"Loading model from: {model_path}")
     if not os.path.exists(model_path):
         print(f"❌ Model file not found: {model_path}")
         return None
@@ -69,19 +70,19 @@ def convert_to_tflite_micro():
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     
     if params.QUANTIZE_MODEL:
-        print("🔧 Configuring post-training quantization...")
+        print("Configuring post-training quantization...")
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
         converter.representative_dataset = representative_dataset
         
         if params.ESP_DL_QUANTIZE:
-            print("🎯 Using INT8 quantization for ESP-DL")
+            print("Using INT8 quantization for ESP-DL")
             # Full integer quantization for ESP-DL
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
             converter.inference_input_type = tf.int8
             converter.inference_output_type = tf.int8
             
         else:
-            print("🔧 Using standard UINT8 quantization")
+            print("Using standard UINT8 quantization")
             # Standard uint8 quantization
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
             converter.inference_input_type = tf.uint8
@@ -90,12 +91,12 @@ def convert_to_tflite_micro():
         converter.allow_custom_ops = False
         
     else:
-        print("🔧 Converting without quantization (float32)")
+        print("Converting without quantization (float32)")
         # No quantization - keep as float32
     
     # Convert model
     try:
-        print("🔄 Converting model to TFLite...")
+        print("Converting model to TFLite...")
         tflite_model = converter.convert()
         
         # Save the model
@@ -144,7 +145,7 @@ def print_quantization_info(model_path, quantized, esp_dl_quantize):
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
     
-    print("\n📊 QUANTIZATION INFORMATION:")
+    print("\n QUANTIZATION INFORMATION:")
     print("=" * 50)
     print(f"Model: {os.path.basename(model_path)}")
     print(f"Quantized: {quantized}")

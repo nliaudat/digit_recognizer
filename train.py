@@ -12,10 +12,14 @@ from contextlib import contextmanager
 from models import create_model, compile_model, model_summary
 # from models.model_factory import print_hyperparameter_summary
 from utils import get_data_splits, preprocess_images
-from utils.preprocess import *
-from utils.data_pipeline import *
-from analyse import *
-from tuner import *
+# from utils.preprocess import *
+# from utils.data_pipeline import *
+# from analyse import *
+# from tuner import *
+from utils.preprocess import validate_quantization_combination, validate_preprocessing_consistency, check_qat_compatibility, debug_preprocessing_flow, diagnose_quantization_settings
+from utils.data_pipeline import create_tf_dataset_from_arrays
+from analyse import evaluate_tflite_model, analyze_quantization_impact, training_diagnostics, verify_model_predictions, debug_model_architecture
+from tuner import run_architecture_tuning
 from parameters import get_hyperparameter_summary_text, validate_quantization_parameters
 import parameters as params
 
@@ -219,7 +223,33 @@ class TFLiteModelManager:
         self.output_dir = output_dir
         self.best_accuracy = 0.0
         self.debug = debug
+ 
+    def _completely_suppress_output(self):
+        """Completely suppress all output during TFLite conversion"""
+        import os
+        import sys
+        from contextlib import contextmanager
         
+        @contextmanager 
+        def suppress_output():
+            # Set TensorFlow to maximum logging suppression
+            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # 0=all, 1=info, 2=warnings, 3=errors
+            tf.get_logger().setLevel('ERROR')
+            
+            # Redirect all Python output streams to devnull
+            with open(os.devnull, 'w') as devnull:
+                old_stdout = sys.stdout
+                old_stderr = sys.stderr
+                sys.stdout = devnull
+                sys.stderr = devnull
+                try:
+                    yield
+                finally:
+                    sys.stdout = old_stdout
+                    sys.stderr = old_stderr
+        
+        return suppress_output()
+ 
     def verify_model_for_conversion(self, model):
         """Verify model is compatible with TFLite conversion"""
         try:
@@ -273,7 +303,6 @@ class TFLiteModelManager:
             
             # CRITICAL: Provide representative dataset for full integer quantization
             if representative_data is None:
-                print("⚠️  No representative dataset provided for QAT conversion")
                 # Create a simple representative dataset from the model input shape
                 def default_representative_dataset():
                     for _ in range(100):
@@ -292,13 +321,14 @@ class TFLiteModelManager:
                 converter.inference_input_type = tf.uint8
                 converter.inference_output_type = tf.uint8
             
-            with suppress_all_output(self.debug):
+            # COMPLETE output suppression during conversion
+            with self._completely_suppress_output():
                 tflite_model = converter.convert()
             
             return self._save_tflite_file(tflite_model, filename, True)
             
         except Exception as e:
-            print(f"❌ QAT conversion failed: {e}")
+            print(f"QAT conversion failed: {e}")
             # Fallback: try without full integer quantization
             return self._convert_qat_model_fallback(model, filename)
             
