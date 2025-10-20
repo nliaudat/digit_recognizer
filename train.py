@@ -305,7 +305,7 @@ class TFLiteModelManager:
             if representative_data is None:
                 # Create a simple representative dataset from the model input shape
                 def default_representative_dataset():
-                    for _ in range(100):
+                    for _ in range(params.QUANTIZE_NUM_SAMPLES):
                         data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
                         yield [data]
                 converter.representative_dataset = default_representative_dataset
@@ -386,7 +386,7 @@ class TFLiteModelManager:
                     else:
                         # Create default representative dataset if none provided
                         def default_representative_dataset():
-                            for _ in range(100):
+                            for _ in range(params.QUANTIZE_NUM_SAMPLES):
                                 data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
                                 yield [data]
                         converter.representative_dataset = default_representative_dataset
@@ -785,13 +785,16 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     
     return callbacks
 
-def create_qat_representative_dataset(x_train, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    """Create representative dataset for QAT model conversion using INFERENCE preprocessing"""
+def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
+    """Create representative dataset that preserves the correct data type"""
     def representative_dataset():
-        # Use inference preprocessing for calibration
-        x_calibration = preprocess_images(x_train[:num_samples], for_training=False)
+        # Use the sophisticated preprocess_images with for_training=False
+        x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
+        
         for i in range(len(x_calibration)):
-            yield [x_calibration[i:i+1].astype(np.float32)]
+            # ✅ DON'T convert to float32 - preserve the data type from preprocess_images
+            yield [x_calibration[i:i+1]]  # Keep original dtype (UINT8 for ESP-DL, float32 for others)
+    
     return representative_dataset
     
 def setup_gpu():
@@ -1042,7 +1045,7 @@ def train_model(debug=False):
         print("❌ WARNING: Data has very low variance - might be over-normalized!")
     
     # Create representative dataset for quantization
-    representative_data = create_qat_representative_dataset(x_train) ## This should use for_training=False internally
+    representative_data = create_qat_representative_dataset(x_train_raw) ## This should use for_training=False internally
     
     # MODEL CREATION WITH QUANTIZATION AWARENESS
     use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
