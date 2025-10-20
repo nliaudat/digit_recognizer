@@ -34,7 +34,7 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v6",
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "original_haverland" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
@@ -61,12 +61,12 @@ USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 
 # Multiple Data Sources Configuration
 DATA_SOURCES = [ 
-    # {
-        # 'name': 'Tenth-of-step-of-a-meter-digit',
-        # 'type': 'label_file', # load labels.txt (tab separated) and images folder in path
-        # 'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
-        # 'weight': 1.0,
-    # },
+    {
+        'name': 'Tenth-of-step-of-a-meter-digit',
+        'type': 'label_file', # load labels.txt (tab separated) and images folder in path
+        'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
+        'weight': 1.0,
+    },
     # {
         # 'name': 'meterdigits_100',
         # 'type': 'folder_structure',
@@ -79,12 +79,12 @@ DATA_SOURCES = [
         # 'path': 'datasets/meterdigits_10_augmented',
         # 'weight': 0.3,
     # },
-    {
-        'name': 'meterdigits_10',
-        'type': 'folder_structure',
-        'path': 'datasets/meterdigits_10',
-        'weight': 1.0,
-    },
+    # {
+        # 'name': 'meterdigits_10',
+        # 'type': 'folder_structure',
+        # 'path': 'datasets/meterdigits_10',
+        # 'weight': 1.0,
+    # },
     # {
         # 'name': 'meterdigits_10_augmented',
         # 'type': 'folder_structure',
@@ -121,33 +121,33 @@ NB_CLASSES = 10  # [0-9]
 # QUANTIZATION MODES (9 possible combinations):
 
 # 1. QUANTIZE_MODEL=False, USE_QAT=False, ESP_DL_QUANTIZE=False
-   # → Float32 training & inference
+   # Float32 training & inference
 
 # 2. QUANTIZE_MODEL=False, USE_QAT=False, ESP_DL_QUANTIZE=True  
-   # → INVALID (ESP_DL requires quantization)
+   # INVALID (ESP_DL requires quantization)
 
 # 3. QUANTIZE_MODEL=False, USE_QAT=True, ESP_DL_QUANTIZE=False
-   # → QAT training, float32 inference
+   # QAT training, float32 inference
 
 # 4. QUANTIZE_MODEL=False, USE_QAT=True, ESP_DL_QUANTIZE=True
-   # → INVALID (ESP_DL requires quantization)
+   # INVALID (ESP_DL requires quantization)
 
 # 5. QUANTIZE_MODEL=True, USE_QAT=False, ESP_DL_QUANTIZE=False
-   # → Standard training, UINT8 post-quantization
+   # Standard training, UINT8 post-quantization
 
 # 6. QUANTIZE_MODEL=True, USE_QAT=False, ESP_DL_QUANTIZE=True
-   # → Standard training, INT8 post-quantization (ESP-DL)
+   # Standard training, INT8 post-quantization (ESP-DL)
 
 # 7. QUANTIZE_MODEL=True, USE_QAT=True, ESP_DL_QUANTIZE=False  
-   # → QAT training, UINT8 quantization
+   # QAT training, UINT8 quantization
 
 # 8. QUANTIZE_MODEL=True, USE_QAT=True, ESP_DL_QUANTIZE=True
-   # → QAT training, INT8 quantization (ESP-DL)
+   # QAT training, INT8 quantization (ESP-DL)
 
 # TFLite Conversion Parameters
 QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
 # ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
-ESP_DL_QUANTIZE = True  # Quantize to int8 range [-128, 127] for ESP-DL
+ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
                          
 # Quantization Aware Training
@@ -330,7 +330,7 @@ TENSORBOARD_WRITE_GRAPHS = True
 # DATA AUGMENTATION HYPERPARAMETERS
 # ==============================================================================
 
-USE_DATA_AUGMENTATION = False
+USE_DATA_AUGMENTATION = True
 AUGMENTATION_ROTATION_RANGE = 10
 AUGMENTATION_WIDTH_SHIFT_RANGE = 0.1
 AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.1

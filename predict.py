@@ -29,10 +29,32 @@ class TFLiteDigitPredictor:
         print(f"Input type: {self.input_details[0]['dtype']}")
         print(f"Output shape: {self.output_details[0]['shape']}")
     
-    def predict(self, image):
+    def debug_preprocessing(self, image, processed_image):
+        """Debug preprocessing steps"""
+        print(f"\n=== DEBUG PREPROCESSING ===")
+        print(f"Original image - shape: {image.shape}, dtype: {image.dtype}")
+        print(f"Original image range: [{image.min():.3f}, {image.max():.3f}]")
+        print(f"Processed image - shape: {processed_image.shape}, dtype: {processed_image.dtype}")
+        print(f"Processed image range: [{processed_image.min():.3f}, {processed_image.max():.3f}]")
+        
+        # Check model expectations
+        expected_shape = self.input_details[0]['shape'][1:3]  # (height, width)
+        expected_dtype = self.input_details[0]['dtype']
+        print(f"Model expects - shape: {expected_shape}, dtype: {expected_dtype}")
+        
+        # Verify preprocessing matches training
+        if processed_image.max() > 1.0:
+            print("⚠️  WARNING: Image not normalized to [0,1] range!")
+        if processed_image.dtype != np.float32:
+            print("⚠️  WARNING: Image not in float32 format!")
+
+    def predict(self, image, debug=False):
         """Predict digit from image using TFLite"""
         # Preprocess image
         processed_image = predict_single_image(image)
+        
+        if debug:
+            self.debug_preprocessing(image, processed_image)
         
         print(f"After preprocessing - shape: {processed_image.shape}, dtype: {processed_image.dtype}")
         
@@ -116,7 +138,6 @@ def load_random_image_from_dataset(input_channels):
     # Use the first data source
     data_source = params.DATA_SOURCES[0]
     dataset_path = data_source['path']
-    # dataset_type = data_source['type']
     
     # Convert to Path object for path operations
     dataset_path = Path(dataset_path)
@@ -130,27 +151,26 @@ def load_random_image_from_dataset(input_channels):
     image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']
     
     # Find all image files first
-    # print("Scanning for image files...")
     image_files = []
     for file_path in dataset_path.rglob('*'):
         if file_path.is_file() and file_path.suffix.lower() in image_extensions:
             image_files.append(file_path)
     
-    if not image_files:  # Fixed variable name - was image_paths
+    if not image_files:
         print(f"No images found in {dataset_path}")
         return None
     
     # Select a random image
-    random_image_path = np.random.choice(image_files)  # Fixed variable name
+    random_image_path = np.random.choice(image_files)
     print(f"Loading random image: {random_image_path}")
     
     # Load image based on model's input requirements
     if input_channels == 1:
         # Model expects grayscale - load as 2D array
-        image = cv2.imread(str(random_image_path), cv2.IMREAD_GRAYSCALE)  # Convert Path to string
+        image = cv2.imread(str(random_image_path), cv2.IMREAD_GRAYSCALE)
     else:
         # Model expects color (RGB) - load as 3D array with 3 channels
-        image = cv2.imread(str(random_image_path), cv2.IMREAD_COLOR)  # Convert Path to string
+        image = cv2.imread(str(random_image_path), cv2.IMREAD_COLOR)
         if image is not None:
             # Convert BGR to RGB
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -289,11 +309,32 @@ def find_model_path(model_name=None):
         print(f"No TFLite model found in: {latest_dir_path}")
         return None
 
+def test_model_with_known_image(predictor, input_channels):
+    """Test the model with a simple known pattern to verify it's working"""
+    print("\n🧪 TESTING WITH KNOWN PATTERN")
+    
+    # Create a simple test image (white digit on black background)
+    test_image = np.zeros((32, 20), dtype=np.uint8)
+    
+    # Create a simple pattern that should be recognizable as some digit
+    # For example, a vertical line in the middle (could be '1')
+    test_image[5:27, 9:11] = 255
+    
+    print(f"Test image shape: {test_image.shape}, range: [{test_image.min()}, {test_image.max()}]")
+    
+    # Predict
+    prediction, confidence, raw_output = predictor.predict(test_image, debug=True)
+    
+    print(f"Test prediction: {prediction}, confidence: {confidence:.4f}")
+    return prediction, confidence
+
 def main():
     """Simple prediction function"""
     parser = argparse.ArgumentParser(description='Digit Recognition Prediction')
     parser.add_argument('--img', type=str, help='Path to input image for prediction')
     parser.add_argument('--model', type=str, help='Model name to use for prediction')
+    parser.add_argument('--debug', action='store_true', help='Enable debug output')
+    parser.add_argument('--test', action='store_true', help='Test with known pattern first')
     
     args = parser.parse_args()
     
@@ -310,6 +351,10 @@ def main():
     input_channels = input_shape[3]
     print(f"Model expects input with {input_channels} channel(s)")
     
+    # Test with known pattern first if requested
+    if args.test:
+        test_model_with_known_image(predictor, input_channels)
+    
     # Load image
     if args.img:
         image = load_image_from_path(args.img, input_channels)
@@ -322,7 +367,7 @@ def main():
         return
     
     # Perform prediction
-    prediction, confidence, raw_output = predictor.predict(image)
+    prediction, confidence, raw_output = predictor.predict(image, debug=args.debug)
     
     print(f"\n=== PREDICTION RESULT ===")
     print(f"Predicted digit: {prediction}")
