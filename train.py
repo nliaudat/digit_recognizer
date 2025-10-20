@@ -232,11 +232,9 @@ class TFLiteModelManager:
         
         @contextmanager 
         def suppress_output():
-            # Set TensorFlow to maximum logging suppression
-            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # 0=all, 1=info, 2=warnings, 3=errors
+            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
             tf.get_logger().setLevel('ERROR')
             
-            # Redirect all Python output streams to devnull
             with open(os.devnull, 'w') as devnull:
                 old_stdout = sys.stdout
                 old_stderr = sys.stderr
@@ -296,7 +294,7 @@ class TFLiteModelManager:
         return False
 
     def _convert_qat_model(self, model, filename, representative_data=None):
-        """Convert QAT model to TFLite - specialized for QAT requirements"""
+        """Convert QAT model to TFLite with proper representative dataset"""
         try:
             print("🎯 Converting QAT model to TFLite...")
             
@@ -340,7 +338,6 @@ class TFLiteModelManager:
                 converter.representative_dataset = representative_data
             
             # QAT-SPECIFIC CONVERSION SETTINGS
-            # For QAT models, we might need to be more careful about input types
             if params.ESP_DL_QUANTIZE:
                 # ESP-DL: Full INT8 quantization
                 converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
@@ -404,7 +401,10 @@ class TFLiteModelManager:
             # Final fallback: Just save the model without quantization
             print("🔄 Final fallback: Saving without quantization...")
             return self.save_as_tflite(model, filename, quantize=False)
-            
+
+    def _convert_qat_model_fallback(self, model, filename):
+        """Legacy fallback - redirect to enhanced version"""
+        return self._convert_qat_model_fallback_enhanced(model, filename)
             
     def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
         """Save model as TFLite with proper QAT handling"""
@@ -414,10 +414,8 @@ class TFLiteModelManager:
                 _ = model(dummy_input)
             
             if quantize and self._is_qat_model(model):
-                # print("🎯 Converting QAT model to quantized TFLite...")
                 return self._convert_qat_model(model, filename, representative_data)
             
-            # print(f"🔧 Converting {filename} to TFLite...")
             return self.save_as_tflite_savedmodel(model, filename, quantize, representative_data)
             
         except Exception as e:
@@ -440,7 +438,6 @@ class TFLiteModelManager:
                     if representative_data is not None:
                         converter.representative_dataset = representative_data
                     else:
-                        # Create default representative dataset if none provided
                         def default_representative_dataset():
                             for _ in range(params.QUANTIZE_NUM_SAMPLES):
                                 data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
@@ -452,7 +449,7 @@ class TFLiteModelManager:
                         converter.inference_input_type = tf.int8
                         converter.inference_output_type = tf.int8
                     else:
-                        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+                        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                         converter.inference_input_type = tf.uint8
                         converter.inference_output_type = tf.uint8
                 
