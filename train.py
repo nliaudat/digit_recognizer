@@ -1,9 +1,4 @@
 # train.py
-# Must be done BEFORE importing TensorFlow
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # 0=all, 1=info, 2=warning, 3=error
-os.environ["TF_CPP_MAX_VLOG_LEVEL"] = "0"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # optional, reduces extra startup logs
-
 import tensorflow as tf
 import numpy as np
 import os
@@ -917,6 +912,12 @@ def train_model(debug=False):
         params.USE_QAT = corrected_params['USE_QAT']
         params.ESP_DL_QUANTIZE = corrected_params['ESP_DL_QUANTIZE']
         print(f"✅ Corrected parameters applied")
+        
+    # Check training/inference alignment
+    alignment_ok = check_training_inference_alignment()
+    if not alignment_ok and params.USE_QAT:
+        print("🚨 CRITICAL: QAT training/inference misalignment detected!")
+        print("   This will cause quantization errors!")
     
     print("🎯 TRAINING CONFIGURATION:")
     print("=" * 60)
@@ -1101,6 +1102,12 @@ def train_model(debug=False):
     except Exception as e:
         print(f"❌ Model verification failed: {e}")
         raise
+        
+    # QAT data flow validation
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        qat_flow_ok, qat_msg = validate_qat_data_flow(model, x_train[:1])
+        if not qat_flow_ok:
+            print(f"❌ {qat_msg}")    
     
     # Setup training components
     tflite_manager = TFLiteModelManager(training_dir, debug)
@@ -1737,99 +1744,72 @@ def train_specific_models(models_to_train, debug=False):
     return results
     
     
-# def create_augmentation_pipeline():
-    # """Complete augmentation pipeline with all available options"""
-    # augmentation_layers = []
+def validate_qat_data_flow(model, x_train_sample, debug=False):
+    """
+    Validate that QAT data flow is consistent between training and inference
+    """
+    if not params.USE_QAT or not params.QUANTIZE_MODEL:
+        return True, "QAT not enabled"
     
-    # if not params.USE_DATA_AUGMENTATION:
-        # return tf.keras.Sequential([tf.keras.layers.Lambda(lambda x: x)])
+    print("\n🔍 VALIDATING QAT DATA FLOW")
+    print("=" * 50)
     
-    # # Geometric transformations
-    # if params.AUGMENTATION_ROTATION_RANGE > 0:
-        # rotation_factor = params.AUGMENTATION_ROTATION_RANGE / 360.0
-        # augmentation_layers.append(
-            # tf.keras.layers.RandomRotation(
-                # factor=rotation_factor,
-                # fill_mode='nearest',
-                # interpolation='bilinear',
-                # name='random_rotation'
-            # )
-        # )
+    # Get a sample batch for testing
+    sample_batch = x_train_sample[:1]
     
-    # if params.AUGMENTATION_WIDTH_SHIFT_RANGE > 0 or params.AUGMENTATION_HEIGHT_SHIFT_RANGE > 0:
-        # augmentation_layers.append(
-            # tf.keras.layers.RandomTranslation(
-                # height_factor=params.AUGMENTATION_HEIGHT_SHIFT_RANGE,
-                # width_factor=params.AUGMENTATION_WIDTH_SHIFT_RANGE,
-                # fill_mode='nearest',
-                # interpolation='bilinear',
-                # name='random_translation'
-            # )
-        # )
+    print(f"Sample batch - dtype: {sample_batch.dtype}, range: [{sample_batch.min():.3f}, {sample_batch.max():.3f}]")
     
-    # if params.AUGMENTATION_ZOOM_RANGE > 0:
-        # augmentation_layers.append(
-            # tf.keras.layers.RandomZoom(
-                # height_factor=params.AUGMENTATION_ZOOM_RANGE,
-                # width_factor=params.AUGMENTATION_ZOOM_RANGE,
-                # fill_mode='nearest',
-                # interpolation='bilinear',
-                # name='random_zoom'
-            # )
-        # )
-    
-    # # Flips
-    # if params.AUGMENTATION_HORIZONTAL_FLIP:
-        # augmentation_layers.append(
-            # tf.keras.layers.RandomFlip(
-                # mode='horizontal',
-                # name='random_horizontal_flip'
-            # )
-        # )
-    
-    # if params.AUGMENTATION_VERTICAL_FLIP:
-        # augmentation_layers.append(
-            # tf.keras.layers.RandomFlip(
-                # mode='vertical',
-                # name='random_vertical_flip'
-            # )
-        # )
-    
-    # # Color transformations
-    # if params.AUGMENTATION_BRIGHTNESS_RANGE != [1.0, 1.0]:
-        # min_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[0] - 1.0
-        # max_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[1] - 1.0
-        # augmentation_layers.append(
-            # tf.keras.layers.RandomBrightness(
-                # factor=(min_delta, max_delta),
-                # value_range=(0, 1),
-                # name='random_brightness'
-            # )
-        # )
-    
-    # # Contrast (add AUGMENTATION_CONTRAST_RANGE to parameters.py)
-    # contrast_factor = getattr(params, 'AUGMENTATION_CONTRAST_RANGE', 0.1)
-    # if contrast_factor > 0:
-        # augmentation_layers.append(
-            # tf.keras.layers.RandomContrast(
-                # factor=contrast_factor,
-                # name='random_contrast'
-            # )
-        # )
-    
-    # # For RGB images - saturation and hue
-    # if not params.USE_GRAYSCALE:
-        # saturation_range = getattr(params, 'AUGMENTATION_SATURATION_RANGE', [0.9, 1.1])
-        # if saturation_range != [1.0, 1.0]:
-            # # Note: RandomSaturation is not available in core Keras, would need custom layer
-            # pass
+    # Test model forward pass
+    try:
+        output = model(sample_batch)
+        print(f"✅ Model forward pass successful")
+        print(f"   Output range: [{output.numpy().min():.3f}, {output.numpy().max():.3f}]")
         
-        # hue_range = getattr(params, 'AUGMENTATION_HUE_RANGE', 0.1)
-        # if hue_range > 0:
-            # # Note: RandomHue is not available in core Keras, would need custom layer
-            # pass
+        # Check for quantization layers
+        quant_layers = [layer for layer in model.layers if any(quant_term in layer.name for quant_term in ['quant', 'qat'])]
+        print(f"   Quantization layers found: {len(quant_layers)}")
+        
+        return True, "QAT data flow validated"
+        
+    except Exception as e:
+        print(f"❌ Model forward pass failed: {e}")
+        return False, f"QAT data flow failed: {e}"
+
+def check_training_inference_alignment():
+    """
+    Check if training and inference preprocessing are aligned
+    """
+    print("\n🔍 CHECKING TRAINING/INFERENCE ALIGNMENT")
+    print("=" * 50)
     
-    # return tf.keras.Sequential(augmentation_layers, name='augmentation_pipeline')
+    from utils.preprocess import get_qat_training_format, preprocess_images
+    
+    # Get expected formats
+    train_dtype, train_min, train_max, train_desc = get_qat_training_format()
+    
+    # Test with sample data
+    test_data = np.random.randint(0, 255, (5, 28, 28, 1), dtype=np.uint8)
+    
+    # Process for training and inference
+    train_processed = preprocess_images(test_data, for_training=True)
+    infer_processed = preprocess_images(test_data, for_training=False)
+    
+    print(f"Expected training format: {train_desc}")
+    print(f"Actual training:   {train_processed.dtype} [{train_processed.min():.1f}, {train_processed.max():.1f}]")
+    print(f"Actual inference:  {infer_processed.dtype} [{infer_processed.min():.1f}, {infer_processed.max():.1f}]")
+    
+    # Check alignment
+    aligned = (train_processed.dtype == infer_processed.dtype and 
+               abs(train_processed.min() - infer_processed.min()) < 1e-6 and
+               abs(train_processed.max() - infer_processed.max()) < 1e-6)
+    
+    if aligned:
+        print("✅ TRAINING/INFERENCE ALIGNMENT: PERFECT")
+        return True
+    else:
+        print("❌ TRAINING/INFERENCE ALIGNMENT: MISMATCH")
+        print("   Training and inference are using different data formats!")
+        return False
 
 def main():
     """Main entry point"""
