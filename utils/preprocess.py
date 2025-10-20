@@ -20,14 +20,14 @@ def validate_quantization_combination():
     else:
         if params.USE_QAT:
             if params.ESP_DL_QUANTIZE:
-                message = "✅ QAT + INT8 quantization for ESP-DL [0, 255]"
+                message = "✅ QAT + INT8 quantization for ESP-DL [0, 1] to INT8"
             else:
-                message = "✅ QAT + UINT8 quantization [0, 255]"
+                message = "✅ QAT + UINT8 quantization [0, 1] to UINT8"
         else:
             if params.ESP_DL_QUANTIZE:
-                message = "✅ Standard training + INT8 post-quantization (ESP-DL) [0, 255]"
+                message = "✅ Standard training + INT8 post-quantization (ESP-DL) [0, 255] to INT8"
             else:
-                message = "✅ Standard training + UINT8 post-quantization [0, 255]"
+                message = "✅ Standard training + UINT8 post-quantization [0, 255] to UINT8"
     
     return valid, message
 
@@ -37,10 +37,9 @@ def get_qat_training_format():
     Returns: (dtype, range_min, range_max, description)
     """
     if params.USE_QAT and params.QUANTIZE_MODEL:
-        if params.ESP_DL_QUANTIZE:
-            return np.uint8, 0, 255, "UINT8 [0, 255] (ESP-DL QAT)"
-        else:
-            return np.uint8, 0, 255, "UINT8 [0, 255] (Standard QAT)"
+        # QAT models typically expect float32 inputs [0, 1] during training
+        # The quantization is simulated internally via fake quantization nodes
+        return np.float32, 0.0, 1.0, "Float32 [0, 1] (QAT Training)"
     else:
         return np.float32, 0.0, 1.0, "Float32 [0, 1] (Standard)"
 
@@ -68,45 +67,40 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
     Preprocessing Behavior:
     
     for_training=True (Training Mode):
-        - QAT Training: UINT8 [0, 255] for both standard and ESP-DL QAT
+        - QAT Training: Float32 [0, 1] (models expect normalized inputs)
         - Non-QAT Training: Float32 [0, 1] for stable training
-        - Ensures consistent training across all configurations
+        - QAT internally simulates quantization via fake quantization nodes
     
     for_training=False (Inference Mode):
         Returns format based on quantization target:
         
-        - ESP-DL Quantization (QUANTIZE_MODEL=True, ESP_DL_QUANTIZE=True):
-          Format: uint8 [0, 255]
-          Used for: ESP-DL microcontroller deployment with INT8 quantization
-        
-        - Standard Quantization (QUANTIZE_MODEL=True, ESP_DL_QUANTIZE=False):
-          Format: uint8 [0, 255] 
-          Used for: Standard TFLite UINT8 quantization
-        
-        - No Quantization (QUANTIZE_MODEL=False):
-          Format: float32 [0, 1]
-          Used for: Float32 TFLite models or direct inference
+        - QAT Models: Float32 [0, 1] (same as training - CRITICAL)
+        - ESP-DL Quantization: UINT8 [0, 255] 
+        - Standard Quantization: UINT8 [0, 255]
+        - No Quantization: Float32 [0, 1]
     
     Examples:
-        >>> # Training data preprocessing
+        >>> # QAT training data preprocessing
         >>> x_train = preprocess_images(x_train_raw, for_training=True)
-        >>> print(f"Training range: [{x_train.min():.3f}, {x_train.max():.3f}]")
-        Training range: [0.000, 255.000]  # For QAT
+        >>> print(f"QAT Training range: [{x_train.min():.3f}, {x_train.max():.3f}]")
+        QAT Training range: [0.000, 1.000]
         
-        >>> # Inference data preprocessing for ESP-DL
+        >>> # QAT inference data preprocessing  
         >>> x_infer = preprocess_images(x_test_raw, for_training=False)
-        >>> print(f"ESP-DL range: [{x_infer.min()}, {x_infer.max()}]")
-        ESP-DL range: [0, 255]
+        >>> print(f"QAT Inference range: [{x_infer.min():.3f}, {x_infer.max():.3f}]")
+        QAT Inference range: [0.000, 1.000]
         
         >>> # Representative dataset for quantization
         >>> rep_data = preprocess_images(calib_data, for_training=False)
     
     Notes:
+        - QAT models expect float32 inputs during training AND inference
+        - Actual quantization happens during TFLite conversion
+        - Fake quantization nodes simulate quantization during training
         - Prevents double preprocessing by using consistent logic
         - Maintains compatibility with QAT (Quantization Aware Training)
         - Handles both grayscale and RGB input formats
         - Automatically resizes images to target dimensions
-        - CRITICAL: QAT training now uses same format as inference (UINT8)
     """
     if target_size is None:
         target_size = (params.INPUT_WIDTH, params.INPUT_HEIGHT)
@@ -134,38 +128,36 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
     # Convert to numpy array first
     processed_images = np.array(processed_images)
     
-    # CRITICAL FIX: Consistent data types for QAT training and inference
+    # CRITICAL FIX: QAT models expect float32 [0, 1] inputs during training AND inference
     if for_training:
-        # TRAINING DATA - Format depends on QAT settings
+        # TRAINING DATA - Always use float32 [0, 1] for training stability
+        if processed_images.dtype != np.float32:
+            processed_images = processed_images.astype(np.float32)
+        if processed_images.max() > 1.0:
+            processed_images = processed_images / 255.0
+        
         if params.USE_QAT and params.QUANTIZE_MODEL:
-            # QAT training: Use the same format as inference (UINT8)
-            if params.ESP_DL_QUANTIZE:
-                # ESP-DL QAT: UINT8 [0, 255]
-                if processed_images.dtype != np.uint8:
-                    if processed_images.max() <= 1.0:
-                        processed_images = (processed_images * 255).astype(np.uint8)
-                    else:
-                        processed_images = processed_images.astype(np.uint8)
-                quantization_info = "UINT8 [0, 255] (QAT ESP-DL Training)"
-            else:
-                # Standard QAT: UINT8 [0, 255] 
-                if processed_images.dtype != np.uint8:
-                    if processed_images.max() <= 1.0:
-                        processed_images = (processed_images * 255).astype(np.uint8)
-                    else:
-                        processed_images = processed_images.astype(np.uint8)
-                quantization_info = "UINT8 [0, 255] (QAT Training)"
+            quantization_info = "Float32 [0, 1] (QAT Training)"
         else:
-            # Non-QAT training: Float32 [0, 1] for stability
+            quantization_info = "Float32 [0, 1] (Standard Training)"
+        
+    else:
+        # INFERENCE DATA - Format depends on model type and quantization target
+        if params.USE_QAT and params.QUANTIZE_MODEL:
+            # QAT MODELS: Always use float32 [0, 1] for inference
+            # The model contains fake quantization nodes and expects normalized inputs
             if processed_images.dtype != np.float32:
                 processed_images = processed_images.astype(np.float32)
             if processed_images.max() > 1.0:
                 processed_images = processed_images / 255.0
-            quantization_info = "Float32 [0, 1] (Standard Training)"
-        
-    else:
-        # INFERENCE DATA - Format depends on quantization target
-        if params.QUANTIZE_MODEL:
+            
+            if params.ESP_DL_QUANTIZE:
+                quantization_info = "Float32 [0, 1] (QAT to ESP-DL INT8)"
+            else:
+                quantization_info = "Float32 [0, 1] (QAT to UINT8)"
+                
+        elif params.QUANTIZE_MODEL:
+            # Non-QAT quantization: Use UINT8 [0, 255] for post-training quantization
             if params.ESP_DL_QUANTIZE:
                 # ESP-DL INT8 quantization: Use UINT8 [0, 255]
                 if processed_images.dtype != np.uint8:
@@ -246,7 +238,11 @@ def validate_data_type_consistency():
     train_dtype, train_min, train_max, train_desc = get_qat_training_format()
     
     # Determine inference format
-    if params.QUANTIZE_MODEL:
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        # QAT inference uses the same format as training (float32 [0, 1])
+        infer_dtype, infer_min, infer_max = np.float32, 0.0, 1.0
+        infer_desc = "Float32 [0, 1] (QAT Inference)"
+    elif params.QUANTIZE_MODEL:
         if params.ESP_DL_QUANTIZE:
             infer_dtype, infer_min, infer_max = np.uint8, 0, 255
             infer_desc = "UINT8 [0, 255] (ESP-DL)"
@@ -291,11 +287,16 @@ def validate_data_type_consistency():
     if train_ok and infer_ok and consistency_ok:
         print("\n✅ DATA TYPE CONSISTENCY: PERFECT")
         print("   Training and inference formats are identical")
-        print("   QAT fake quantization will match deployment quantization")
+        if params.USE_QAT:
+            print("   QAT fake quantization will match deployment quantization")
+    elif params.USE_QAT and params.QUANTIZE_MODEL and consistency_ok:
+        print("\n✅ DATA TYPE CONSISTENCY: QAT-OPTIMAL")
+        print("   QAT training and inference using identical float32 format")
+        print("   Fake quantization will accurately simulate deployment")
     elif train_ok and infer_ok:
         print("\n⚠️  DATA TYPE CONSISTENCY: ACCEPTABLE")
         print("   Individual formats are correct but training ≠ inference")
-        print("   This may cause QAT quantization mismatches")
+        print("   This is expected for non-QAT quantization scenarios")
     else:
         print("\n❌ DATA TYPE CONSISTENCY: FAILED")
         if not train_ok:
@@ -307,19 +308,19 @@ def validate_data_type_consistency():
     if params.USE_QAT and params.QUANTIZE_MODEL:
         print(f"\n🎯 QAT DATA FLOW VALIDATION:")
         if consistency_ok:
-            print("   ✅ QAT training and inference using identical data format")
+            print("   ✅ QAT training and inference using identical float32 format")
             print("   ✅ Fake quantization will accurately simulate deployment")
+            print("   ✅ Model expects float32 inputs during training and inference")
         else:
             print("   ⚠️  QAT training and inference using different formats")
-            print("   ⚠️  Fake quantization may not match deployment quantization")
-            print("   ⚠️  This can cause accuracy degradation after conversion")
+            print("   ⚠️  This will cause input type mismatches during inference")
     
     return train_ok and infer_ok
 
 def diagnose_qat_data_flow():
     """
     Comprehensive diagnosis of QAT data flow issues
-    Specifically checks for the UINT8 training vs float32 inference mismatch
+    Specifically checks for input type compatibility
     """
     print("\n🔍 QAT DATA FLOW DIAGNOSIS")
     print("=" * 50)
@@ -332,31 +333,25 @@ def diagnose_qat_data_flow():
         issues.append("QAT enabled but QUANTIZE_MODEL=False")
         recommendations.append("Set QUANTIZE_MODEL=True to apply quantization benefits")
     
-    # Check data type consistency between training and inference
-    train_dtype, _, _, train_desc = get_qat_training_format()
-    if params.QUANTIZE_MODEL:
-        infer_dtype = np.uint8  # Both standard and ESP-DL use UINT8 for inference
-    else:
-        infer_dtype = np.float32
-    
-    if params.USE_QAT and params.QUANTIZE_MODEL and train_dtype != infer_dtype:
-        issues.append(f"QAT training ({train_dtype}) ≠ inference ({infer_dtype})")
-        recommendations.append("Ensure training and inference use same UINT8 data type")
-    
     # Test actual preprocessing consistency
     test_images = np.random.randint(0, 255, (2, 28, 28, 1), dtype=np.uint8)
     train_data = preprocess_images(test_images, for_training=True)
     infer_data = preprocess_images(test_images, for_training=False)
     
-    if train_data.dtype != infer_data.dtype:
-        issues.append(f"Preprocessing inconsistency: train={train_data.dtype}, infer={infer_data.dtype}")
-        recommendations.append("Fix preprocess_images() to use consistent data types for QAT")
-    
-    # Check for the specific UINT8 training vs float32 inference issue
-    if (params.USE_QAT and params.QUANTIZE_MODEL and 
-        train_data.dtype == np.uint8 and infer_data.dtype == np.float32):
-        issues.append("CRITICAL: QAT trained with UINT8 but inference uses Float32")
-        recommendations.append("Update inference preprocessing to use UINT8 [0, 255]")
+    # Check for QAT input type requirements
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        if train_data.dtype != np.float32:
+            issues.append(f"QAT training expects float32 but got {train_data.dtype}")
+            recommendations.append("QAT training must use float32 [0, 1] inputs")
+        
+        if infer_data.dtype != np.float32:
+            issues.append(f"QAT inference expects float32 but got {infer_data.dtype}")
+            recommendations.append("QAT inference must use float32 [0, 1] inputs")
+        
+        # Check range
+        if train_data.max() > 1.0 or train_data.min() < 0.0:
+            issues.append(f"QAT training data out of range: [{train_data.min():.3f}, {train_data.max():.3f}]")
+            recommendations.append("QAT inputs must be normalized to [0, 1] range")
     
     # Print comprehensive diagnosis results
     if issues:
@@ -368,15 +363,16 @@ def diagnose_qat_data_flow():
             print(f"   - {rec}")
         
         # Provide specific guidance for common issues
-        if "CRITICAL: QAT trained with UINT8 but inference uses Float32" in issues:
+        if "QAT inference expects float32" in str(issues):
             print("\n🚨 CRITICAL FIX REQUIRED:")
-            print("   QAT models must be trained and inferenced with identical data formats.")
-            print("   Current fix: Training uses UINT8 [0,255], inference should also use UINT8 [0,255]")
-            print("   This ensures fake quantization during training matches real quantization during inference")
+            print("   QAT models expect float32 [0, 1] inputs during inference.")
+            print("   The error 'Got value of type UINT8 but expected type FLOAT32'")
+            print("   indicates the model is receiving UINT8 instead of FLOAT32.")
+            print("   Solution: Use float32 [0, 1] for QAT model inference.")
     else:
         print("✅ No QAT data flow issues detected")
         print("   QAT training and inference are properly aligned")
-        print("   Fake quantization will accurately simulate deployment behavior")
+        print("   Model will receive float32 [0, 1] inputs as expected")
     
     return len(issues) == 0
 
@@ -418,8 +414,8 @@ def validate_preprocessing_consistency():
     
     # Determine expected ranges based on configuration
     if params.USE_QAT and params.QUANTIZE_MODEL:
-        expected_train_range = "[0, 255]"
-        expected_infer_range = "[0, 255]"
+        expected_train_range = "[0, 1]"
+        expected_infer_range = "[0, 1]"
     elif params.QUANTIZE_MODEL and params.ESP_DL_QUANTIZE:
         expected_train_range = "[0, 1]"
         expected_infer_range = "[0, 255]"
@@ -445,9 +441,9 @@ def validate_preprocessing_consistency():
         if params.USE_QAT:
             print("💡 QAT Configuration Validated:")
             if params.QUANTIZE_MODEL:
-                print("   - Using deployment-compatible preprocessing")
-                print("   - Fake quantization will accurately simulate deployment")
-                print("   - Model should quantize well to TFLite with minimal accuracy loss")
+                print("   - Using float32 [0, 1] inputs for training and inference")
+                print("   - Fake quantization nodes simulate quantization internally")
+                print("   - Model expects normalized inputs during deployment")
             else:
                 print("   ⚠️  QAT enabled but QUANTIZE_MODEL=False")
                 print("   💡 Quantization won't be applied to final model")
@@ -464,33 +460,30 @@ def validate_preprocessing_consistency():
 def get_preprocessing_info():
     """
     Get current preprocessing configuration including QAT status
-    Updated with corrected data type information
+    Updated with corrected QAT input requirements
     """
-    # Determine current mode with corrected data types
+    # Determine current mode with corrected QAT data types
     if not params.QUANTIZE_MODEL:
         if params.USE_QAT:
             mode = "QAT Training (No quantization applied)"
-            if params.ESP_DL_QUANTIZE:
-                normalization = "UINT8 [0,255] (simulating ESP-DL)"
-            else:
-                normalization = "UINT8 [0,255] (simulating UINT8)"
+            normalization = "Float32 [0,1] (QAT expects normalized inputs)"
         else:
             mode = "Float32 Training"
             normalization = "Float32 [0,1]"
     else:
         if params.USE_QAT:
             if params.ESP_DL_QUANTIZE:
-                mode = "QAT + INT8 ESP-DL Quantization"
-                normalization = "Training: UINT8 [0,255], Inference: UINT8 [0,255]"
+                mode = "QAT + INT8 quantization"
+                normalization = "Training: Float32 [0,1], Inference: Float32 [0,1]"
             else:
-                mode = "QAT + UINT8 Quantization" 
-                normalization = "Training: UINT8 [0,255], Inference: UINT8 [0,255]"
+                mode = "QAT + UINT8 quantization" 
+                normalization = "Training: Float32 [0,1], Inference: Float32 [0,1]"
         else:
             if params.ESP_DL_QUANTIZE:
-                mode = "Standard Training + INT8 ESP-DL Quantization"
+                mode = "Standard Training + INT8 post-quantization"
                 normalization = "Training: Float32 [0,1], Inference: UINT8 [0,255]"
             else:
-                mode = "Standard Training + UINT8 Quantization"
+                mode = "Standard Training + UINT8 post-quantization"
                 normalization = "Training: Float32 [0,1], Inference: UINT8 [0,255]"
     
     return {
@@ -501,7 +494,7 @@ def get_preprocessing_info():
         'normalization': normalization,
         'input_shape': params.INPUT_SHAPE,
         'recommendation': 'QAT compatible' if params.USE_QAT else 'Standard training',
-        'data_type_consistency': '✅ Perfect' if (not params.USE_QAT or (params.USE_QAT and params.QUANTIZE_MODEL)) else '⚠️ Check'
+        'data_type_consistency': '✅ QAT Optimal' if (params.USE_QAT and params.QUANTIZE_MODEL) else '✅ Standard'
     }
 
 def predict_single_image(image):
@@ -510,6 +503,25 @@ def predict_single_image(image):
     Uses the same preprocessing as training for consistency
     """
     return preprocess_images([image], for_training=False)[0]
+
+def get_model_input_requirements():
+    """
+    Get the input requirements for the current model configuration
+    Helps diagnose input type mismatches
+    """
+    requirements = {
+        'qat_float32': "QAT models expect float32 [0, 1] inputs during training AND inference",
+        'qat_conversion': "QAT models are converted to quantized TFLite but still expect float32",
+        'non_qat_quantized': "Non-QAT quantized models expect uint8 [0, 255] inputs",
+        'float_models': "Float models expect float32 [0, 1] inputs"
+    }
+    
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        return requirements['qat_float32']
+    elif params.QUANTIZE_MODEL:
+        return requirements['non_qat_quantized']
+    else:
+        return requirements['float_models']
 
 def test_all_preprocessing_combinations():
     """
@@ -625,7 +637,7 @@ def check_qat_compatibility(qat_available):
     if params.USE_QAT and params.QUANTIZE_MODEL:
         train_dtype, _, _, _ = get_qat_training_format()
         if params.QUANTIZE_MODEL:
-            infer_dtype = np.uint8
+            infer_dtype = np.float32  # QAT inference also uses float32
         else:
             infer_dtype = np.float32
             
@@ -648,6 +660,7 @@ def check_qat_compatibility(qat_available):
             # Check data type consistency
             train_dtype, _, _, train_desc = get_qat_training_format()
             info.append(f"✅ Training format: {train_desc}")
+            info.append(f"✅ Inference format: Float32 [0, 1] (QAT models expect normalized inputs)")
         else:
             info.append("⚠️  Post-training quantization disabled - QAT benefits may not be realized")
     
@@ -677,10 +690,12 @@ def diagnose_quantization_settings():
     
     # Enhanced configuration analysis with data type info
     if params.USE_QAT and params.ESP_DL_QUANTIZE:
-        print("✅ QAT + ESP-DL: Training for INT8 quantization with UINT8 [0,255]")
+        print("✅ QAT + ESP-DL: Training for INT8 quantization with Float32 [0,1]")
+        print("   Model expects Float32 inputs, converts to INT8 during TFLite conversion")
     
     elif params.USE_QAT and not params.ESP_DL_QUANTIZE:
-        print("✅ QAT only: Training for UINT8 quantization with UINT8 [0,255]")
+        print("✅ QAT only: Training for UINT8 quantization with Float32 [0,1]")
+        print("   Model expects Float32 inputs, converts to UINT8 during TFLite conversion")
     
     elif not params.USE_QAT and params.ESP_DL_QUANTIZE:
         print("✅ ESP-DL only: Standard training + INT8 post-quantization")
@@ -708,7 +723,7 @@ def diagnose_quantization_settings():
     return len(issues) == 0
     
 def debug_preprocessing_flow():
-    """Debug function to trace preprocessing flow and detect double processing"""
+    """Debug function to trace preprocessing flow and detect input type issues"""
     print("\n🔍 DEBUG: Tracing Preprocessing Flow")
     print("=" * 50)
     
@@ -719,45 +734,29 @@ def debug_preprocessing_flow():
     
     # Simulate preprocessing
     test_processed = preprocess_images(test_images_raw, for_training=True)
-    print(f"After preprocessing: [{test_processed.min():.3f}, {test_processed.max():.3f}]")
-    print(f"After preprocessing dtype: {test_processed.dtype}")
+    print(f"Training preprocessing: [{test_processed.min():.3f}, {test_processed.max():.3f}]")
+    print(f"Training dtype: {test_processed.dtype}")
     
-    # Check if this matches expected range
-    expected_range = ""
-    if params.QUANTIZE_MODEL and params.ESP_DL_QUANTIZE:
-        expected_range = "UINT8 [0, 255]"
-        if test_processed.dtype == np.uint8 and test_processed.max() > 1.0:
-            print("✅ Preprocessing correct for ESP-DL quantization")
-        else:
-            print("❌ Preprocessing incorrect for ESP-DL quantization")
-    elif params.QUANTIZE_MODEL:
-        expected_range = "UINT8 [0, 255]"
-        if test_processed.dtype == np.uint8 and test_processed.max() > 1.0:
-            print("✅ Preprocessing correct for standard quantization")
-        else:
-            print("❌ Preprocessing incorrect for standard quantization")
-    else:
-        expected_range = "Float32 [0, 1]"
-        if test_processed.dtype == np.float32 and test_processed.max() <= 1.0:
-            print("✅ Preprocessing correct for float32 training")
-        else:
-            print("❌ Preprocessing incorrect for float32 training")
+    # Check inference preprocessing
+    infer_processed = preprocess_images(test_images_raw, for_training=False)
+    print(f"Inference preprocessing: [{infer_processed.min():.3f}, {infer_processed.max():.3f}]")
+    print(f"Inference dtype: {infer_processed.dtype}")
     
-    print(f"Expected range: {expected_range}")
+    # Get model requirements
+    requirements = get_model_input_requirements()
+    print(f"\n🎯 Model Input Requirements: {requirements}")
     
-    # Additional check for double preprocessing
-    if test_processed.max() < 0.1 and test_processed.dtype == np.float32:
-        print("🚨 WARNING: Possible double preprocessing detected!")
-        print("   Data range suggests over-normalization (should be [0, 1], not [0, ~0.0039])")
-    
-    # Check training/inference consistency for QAT
+    # Check QAT-specific requirements
     if params.USE_QAT and params.QUANTIZE_MODEL:
-        infer_processed = preprocess_images(test_images_raw, for_training=False)
-        if test_processed.dtype == infer_processed.dtype:
-            print("✅ QAT consistency: Training and inference use same data type")
+        if infer_processed.dtype == np.float32:
+            print("✅ QAT Input Compatibility: CORRECT")
+            print("   Model will receive float32 inputs as expected")
+            print("   This will prevent 'UINT8 but expected FLOAT32' errors")
         else:
-            print("❌ QAT inconsistency: Training and inference use different data types")
-            print(f"   Training: {test_processed.dtype}, Inference: {infer_processed.dtype}")
+            print("❌ QAT Input Compatibility: ERROR")
+            print(f"   Model expects float32 but will receive {infer_processed.dtype}")
+            print("   This will cause: 'Got value of type UINT8 but expected type FLOAT32'")
+            print("   SOLUTION: QAT models must receive float32 [0, 1] inputs")
     
     return test_processed
 
@@ -770,6 +769,13 @@ if __name__ == "__main__":
     print(f"\n📋 CURRENT PREPROCESSING CONFIGURATION:")
     for key, value in info.items():
         print(f"   {key}: {value}")
+    
+    # Show model input requirements
+    requirements = get_model_input_requirements()
+    print(f"\n🎯 MODEL INPUT REQUIREMENTS: {requirements}")
+    
+    # Run debug flow to check for input type issues
+    debug_preprocessing_flow()
     
     # Optionally test all combinations
     import argparse
