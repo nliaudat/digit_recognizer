@@ -1,4 +1,9 @@
 # train.py
+# Must be done BEFORE importing TensorFlow
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # 0=all, 1=info, 2=warning, 3=error
+os.environ["TF_CPP_MAX_VLOG_LEVEL"] = "0"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # optional, reduces extra startup logs
+
 import tensorflow as tf
 import numpy as np
 import os
