@@ -31,6 +31,7 @@ from tuner import run_architecture_tuning
 from parameters import get_hyperparameter_summary_text, validate_quantization_parameters
 import parameters as params
 from utils.logging import log_print
+from utils.multi_source_loader import clear_cache
 
 # import tensorflow_model_optimization as tfmot
 
@@ -239,23 +240,73 @@ class TFLiteModelManager:
         import sys
         from contextlib import contextmanager
         
-        @contextmanager 
-        def suppress_output():
+        @contextmanager
+        def suppress_tflite_output():
+            # Maximum TensorFlow log suppression
             os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-            tf.get_logger().setLevel('ERROR')
             
-            with open(os.devnull, 'w') as devnull:
-                old_stdout = sys.stdout
-                old_stderr = sys.stderr
-                sys.stdout = devnull
-                sys.stderr = devnull
+            # Suppress TensorFlow Python logs
+            tf_logger = tf.get_logger()
+            original_tf_level = tf_logger.level
+            tf_logger.setLevel('ERROR')
+            
+            # Suppress absl logging
+            try:
+                import absl.logging
+                original_absl_level = absl.logging.get_verbosity()
+                absl.logging.set_verbosity(absl.logging.ERROR)
+            except ImportError:
+                pass
+            
+            # Redirect stdout/stderr
+            original_stdout = sys.stdout
+            original_stderr = sys.stderr
+            
+            try:
+                # For Windows compatibility
+                with open(os.devnull, 'w') as fnull:
+                    sys.stdout = fnull
+                    sys.stderr = fnull
+                    
+                    # Also suppress C-level output
+                    try:
+                        # This handles the low-level C++ output that bypasses Python redirection
+                        original_stdout_fd = os.dup(1)
+                        original_stderr_fd = os.dup(2)
+                        
+                        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+                        os.dup2(devnull_fd, 1)
+                        os.dup2(devnull_fd, 2)
+                        os.close(devnull_fd)
+                    except (OSError, AttributeError):
+                        # Fallback if fd manipulation fails
+                        pass
+                    
+                    try:
+                        yield
+                    finally:
+                        # Restore stdout/stderr
+                        sys.stdout = original_stdout
+                        sys.stderr = original_stderr
+                        
+                        # Restore file descriptors
+                        try:
+                            os.dup2(original_stdout_fd, 1)
+                            os.dup2(original_stderr_fd, 2)
+                            os.close(original_stdout_fd)
+                            os.close(original_stderr_fd)
+                        except (OSError, NameError):
+                            pass
+            finally:
+                # Restore logging levels
+                tf_logger.setLevel(original_tf_level)
                 try:
-                    yield
-                finally:
-                    sys.stdout = old_stdout
-                    sys.stderr = old_stderr
+                    import absl.logging
+                    absl.logging.set_verbosity(original_absl_level)
+                except ImportError:
+                    pass
         
-        return suppress_output()
+        return suppress_tflite_output()
  
     def verify_model_for_conversion(self, model):
         """Verify model is compatible with TFLite conversion"""
@@ -2123,3 +2174,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    clear_cache()
