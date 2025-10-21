@@ -1,10 +1,18 @@
+import argparse
 # train.py
 import tensorflow as tf
 import numpy as np
 import os
 import matplotlib.pyplot as plt
 from datetime import datetime
-import argparse
+import os
+# Suppress TensorFlow C++ backend logs (INFO/WARNING) only if not in debug mode
+import sys
+def suppress_tf_logs_if_needed():
+    # Check for --debug in sys.argv before importing TensorFlow
+    if '--debug' not in sys.argv:
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+suppress_tf_logs_if_needed()
 import sys
 from tqdm.auto import tqdm
 import logging
@@ -232,11 +240,9 @@ class TFLiteModelManager:
         
         @contextmanager 
         def suppress_output():
-            # Set TensorFlow to maximum logging suppression
-            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # 0=all, 1=info, 2=warnings, 3=errors
+            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
             tf.get_logger().setLevel('ERROR')
             
-            # Redirect all Python output streams to devnull
             with open(os.devnull, 'w') as devnull:
                 old_stdout = sys.stdout
                 old_stderr = sys.stderr
@@ -295,60 +301,112 @@ class TFLiteModelManager:
                 return True
         return False
 
+
     def _convert_qat_model(self, model, filename, representative_data=None):
         """Convert QAT model to TFLite with proper representative dataset"""
         try:
+            if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                print("🎯 Converting QAT model to TFLite...")
+
             converter = tf.lite.TFLiteConverter.from_keras_model(model)
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
-            
-            # CRITICAL: Provide representative dataset for full integer quantization
+
+            # QAT MODELS: Use representative dataset that matches training data flow
             if representative_data is None:
-                # Create a simple representative dataset from the model input shape
-                def default_representative_dataset():
-                    for _ in range(params.QUANTIZE_NUM_SAMPLES):
-                        data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
-                        yield [data]
-                converter.representative_dataset = default_representative_dataset
+                def qat_representative_dataset():
+                    from utils import get_data_splits, preprocess_images
+                    (x_train_raw, y_train_raw), _, _ = get_data_splits()
+                    calibration_data = x_train_raw[:params.QUANTIZE_NUM_SAMPLES]
+                    calibration_processed = preprocess_images(calibration_data, for_training=False)
+                    if calibration_processed.dtype != np.float32:
+                        if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                            print(f"🔄 Converting calibration data from {calibration_processed.dtype} to float32")
+                        calibration_processed = calibration_processed.astype(np.float32)
+                        if calibration_processed.max() > 1.0:
+                            calibration_processed = calibration_processed / 255.0
+                    if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                        print(f"🔧 QAT Calibration: {len(calibration_processed)} samples, "
+                              f"dtype: {calibration_processed.dtype}, "
+                              f"range: [{calibration_processed.min():.3f}, {calibration_processed.max():.3f}]")
+                    if calibration_processed.dtype != np.float32:
+                        raise ValueError(f"QAT calibration data must be float32, got {calibration_processed.dtype}")
+                    for i in range(len(calibration_processed)):
+                        yield [calibration_processed[i:i+1]]
+                converter.representative_dataset = qat_representative_dataset
             else:
                 converter.representative_dataset = representative_data
-            
+
+            # QAT-SPECIFIC CONVERSION SETTINGS
             if params.ESP_DL_QUANTIZE:
                 converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                 converter.inference_input_type = tf.int8
                 converter.inference_output_type = tf.int8
+                if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                    print("🔧 QAT → ESP-DL INT8 quantization")
             else:
-                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                 converter.inference_input_type = tf.uint8
                 converter.inference_output_type = tf.uint8
-            
-            # COMPLETE output suppression during conversion
-            with self._completely_suppress_output():
+                if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                    print("🔧 QAT → Standard UINT8 quantization")
+
+            # Suppress output during conversion based on debug/verbose flag
+            if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                 tflite_model = converter.convert()
-            
+                print("🔧 TFLite conversion completed with debug output")
+            else:
+                with self._completely_suppress_output():
+                    tflite_model = converter.convert()
+            if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                print(f"✅ QAT conversion successful")
             return self._save_tflite_file(tflite_model, filename, True)
             
         except Exception as e:
-            print(f"QAT conversion failed: {e}")
-            # Fallback: try without full integer quantization
-            return self._convert_qat_model_fallback(model, filename)
+            print(f"❌ QAT conversion failed: {e}")
             
-    def _convert_qat_model_fallback(self, model, filename):
-        """Fallback conversion for QAT model without full integer quantization"""
+            # Enhanced fallback with better error reporting
+            print("🔄 Attempting QAT fallback conversion...")
+            return self._convert_qat_model_fallback_enhanced(model, filename)
+            
+    def _convert_qat_model_fallback_enhanced(self, model, filename):
+        """Enhanced fallback conversion for QAT model with better debugging"""
         try:
-            print("🔄 Trying fallback QAT conversion (dynamic range quantization)...")
+            if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                print("🔄 Trying enhanced QAT fallback conversion...")
+                print("🔍 Diagnosing QAT conversion issue...")
+            test_input = tf.random.normal([1] + list(params.INPUT_SHAPE), dtype=tf.float32)
+            try:
+                test_output = model(test_input)
+                if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                    print(f"✅ Model accepts float32 inputs: output shape {test_output.shape}")
+            except Exception as e:
+                if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                    print(f"❌ Model input test failed: {e}")
+            if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                print("🔧 Strategy 1: Dynamic range quantization...")
             converter = tf.lite.TFLiteConverter.from_keras_model(model)
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
-            # Don't set representative dataset - use dynamic range quantization
-            
-            with suppress_all_output(self.debug):
+            if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                 tflite_model = converter.convert()
-            
+            else:
+                with self._completely_suppress_output():
+                    tflite_model = converter.convert()
+            if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                print("✅ Dynamic range quantization successful")
             return self._save_tflite_file(tflite_model, filename, True)
-            
+                
         except Exception as e:
-            print(f"❌ Fallback QAT conversion failed: {e}")
-            raise          
+            print(f"❌ Enhanced QAT fallback failed: {e}")
             
+            # Final fallback: Just save the model without quantization
+            print("🔄 Final fallback: Saving without quantization...")
+            return self.save_as_tflite(model, filename, quantize=False)
+            
+
+
+    def _convert_qat_model_fallback(self, model, filename):
+        """Legacy fallback - redirect to enhanced version"""
+        return self._convert_qat_model_fallback_enhanced(model, filename)
             
     def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
         """Save model as TFLite with proper QAT handling"""
@@ -358,10 +416,8 @@ class TFLiteModelManager:
                 _ = model(dummy_input)
             
             if quantize and self._is_qat_model(model):
-                # print("🎯 Converting QAT model to quantized TFLite...")
                 return self._convert_qat_model(model, filename, representative_data)
             
-            # print(f"🔧 Converting {filename} to TFLite...")
             return self.save_as_tflite_savedmodel(model, filename, quantize, representative_data)
             
         except Exception as e:
@@ -384,7 +440,6 @@ class TFLiteModelManager:
                     if representative_data is not None:
                         converter.representative_dataset = representative_data
                     else:
-                        # Create default representative dataset if none provided
                         def default_representative_dataset():
                             for _ in range(params.QUANTIZE_NUM_SAMPLES):
                                 data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
@@ -396,7 +451,7 @@ class TFLiteModelManager:
                         converter.inference_input_type = tf.int8
                         converter.inference_output_type = tf.int8
                     else:
-                        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+                        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                         converter.inference_input_type = tf.uint8
                         converter.inference_output_type = tf.uint8
                 
@@ -786,14 +841,20 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     return callbacks
 
 def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    """Create representative dataset that preserves the correct data type"""
+    """Create representative dataset that preserves the correct data type for QAT"""
     def representative_dataset():
         # Use the sophisticated preprocess_images with for_training=False
         x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
         
+        # FOR QAT: Always convert to float32
+        if x_calibration.dtype != np.float32:
+            x_calibration = x_calibration.astype(np.float32)
+        
+        print(f"QAT Representative: {x_calibration.dtype}, "
+              f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
+        
         for i in range(len(x_calibration)):
-            # ✅ DON'T convert to float32 - preserve the data type from preprocess_images
-            yield [x_calibration[i:i+1]]  # Keep original dtype (UINT8 for ESP-DL, float32 for others)
+            yield [x_calibration[i:i+1]]  # Keep as float32 for QAT
     
     return representative_dataset
     

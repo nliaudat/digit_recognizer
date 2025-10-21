@@ -34,7 +34,7 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v6",
 ]
 
-MODEL_ARCHITECTURE = "original_haverland" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
@@ -80,10 +80,10 @@ DATA_SOURCES = [
         # 'weight': 0.3,
     # },
     # {
-        # 'name': 'meterdigits_10',
-        # 'type': 'folder_structure',
-        # 'path': 'datasets/meterdigits_10',
-        # 'weight': 1.0,
+    #     'name': 'meterdigits_10',
+    #     'type': 'folder_structure',
+    #     'path': 'datasets/meterdigits_10',
+    #     'weight': 1.0,
     # },
     # {
         # 'name': 'meterdigits_10_augmented',
@@ -330,7 +330,7 @@ TENSORBOARD_WRITE_GRAPHS = True
 # DATA AUGMENTATION HYPERPARAMETERS
 # ==============================================================================
 
-USE_DATA_AUGMENTATION = True
+USE_DATA_AUGMENTATION = False
 AUGMENTATION_ROTATION_RANGE = 10
 AUGMENTATION_WIDTH_SHIFT_RANGE = 0.1
 AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.1
