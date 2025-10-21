@@ -1,23 +1,38 @@
-import argparse
 # train.py
+import parameters as params
+if getattr(params, "VERBOSE", 1) < 2:
+    import os
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    import tensorflow as tf
+    tf.get_logger().setLevel('ERROR')
+import argparse
+from utils.augmentation_pipeline import build_augmentation_pipeline
+
+
 import tensorflow as tf
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+from utils.tflite_manager import TFLiteModelManager
+from utils.training_monitor import TrainingMonitor, TFLiteCheckpoint, TQDMProgressBar
+from utils.training_summary import print_training_summary, save_training_config, save_training_csv
+from utils.preprocess import get_qat_training_format, preprocess_images, debug_preprocessing_flow, diagnose_quantization_settings
+from utils import get_data_splits, preprocess_images
+from utils.multi_source_loader import clear_cache
+from utils.qat_utils import validate_quantization_combination, validate_preprocessing_consistency, check_qat_compatibility, validate_quantization_parameters, create_qat_representative_dataset
+from utils.validation_checks import validate_qat_data_flow, check_training_inference_alignment
+from utils.data_pipeline import create_tf_dataset_from_arrays
 from datetime import datetime
+from analyse import evaluate_tflite_model, analyze_quantization_impact, training_diagnostics, verify_model_predictions, debug_model_architecture
+from tuner import run_architecture_tuning
+from parameters import get_hyperparameter_summary_text, validate_quantization_parameters
+from utils.logging import log_print
 import os
-# Suppress TensorFlow C++ backend logs (INFO/WARNING) only if not in debug mode
-import sys
-def suppress_tf_logs_if_needed():
-    # Check for --debug in sys.argv before importing TensorFlow
-    if '--debug' not in sys.argv:
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-suppress_tf_logs_if_needed()
-import sys
 from tqdm.auto import tqdm
 import logging
 from contextlib import contextmanager
 from models import create_model, compile_model, model_summary
+<<<<<<< Updated upstream
 # from models.model_factory import print_hyperparameter_summary
 from utils import get_data_splits, preprocess_images
 # from utils.preprocess import *
@@ -30,16 +45,19 @@ from analyse import evaluate_tflite_model, analyze_quantization_impact, training
 from tuner import run_architecture_tuning
 from parameters import get_hyperparameter_summary_text, validate_quantization_parameters
 import parameters as params
+=======
+from utils.tf_logging import setup_tensorflow_logging
+from utils.seed_utils import set_all_seeds
+from utils.logging import log_print
+>>>>>>> Stashed changes
 
-# import tensorflow_model_optimization as tfmot
-
-# QAT imports
 try:
     import tensorflow_model_optimization as tfmot
     QAT_AVAILABLE = True
 except ImportError:
     print("⚠️  tensorflow-model-optimization not available. Install with: pip install tensorflow-model-optimization")
     QAT_AVAILABLE = False
+<<<<<<< Updated upstream
     tfmot = None 
     
 # try:
@@ -732,6 +750,9 @@ class TQDMProgressBar(tf.keras.callbacks.Callback):
             self.pbar.close()
 ### end class TQDMProgressBa           
             
+=======
+         
+>>>>>>> Stashed changes
 def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False):
     """Create training callbacks with robust CSV logging"""
     
@@ -840,23 +861,6 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     
     return callbacks
 
-def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    """Create representative dataset that preserves the correct data type for QAT"""
-    def representative_dataset():
-        # Use the sophisticated preprocess_images with for_training=False
-        x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
-        
-        # FOR QAT: Always convert to float32
-        if x_calibration.dtype != np.float32:
-            x_calibration = x_calibration.astype(np.float32)
-        
-        print(f"QAT Representative: {x_calibration.dtype}, "
-              f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
-        
-        for i in range(len(x_calibration)):
-            yield [x_calibration[i:i+1]]  # Keep as float32 for QAT
-    
-    return representative_dataset
     
 def setup_gpu():
     """Comprehensive GPU configuration"""
@@ -917,43 +921,7 @@ def setup_gpu():
         print("   Falling back to CPU")
         return None
    
-def print_training_summary(model, x_train, x_val, x_test, debug=False):
-    """Print comprehensive training summary"""
-    print("\n" + "="*60)
-    print("TRAINING SUMMARY")
-    print("="*60)
-    
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    print(f"Hardware:")
-    print(f"  GPU: {'Available' if gpus else 'Not available'}")
-    print(f"  GPU Usage: {'Enabled' if params.USE_GPU else 'Disabled'}")
-    if gpus and params.USE_GPU:
-        print(f"  GPU Count: {len(gpus)}")
-        for i, gpu in enumerate(gpus):
-            print(f"    GPU {i}: {gpu.name}")
-    
-    print(f"\nModel Architecture:")
-    print(f"  Model: {params.MODEL_ARCHITECTURE}")
-    print(f"  Input shape: {params.INPUT_SHAPE}")
-    print(f"  Classes: {params.NB_CLASSES}")
-    print(f"  Total parameters: {model.count_params():,}")
-    
-    print(f"\nDataset Information:")
-    print(f"  Training samples: {len(x_train):,}")
-    print(f"  Validation samples: {len(x_val):,}")
-    print(f"  Test samples: {len(x_test):,}")
-    print(f"  Data sources: {len(params.DATA_SOURCES)}")
-    
-    print(f"\nTraining Configuration:")
-    print(f"  Batch size: {params.BATCH_SIZE}")
-    print(f"  Epochs: {params.EPOCHS}")
-    print(f"  Learning rate: {params.LEARNING_RATE}")
-    print(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}")
-    print(f"  Quantization: {'Enabled' if params.QUANTIZE_MODEL else 'Disabled'}")
-    print(f"  QAT: {'Enabled' if params.USE_QAT else 'Disabled'}")
-    print(f"  ESP-DL Quantization: {params.ESP_DL_QUANTIZE}")
-    print(f"  Debug mode: {'Enabled' if debug else 'Disabled'}")
-    
+
 
 def train_model(debug=False):
     """Main training function with comprehensive handling of all 9 quantization cases"""
@@ -961,43 +929,43 @@ def train_model(debug=False):
     set_all_seeds(params.SHUFFLE_SEED)
     
     # VALIDATE AND CORRECT QUANTIZATION PARAMETERS FIRST
-    print("🎯 VALIDATING QUANTIZATION PARAMETERS...")
+    log_print("🎯 VALIDATING QUANTIZATION PARAMETERS...", level=1)
     is_valid, corrected_params, message = validate_quantization_parameters()
     
-    print(message)
+    log_print(message, level=1)
     
     # Apply corrections if needed
     if not is_valid:
-        print("🔄 Applying parameter corrections...")
+        log_print("🔄 Applying parameter corrections...", level=1)
         params.QUANTIZE_MODEL = corrected_params['QUANTIZE_MODEL']
         params.USE_QAT = corrected_params['USE_QAT']
         params.ESP_DL_QUANTIZE = corrected_params['ESP_DL_QUANTIZE']
-        print(f"✅ Corrected parameters applied")
+        log_print(f"✅ Corrected parameters applied", level=1)
         
     # Check training/inference alignment
     alignment_ok = check_training_inference_alignment()
     if not alignment_ok and params.USE_QAT:
-        print("🚨 CRITICAL: QAT training/inference misalignment detected!")
-        print("   This will cause quantization errors!")
+        log_print("🚨 CRITICAL: QAT training/inference misalignment detected!", level=0)
+        log_print("   This will cause quantization errors!", level=0)
     
-    print("🎯 TRAINING CONFIGURATION:")
-    print("=" * 60)
-    print(f"   MODEL_ARCHITECTURE: {params.MODEL_ARCHITECTURE}")
-    print(f"   QUANTIZE_MODEL: {params.QUANTIZE_MODEL}")
-    print(f"   USE_QAT: {params.USE_QAT}")
-    print(f"   ESP_DL_QUANTIZE: {params.ESP_DL_QUANTIZE}")
+    log_print("🎯 TRAINING CONFIGURATION:", level=1)
+    log_print("=" * 60, level=1)
+    log_print(f"   MODEL_ARCHITECTURE: {params.MODEL_ARCHITECTURE}", level=1)
+    log_print(f"   QUANTIZE_MODEL: {params.QUANTIZE_MODEL}", level=1)
+    log_print(f"   USE_QAT: {params.USE_QAT}", level=1)
+    log_print(f"   ESP_DL_QUANTIZE: {params.ESP_DL_QUANTIZE}", level=1)
     
     # Validate quantization combination first
     is_valid, msg = validate_quantization_combination()
     if not is_valid:
-        print(f"❌ {msg}")
-        print("💡 Fix the quantization parameters in parameters.py")
+        log_print(f"❌ {msg}", level=0)
+        log_print("💡 Fix the quantization parameters in parameters.py", level=0)
         return None, None, None
     
-    print(f"✅ {msg}")
+    log_print(f"✅ {msg}", level=1)
     
     # Setup hardware
-    print("🔧 Configuring hardware...")
+    log_print("🔧 Configuring hardware...", level=1)
     strategy = setup_gpu()
     
     # Create output directory
@@ -1015,7 +983,7 @@ def train_model(debug=False):
         f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls{quantization_mode}_{color_mode}_{datetime.now().strftime('%m%d_%H%M')}"
     )
     os.makedirs(training_dir, exist_ok=True)
-    print(f"📁 Output directory: {training_dir}")
+    log_print(f"📁 Output directory: {training_dir}", level=1)
     
     # QAT Compatibility Check
     if params.USE_QAT:
@@ -1027,96 +995,8 @@ def train_model(debug=False):
                 print(f"   - {error}")
             print("🔄 Disabling QAT...")
             params.USE_QAT = False
-            # Re-validate after disabling QAT
-            is_valid, msg = validate_quantization_combination()
-            print(f"🔄 New configuration: {msg}")
-        else:
-            # Show warnings but don't disable QAT
-            if qat_warnings:
-                print("⚠️  QAT Warnings:")
-                for warning in qat_warnings:
-                    print(f"   - {warning}")
-            
-            # Show info messages
-            if qat_info:
-                print("💡 QAT Info:")
-                for info_msg in qat_info:
-                    print(f"   - {info_msg}")
-    
-    # Validate preprocessing consistency
-    if not validate_preprocessing_consistency():
-        print("❌ Preprocessing validation failed!")
-        return None, None, None
-    
-    # LOAD AND PREPROCESS DATA
-    print("\n📊 Loading dataset from multiple sources...")
-    (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
-    
-    print("🔄 Preprocessing images...")
-    x_train = preprocess_images(x_train_raw, for_training=True)
-    x_val = preprocess_images(x_val_raw, for_training=True)  
-    x_test = preprocess_images(x_test_raw, for_training=True)
-    
-    print(f"✅ Preprocessing complete:")
-    print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
-    print(f"   Val range: [{x_val.min():.3f}, {x_val.max():.3f}]")
-    print(f"   Shapes - Train: {x_train.shape}, Val: {x_val.shape}")
-    
-    # Handle labels based on model type
-    if params.MODEL_ARCHITECTURE == "original_haverland":
-        # Haverland model needs categorical labels (one-hot encoded)
-        y_train_final = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
-        y_val_final = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES) 
-        y_test_final = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)
-        loss_type = 'categorical_crossentropy'
-        print(f"✅ Using categorical labels (one-hot) for Haverland model")
-    else:
-        # Other models use sparse categorical labels (integer labels)
-        y_train_final = y_train_raw.copy()
-        y_val_final = y_val_raw.copy()
-        y_test_final = y_test_raw.copy()
-        loss_type = 'sparse_categorical_crossentropy'
-        print(f"✅ Using sparse categorical labels for {params.MODEL_ARCHITECTURE}")
-    
-    print(f"   Loss function: {loss_type}")
-    print(f"   y_train shape: {y_train_final.shape}")
-    
-    # VERIFY DATA BEFORE TRAINING
-    print("\n🔍 Verifying data consistency...")
-    sample_image = x_train[0]
-    print(f"   Sample image - Range: [{sample_image.min():.3f}, {sample_image.max():.3f}], Shape: {sample_image.shape}")
 
-    # Check for double preprocessing
-    if sample_image.max() <= 0.1:
-        print("❌ WARNING: Data appears to be over-normalized! Check for double preprocessing.")
-        print("   This might indicate double preprocessing. Data should be in appropriate range:")
-        if params.QUANTIZE_MODEL and params.ESP_DL_QUANTIZE:
-            print("   Expected: UINT8 [0, 255] for ESP-DL quantization")
-        elif params.QUANTIZE_MODEL:
-            print("   Expected: Float32 [0, 1] for standard quantization")  
-        else:
-            print("   Expected: Float32 [0, 1] for float32 training")
-
-    print(f"✅ Data verification:")
-    print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
-    print(f"   Mean: {x_train.mean():.3f}, Std: {x_train.std():.3f}")
-
-    if x_train.std() < 0.01:
-        print("❌ WARNING: Data has very low variance - might be over-normalized!")
-        
-    print(f"✅ Data verification:")
-    print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
-    print(f"   Mean: {x_train.mean():.3f}, Std: {x_train.std():.3f}")
-    
-    if x_train.std() < 0.01:
-        print("❌ WARNING: Data has very low variance - might be over-normalized!")
-    
-    # Create representative dataset for quantization
-    representative_data = create_qat_representative_dataset(x_train_raw) ## This should use for_training=False internally
-    
-    # MODEL CREATION WITH QUANTIZATION AWARENESS
-    use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
-    
+    use_qat = params.USE_QAT
     print(f"\n🔧 Creating model...")
     print(f"   Using QAT: {use_qat}")
     print(f"   Strategy: {'Multi-GPU' if strategy else 'Single device'}")
@@ -1125,12 +1005,19 @@ def train_model(debug=False):
         print("🎯 Creating model with Quantization Aware Training...")
         if strategy:
             with strategy.scope():
-                model = create_qat_model()
-                loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'                                                                                            
+                model = create_model()
+                # Apply QAT if available and required for the architecture
+                if hasattr(params, 'MODEL_ARCHITECTURE') and params.MODEL_ARCHITECTURE == "mnist_quantization":
+                    from models.mnist_quantization import apply_qat_to_mnist
+                    model = apply_qat_to_mnist(model)
+                loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'
                 model = compile_model(model, loss_type=loss_type)
         else:
-            model = create_qat_model()
-            loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'                                                                                            
+            model = create_model()
+            if hasattr(params, 'MODEL_ARCHITECTURE') and params.MODEL_ARCHITECTURE == "mnist_quantization":
+                from models.mnist_quantization import apply_qat_to_mnist
+                model = apply_qat_to_mnist(model)
+            loss_type = 'categorical' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse'
             model = compile_model(model, loss_type=loss_type)
     else:
         print("🔧 Creating standard model...")
@@ -1520,118 +1407,6 @@ def train_model(debug=False):
     return model, history, training_dir
     
 
-def save_training_config(training_dir, quantized_size, float_size, tflite_manager, 
-                        test_accuracy, tflite_accuracy, training_time, debug=False):
-    """Save training configuration and results to file with enhanced parameters"""
-    config_path = os.path.join(training_dir, "training_config.txt")
-    
-    with open(config_path, 'w') as f:
-        f.write("Digit Recognition Training Configuration\n")
-        f.write("=" * 50 + "\n\n")
-        
-        f.write("FINAL RESULTS:\n")
-        f.write(f"  Keras Model Test Accuracy: {test_accuracy:.4f}\n")
-        f.write(f"  TFLite Model Test Accuracy: {tflite_accuracy:.4f}\n")
-        f.write(f"  Best Validation Accuracy: {tflite_manager.best_accuracy:.4f}\n")
-        f.write(f"  Quantized Model Size: {quantized_size:.1f} KB\n")
-        f.write(f"  Float Model Size: {float_size:.1f} KB\n")
-        f.write(f"  Training Time: {training_time}\n\n")
-        
-        f.write("MODEL OUTPUT:\n")
-        f.write(f"  Quantized TFLite: {quantized_size:.1f} KB\n")
-        f.write(f"  Float TFLite: {float_size:.1f} KB\n")
-        f.write(f"  Best accuracy: {tflite_manager.best_accuracy:.4f}\n\n")
-        
-        f.write("DATA SOURCES:\n")
-        for i, source in enumerate(params.DATA_SOURCES):
-            f.write(f"  {i+1}. {source['name']} ({source['type']}) - weight: {source.get('weight', 1.0)}\n")
-        
-        f.write(f"\nMODEL ARCHITECTURE:\n")
-        f.write(f"  Model: {params.MODEL_ARCHITECTURE}\n")
-        f.write(f"  Input shape: [{params.INPUT_SHAPE}]\n")
-        f.write(f"  Classes: {params.NB_CLASSES}\n")
-        
-        f.write(f"\nTRAINING CONFIG:\n")
-        f.write(f"  Batch size: {params.BATCH_SIZE}\n")
-        f.write(f"  Epochs: {params.EPOCHS}\n")
-        f.write(f"  Learning rate: {params.LEARNING_RATE}\n")
-        f.write(f"  Early stopping: {'Enabled' if params.USE_EARLY_STOPPING else 'Disabled'}\n")
-        if params.USE_EARLY_STOPPING:
-            f.write(f"    Monitor: {params.EARLY_STOPPING_MONITOR}\n")
-            f.write(f"    Patience: {params.EARLY_STOPPING_PATIENCE}\n")
-            f.write(f"    Min delta: {params.EARLY_STOPPING_MIN_DELTA}\n")
-        
-        f.write(f"  Learning rate scheduler:\n")
-        f.write(f"    Monitor: {params.LR_SCHEDULER_MONITOR}\n")
-        f.write(f"    Patience: {params.LR_SCHEDULER_PATIENCE}\n")
-        f.write(f"    Factor: {params.LR_SCHEDULER_FACTOR}\n")
-        f.write(f"    Min LR: {params.LR_SCHEDULER_MIN_LR}\n")
-        
-        f.write(f"  Quantization: {params.QUANTIZE_MODEL}\n")
-        if params.QUANTIZE_MODEL:
-            f.write(f"    ESP-DL Quantization: {params.ESP_DL_QUANTIZE}\n")
-            f.write(f"    Num samples: {params.QUANTIZE_NUM_SAMPLES}\n")
-        
-        f.write(f"  Debug mode: {'Enabled' if debug else 'Disabled'}\n")
-        
-        f.write(f"\nHARDWARE CONFIG:\n")
-        f.write(f"  GPU Usage: {'Enabled' if params.USE_GPU else 'Disabled'}\n")
-        if params.USE_GPU:
-            f.write(f"  Memory growth: {params.GPU_MEMORY_GROWTH}\n")
-            f.write(f"  Memory limit: {params.GPU_MEMORY_LIMIT} MB\n")
-        
-        # Add hyperparameter summary
-        try:
-            from parameters import get_hyperparameter_summary_text
-            hyperparam_text = get_hyperparameter_summary_text()
-            f.write(hyperparam_text)
-            f.write("\n\n" + "=" * 50 + "\n\n")
-        except ImportError:
-            print("⚠️  Could not import hyperparameter summary function")
-            
-        f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-    
-    # Also save as CSV for benchmarking
-    save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
-                     test_accuracy, tflite_accuracy, training_time)
-
-def save_training_csv(training_dir, quantized_size, float_size, tflite_manager,
-                     test_accuracy, tflite_accuracy, training_time):
-    """Save training results to CSV for benchmarking"""
-    csv_path = os.path.join(training_dir, "training_results.csv")
-    
-    # Extract data source information
-    data_sources_str = ";".join([f"{src['name']}({src.get('weight', 1.0)})" 
-                               for src in params.DATA_SOURCES])
-    
-    with open(csv_path, 'w') as f:
-        f.write("parameter,value\n")
-        f.write(f"timestamp,{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"model_architecture,{params.MODEL_ARCHITECTURE}\n")
-        f.write(f"input_shape,{params.INPUT_SHAPE}\n")
-        f.write(f"nb_classes,{params.NB_CLASSES}\n")
-        f.write(f"data_sources,{data_sources_str}\n")
-        f.write(f"batch_size,{params.BATCH_SIZE}\n")
-        f.write(f"epochs,{params.EPOCHS}\n")
-        f.write(f"learning_rate,{params.LEARNING_RATE}\n")
-        f.write(f"use_early_stopping,{params.USE_EARLY_STOPPING}\n")
-        f.write(f"early_stopping_monitor,{params.EARLY_STOPPING_MONITOR}\n")
-        f.write(f"early_stopping_patience,{params.EARLY_STOPPING_PATIENCE}\n")
-        f.write(f"lr_scheduler_monitor,{params.LR_SCHEDULER_MONITOR}\n")
-        f.write(f"lr_scheduler_patience,{params.LR_SCHEDULER_PATIENCE}\n")
-        f.write(f"lr_scheduler_factor,{params.LR_SCHEDULER_FACTOR}\n")
-        f.write(f"QUANTIZE_MODEL,{params.QUANTIZE_MODEL}\n")
-        f.write(f"esp_dl_quantize,{params.ESP_DL_QUANTIZE}\n")
-        f.write(f"quantize_num_samples,{params.QUANTIZE_NUM_SAMPLES}\n")
-        f.write(f"use_gpu,{params.USE_GPU}\n")
-        f.write(f"keras_test_accuracy,{test_accuracy:.4f}\n")
-        f.write(f"tflite_test_accuracy,{tflite_accuracy:.4f}\n")
-        f.write(f"best_val_accuracy,{tflite_manager.best_accuracy:.4f}\n")
-        f.write(f"quantized_model_size_kb,{quantized_size:.1f}\n")
-        f.write(f"float_model_size_kb,{float_size:.1f}\n")
-        f.write(f"training_time,{training_time}\n")
-        f.write(f"optimizer,{params.OPTIMIZER_TYPE}\n")
-        #f.write(f"model_parameters,{model.count_params()}\n")
 
 def test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, models_to_test=None, debug=False):
     """Test all available model architectures or specific models"""
@@ -1874,6 +1649,7 @@ def check_training_inference_alignment():
 
 def main():
     """Main entry point"""
+    from utils.cli import parse_arguments
     args = parse_arguments()
     tflite_checkpoint_callback = None  # Store reference to the callback
     
@@ -2122,3 +1898,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    clear_cache()

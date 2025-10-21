@@ -13,13 +13,13 @@ from pathlib import Path
 import cv2
 import glob
 import re
+from utils.training_summary import print_training_summary
 
 # Import your existing modules
 from train import (
     set_all_seeds, setup_tensorflow_logging, 
     suppress_all_output, TFLiteModelManager, TrainingMonitor,
-    create_callbacks, create_representative_dataset, setup_gpu,
-    print_training_summary
+    create_callbacks, create_representative_dataset, setup_gpu
 )
 from utils import get_data_splits, preprocess_images
 import parameters as params
