@@ -3,56 +3,6 @@ import cv2
 import numpy as np
 import tensorflow as tf
 import parameters as params
-import os
-import logging
-import warnings
-from contextlib import contextmanager
-
-# TensorFlow output suppression setup
-def setup_tf_suppression():
-    """Suppress TensorFlow warnings and info messages"""
-    # Set TensorFlow logging level
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # 0=all, 1=info, 2=warnings, 3=errors
-    tf.get_logger().setLevel('ERROR')
-    
-    # Suppress Python warnings
-    warnings.filterwarnings('ignore', category=UserWarning, module='tensorflow')
-    warnings.filterwarnings('ignore', category=FutureWarning, module='tensorflow')
-    warnings.filterwarnings('ignore', category=DeprecationWarning, module='tensorflow')
-    
-    # Suppress absl logging
-    try:
-        import absl.logging
-        absl.logging.set_verbosity(absl.logging.ERROR)
-    except ImportError:
-        pass
-
-# Apply suppression on import
-setup_tf_suppression()
-
-@contextmanager
-def suppress_tf_output():
-    """
-    Context manager to completely suppress TensorFlow output during operations
-    Useful for TFLite conversion and model loading
-    """
-    # Save original state
-    original_tf_log_level = os.environ.get('TF_CPP_MIN_LOG_LEVEL', '0')
-    original_verbose = tf.get_logger().level
-    
-    # Maximum suppression
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Only errors
-    tf.get_logger().setLevel('ERROR')
-    
-    # Also suppress Python warnings
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        try:
-            yield
-        finally:
-            # Restore original state
-            os.environ['TF_CPP_MIN_LOG_LEVEL'] = original_tf_log_level
-            tf.get_logger().setLevel(original_verbose)
 
 def validate_quantization_combination():
     """Validate quantization parameters with CORRECTED data type handling"""
