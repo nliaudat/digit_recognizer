@@ -30,6 +30,8 @@ from analyse import evaluate_tflite_model, analyze_quantization_impact, training
 from tuner import run_architecture_tuning
 from parameters import get_hyperparameter_summary_text, validate_quantization_parameters
 import parameters as params
+from utils.logging import log_print
+from utils.multi_source_loader import clear_cache
 
 # import tensorflow_model_optimization as tfmot
 
@@ -38,7 +40,7 @@ try:
     import tensorflow_model_optimization as tfmot
     QAT_AVAILABLE = True
 except ImportError:
-    print("⚠️  tensorflow-model-optimization not available. Install with: pip install tensorflow-model-optimization")
+    log_print("⚠️  tensorflow-model-optimization not available. Install with: pip install tensorflow-model-optimization", level=1)
     QAT_AVAILABLE = False
     tfmot = None 
     
@@ -238,23 +240,73 @@ class TFLiteModelManager:
         import sys
         from contextlib import contextmanager
         
-        @contextmanager 
-        def suppress_output():
+        @contextmanager
+        def suppress_tflite_output():
+            # Maximum TensorFlow log suppression
             os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-            tf.get_logger().setLevel('ERROR')
             
-            with open(os.devnull, 'w') as devnull:
-                old_stdout = sys.stdout
-                old_stderr = sys.stderr
-                sys.stdout = devnull
-                sys.stderr = devnull
+            # Suppress TensorFlow Python logs
+            tf_logger = tf.get_logger()
+            original_tf_level = tf_logger.level
+            tf_logger.setLevel('ERROR')
+            
+            # Suppress absl logging
+            try:
+                import absl.logging
+                original_absl_level = absl.logging.get_verbosity()
+                absl.logging.set_verbosity(absl.logging.ERROR)
+            except ImportError:
+                pass
+            
+            # Redirect stdout/stderr
+            original_stdout = sys.stdout
+            original_stderr = sys.stderr
+            
+            try:
+                # For Windows compatibility
+                with open(os.devnull, 'w') as fnull:
+                    sys.stdout = fnull
+                    sys.stderr = fnull
+                    
+                    # Also suppress C-level output
+                    try:
+                        # This handles the low-level C++ output that bypasses Python redirection
+                        original_stdout_fd = os.dup(1)
+                        original_stderr_fd = os.dup(2)
+                        
+                        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+                        os.dup2(devnull_fd, 1)
+                        os.dup2(devnull_fd, 2)
+                        os.close(devnull_fd)
+                    except (OSError, AttributeError):
+                        # Fallback if fd manipulation fails
+                        pass
+                    
+                    try:
+                        yield
+                    finally:
+                        # Restore stdout/stderr
+                        sys.stdout = original_stdout
+                        sys.stderr = original_stderr
+                        
+                        # Restore file descriptors
+                        try:
+                            os.dup2(original_stdout_fd, 1)
+                            os.dup2(original_stderr_fd, 2)
+                            os.close(original_stdout_fd)
+                            os.close(original_stderr_fd)
+                        except (OSError, NameError):
+                            pass
+            finally:
+                # Restore logging levels
+                tf_logger.setLevel(original_tf_level)
                 try:
-                    yield
-                finally:
-                    sys.stdout = old_stdout
-                    sys.stderr = old_stderr
+                    import absl.logging
+                    absl.logging.set_verbosity(original_absl_level)
+                except ImportError:
+                    pass
         
-        return suppress_output()
+        return suppress_tflite_output()
  
     def verify_model_for_conversion(self, model):
         """Verify model is compatible with TFLite conversion"""
@@ -306,7 +358,7 @@ class TFLiteModelManager:
         """Convert QAT model to TFLite with proper representative dataset"""
         try:
             if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                print("🎯 Converting QAT model to TFLite...")
+                log_print("🎯 Converting QAT model to TFLite...", level=2)
 
             converter = tf.lite.TFLiteConverter.from_keras_model(model)
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
@@ -342,48 +394,48 @@ class TFLiteModelManager:
                 converter.inference_input_type = tf.int8
                 converter.inference_output_type = tf.int8
                 if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                    print("🔧 QAT → ESP-DL INT8 quantization")
+                    log_print("🔧 QAT → ESP-DL INT8 quantization", level=2)
             else:
                 converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                 converter.inference_input_type = tf.uint8
                 converter.inference_output_type = tf.uint8
                 if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                    print("🔧 QAT → Standard UINT8 quantization")
+                    log_print("🔧 QAT → Standard UINT8 quantization", level=2)
 
             # Suppress output during conversion based on debug/verbose flag
             if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                 tflite_model = converter.convert()
-                print("🔧 TFLite conversion completed with debug output")
+                log_print("🔧 TFLite conversion completed with debug output", level=2)
             else:
                 with self._completely_suppress_output():
                     tflite_model = converter.convert()
             if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                print(f"✅ QAT conversion successful")
+                log_print(f"✅ QAT conversion successful", level=2)
             return self._save_tflite_file(tflite_model, filename, True)
             
         except Exception as e:
-            print(f"❌ QAT conversion failed: {e}")
+            log_print(f"❌ QAT conversion failed: {e}", level=1)
             
             # Enhanced fallback with better error reporting
-            print("🔄 Attempting QAT fallback conversion...")
+            log_print("🔄 Attempting QAT fallback conversion...", level=1)
             return self._convert_qat_model_fallback_enhanced(model, filename)
             
     def _convert_qat_model_fallback_enhanced(self, model, filename):
         """Enhanced fallback conversion for QAT model with better debugging"""
         try:
             if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                print("🔄 Trying enhanced QAT fallback conversion...")
-                print("🔍 Diagnosing QAT conversion issue...")
+                log_print("🔄 Trying enhanced QAT fallback conversion...", level=2)
+                log_print("🔍 Diagnosing QAT conversion issue...", level=2)
             test_input = tf.random.normal([1] + list(params.INPUT_SHAPE), dtype=tf.float32)
             try:
                 test_output = model(test_input)
                 if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                    print(f"✅ Model accepts float32 inputs: output shape {test_output.shape}")
+                    log_print(f"✅ Model accepts float32 inputs: output shape {test_output.shape}", level=2)
             except Exception as e:
                 if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                    print(f"❌ Model input test failed: {e}")
+                    log_print(f"❌ Model input test failed: {e}", level=1)
             if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                print("🔧 Strategy 1: Dynamic range quantization...")
+                log_print("🔧 Strategy 1: Dynamic range quantization...", level=2)
             converter = tf.lite.TFLiteConverter.from_keras_model(model)
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
             if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
@@ -392,14 +444,14 @@ class TFLiteModelManager:
                 with self._completely_suppress_output():
                     tflite_model = converter.convert()
             if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                print("✅ Dynamic range quantization successful")
+                log_print("✅ Dynamic range quantization successful", level=2)
             return self._save_tflite_file(tflite_model, filename, True)
                 
         except Exception as e:
-            print(f"❌ Enhanced QAT fallback failed: {e}")
+            log_print(f"❌ Enhanced QAT fallback failed: {e}", level=1)
             
             # Final fallback: Just save the model without quantization
-            print("🔄 Final fallback: Saving without quantization...")
+            log_print("🔄 Final fallback: Saving without quantization...", level=1)
             return self.save_as_tflite(model, filename, quantize=False)
             
 
@@ -2122,3 +2174,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    clear_cache()
