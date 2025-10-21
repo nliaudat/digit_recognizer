@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from sklearn.model_selection import train_test_split
 import parameters as params
+from utils.logging import log_print
 
 # Global variable to cache loaded data
 _loaded_data = None
@@ -33,7 +34,7 @@ class MultiSourceDataLoader:
             source_path = source_config['path']
             source_weight = source_config.get('weight', 1.0)
             
-            print(f"Loading source: {source_name} (type: {source_type})")
+            log_print(f"Loading source: {source_name} (type: {source_type})", level=2)
             
             if source_type == 'builtin':
                 images, labels = self.load_builtin_dataset(source_name)
@@ -42,11 +43,11 @@ class MultiSourceDataLoader:
             elif source_type == 'label_file':
                 images, labels = self.load_label_file_dataset(source_path)
             else:
-                print(f"Unknown source type: {source_type}, skipping...")
+                log_print(f"Unknown source type: {source_type}, skipping...", level=1)
                 continue
             
             if len(images) == 0:
-                print(f"  No data loaded from {source_name}, skipping...")
+                log_print(f"  No data loaded from {source_name}, skipping...", level=1)
                 continue
             
             # Apply sampling weight (undersample if weight < 1.0)
@@ -55,7 +56,7 @@ class MultiSourceDataLoader:
                 indices = np.random.choice(len(images), sample_size, replace=False)
                 images = images[indices]
                 labels = labels[indices]
-                print(f"  Sampled {sample_size} images (weight: {source_weight})")
+                log_print(f"  Sampled {sample_size} images (weight: {source_weight})", level=2)
             
             # Store source statistics
             self.source_stats[source_name] = {
@@ -67,12 +68,12 @@ class MultiSourceDataLoader:
             self.all_images.append(images)
             self.all_labels.append(labels)
             
-            print(f"  Loaded {len(images)} images")
-            print(f"  Class distribution: {self.source_stats[source_name]['class_distribution']}")
-            print("-" * 30)
+            log_print(f"  Loaded {len(images)} images", level=2)
+            log_print(f"  Class distribution: {self.source_stats[source_name]['class_distribution']}", level=2)
+            log_print("-" * 30, level=2)
         
         if len(self.all_images) == 0:
-            print("No data sources could be loaded.")
+            log_print("No data sources could be loaded.", level=1)
             images, labels = self.load_mnist_fallback()
         else:
             # Combine all sources
@@ -81,12 +82,12 @@ class MultiSourceDataLoader:
         
         # Cache the loaded data
         _loaded_data = (images, labels)
-        print(f"\nCombined dataset:")
-        print(f"  Total images: {len(images)}")
-        print(f"  Sources: {list(self.source_stats.keys())}")
+        log_print(f"\nCombined dataset:", level=2)
+        log_print(f"  Total images: {len(images)}", level=2)
+        log_print(f"  Sources: {list(self.source_stats.keys())}", level=2)
         return images, labels
     
-    # ... keep the rest of the MultiSourceDataLoader methods the same ...
+
     def load_builtin_dataset(self, dataset_name):
         """Load built-in datasets"""
         if dataset_name.lower() == 'mnist':
