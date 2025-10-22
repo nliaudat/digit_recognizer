@@ -32,6 +32,13 @@ from parameters import get_hyperparameter_summary_text, validate_quantization_pa
 import parameters as params
 from utils.logging import log_print
 from utils.multi_source_loader import clear_cache
+from utils.augmentation import (
+    create_augmentation_pipeline, 
+    apply_augmentation_to_dataset, 
+    test_augmentation_pipeline, 
+    print_augmentation_summary,
+    create_augmentation_safety_monitor 
+)
 
 # import tensorflow_model_optimization as tfmot
 
@@ -784,7 +791,7 @@ class TQDMProgressBar(tf.keras.callbacks.Callback):
             self.pbar.close()
 ### end class TQDMProgressBa           
             
-def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False):
+def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False, validation_data=None):
     """Create training callbacks with robust CSV logging"""
     
     callbacks = []
@@ -802,12 +809,21 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
                 monitor=params.EARLY_STOPPING_MONITOR,
                 patience=params.EARLY_STOPPING_PATIENCE,
                 min_delta=params.EARLY_STOPPING_MIN_DELTA,
-                # restore_best_weights=getattr(params, 'RESTORE_BEST_WEIGHTS', True),
                 restore_best_weights=params.RESTORE_BEST_WEIGHTS,
                 mode=mode,
                 verbose=1 if debug else 0
             )
         )
+    
+    # Add Augmentation Safety Monitor if using augmentation and validation data is provided
+    if params.USE_DATA_AUGMENTATION and validation_data is not None:
+        safety_monitor = create_augmentation_safety_monitor(
+            validation_data=validation_data,
+            debug=debug
+        )
+        callbacks.append(safety_monitor)
+        if debug:
+            print("🔒 AugmentationSafetyMonitor callback added")
     
     # Regular checkpoint every epoch
     # callbacks.append(
@@ -1256,19 +1272,35 @@ def train_model(debug=False):
         pipeline_image.numpy().min(), pipeline_image.numpy().max()))
     
     # Create callbacks
-    callbacks = create_callbacks(training_dir, tflite_manager, representative_data, params.EPOCHS, monitor, debug)
-    
+    callbacks = create_callbacks(
+        training_dir, 
+        tflite_manager, 
+        representative_data, 
+        params.EPOCHS, 
+        monitor, 
+        debug, 
+        validation_data=(x_val, y_val_final)
+    )
+        
     print("\n🎯 Starting training...")
     print("-" * 60)
     
     start_time = datetime.now()
     
     # DATA AUGMENTATION PIPELINE
-    if params.USE_DATA_AUGMENTATION:
+    if params.USE_DATA_AUGMENTATION == True:
         print("🔄 Setting up data augmentation pipeline...")
         
-        # Create augmentation pipeline using parameters
+        # Create augmentation pipeline with data type preservation and value clamping
         augmentation_layers = []
+        
+        augmentation_layers.append(
+            tf.keras.layers.Lambda(
+                lambda x: tf.cast(x, tf.float32),
+                name='ensure_float32'
+            )
+        )
+        
         
         # Rotation
         if params.AUGMENTATION_ROTATION_RANGE > 0:
@@ -1276,69 +1308,88 @@ def train_model(debug=False):
             augmentation_layers.append(
                 tf.keras.layers.RandomRotation(
                     factor=rotation_factor,
-                    fill_mode='nearest',
+                    fill_mode='constant',  # Use constant instead of nearest
+                    fill_value=0.0,       # Fill with black (0.0)
                     name='random_rotation'
                 )
             )
-        
+
         # Translation
         if params.AUGMENTATION_WIDTH_SHIFT_RANGE > 0 or params.AUGMENTATION_HEIGHT_SHIFT_RANGE > 0:
             augmentation_layers.append(
                 tf.keras.layers.RandomTranslation(
                     height_factor=params.AUGMENTATION_HEIGHT_SHIFT_RANGE,
                     width_factor=params.AUGMENTATION_WIDTH_SHIFT_RANGE,
-                    fill_mode='nearest',
+                    fill_mode='constant',
+                    fill_value=0.0,
                     name='random_translation'
                 )
             )
-        
+
         # Zoom
         if params.AUGMENTATION_ZOOM_RANGE > 0:
             augmentation_layers.append(
                 tf.keras.layers.RandomZoom(
                     height_factor=params.AUGMENTATION_ZOOM_RANGE,
                     width_factor=params.AUGMENTATION_ZOOM_RANGE,
-                    fill_mode='nearest',
+                    fill_mode='constant',
+                    fill_value=0.0,
                     name='random_zoom'
                 )
             )
-        
-        # Brightness
+
+        # Brightness - WITH SAFE RANGE
         if params.AUGMENTATION_BRIGHTNESS_RANGE != [1.0, 1.0]:
             min_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[0] - 1.0
             max_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[1] - 1.0
             augmentation_layers.append(
                 tf.keras.layers.RandomBrightness(
                     factor=(min_delta, max_delta),
-                    value_range=(0, 1),
+                    value_range=(0, 1),  # Explicitly define expected range
                     name='random_brightness'
                 )
             )
-        
-        # Contrast
-        augmentation_layers.append(
-            tf.keras.layers.RandomContrast(
-                factor=0.1,
-                name='random_contrast'
+
+        # Contrast - WITH VALUE PROTECTION
+        if params.AUGMENTATION_CONTRAST_RANGE > 0:
+            # Add protection before contrast to prevent extreme values
+            augmentation_layers.append(
+                tf.keras.layers.Lambda(
+                    lambda x: tf.clip_by_value(x, 0.1, 0.9),  # Clip before contrast
+                    name='pre_contrast_clip'
+                )
             )
-        )
-        
+            augmentation_layers.append(
+                tf.keras.layers.RandomContrast(
+                    factor=params.AUGMENTATION_CONTRAST_RANGE,
+                    name='random_contrast'
+                )
+            )
+
         # Flips
-        if params.AUGMENTATION_HORIZONTAL_FLIP:
+        if params.AUGMENTATION_HORIZONTAL_FLIP == True:
             augmentation_layers.append(
                 tf.keras.layers.RandomFlip(
                     mode='horizontal',
                     name='random_horizontal_flip'
                 )
             )
-        
-        if params.AUGMENTATION_VERTICAL_FLIP:
+
+        if params.AUGMENTATION_VERTICAL_FLIP == True:
             augmentation_layers.append(
                 tf.keras.layers.RandomFlip(
                     mode='vertical',
                     name='random_vertical_flip'
                 )
             )
+        
+        # 3. FINAL VALUE CLAMPING 
+        augmentation_layers.append(
+            tf.keras.layers.Lambda(
+                lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure valid range
+                name='final_value_clamp'
+            )
+        )
         
         # Create augmentation pipeline
         augmentation_pipeline = tf.keras.Sequential(augmentation_layers, name='augmentation_pipeline')
