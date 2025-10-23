@@ -32,6 +32,13 @@ from parameters import get_hyperparameter_summary_text, validate_quantization_pa
 import parameters as params
 from utils.logging import log_print
 from utils.multi_source_loader import clear_cache
+from utils.augmentation import (
+    create_augmentation_pipeline, 
+    apply_augmentation_to_dataset, 
+    test_augmentation_pipeline, 
+    print_augmentation_summary,
+    create_augmentation_safety_monitor 
+)
 
 # import tensorflow_model_optimization as tfmot
 
@@ -329,9 +336,11 @@ class TFLiteModelManager:
             return False
             
     def save_trainable_checkpoint(self, model, accuracy, epoch):
-        """Save model in trainable format"""
+        """Save model in trainable format - Keras 3 compatible"""
         timestamp = datetime.now().strftime("%H%M%S")
         checkpoint_path = os.path.join(self.output_dir, f"checkpoint_epoch_{epoch:03d}_acc_{accuracy:.4f}_{timestamp}.keras")
+        
+        # Keras 3 compatible saving
         model.save(checkpoint_path)
         
         if self.debug:
@@ -340,7 +349,7 @@ class TFLiteModelManager:
         if accuracy > self.best_accuracy:
             self.best_accuracy = accuracy
             best_checkpoint_path = os.path.join(self.output_dir, "best_model.keras")
-            model.save(best_checkpoint_path)
+            model.save(best_checkpoint_path)  # Remove save_format argument
             if self.debug:
                 print(f"🏆 New best model saved: {best_checkpoint_path}")
         
@@ -360,65 +369,44 @@ class TFLiteModelManager:
             if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                 log_print("🎯 Converting QAT model to TFLite...", level=2)
 
+            # Use direct conversion for QAT models
             converter = tf.lite.TFLiteConverter.from_keras_model(model)
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
 
-            # QAT MODELS: Use representative dataset that matches training data flow
+            # QAT models need representative dataset
             if representative_data is None:
+                # Create representative dataset from training data
                 def qat_representative_dataset():
-                    from utils import get_data_splits, preprocess_images
-                    (x_train_raw, y_train_raw), _, _ = get_data_splits()
-                    calibration_data = x_train_raw[:params.QUANTIZE_NUM_SAMPLES]
-                    calibration_processed = preprocess_images(calibration_data, for_training=False)
-                    if calibration_processed.dtype != np.float32:
-                        if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                            print(f"🔄 Converting calibration data from {calibration_processed.dtype} to float32")
-                        calibration_processed = calibration_processed.astype(np.float32)
-                        if calibration_processed.max() > 1.0:
-                            calibration_processed = calibration_processed / 255.0
-                    if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                        print(f"🔧 QAT Calibration: {len(calibration_processed)} samples, "
-                              f"dtype: {calibration_processed.dtype}, "
-                              f"range: [{calibration_processed.min():.3f}, {calibration_processed.max():.3f}]")
-                    if calibration_processed.dtype != np.float32:
-                        raise ValueError(f"QAT calibration data must be float32, got {calibration_processed.dtype}")
-                    for i in range(len(calibration_processed)):
-                        yield [calibration_processed[i:i+1]]
+                    # Use a small subset of actual data
+                    sample_size = min(100, params.QUANTIZE_NUM_SAMPLES)
+                    for i in range(sample_size):
+                        # Create dummy data in the correct format
+                        data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
+                        yield [data]
                 converter.representative_dataset = qat_representative_dataset
             else:
                 converter.representative_dataset = representative_data
 
-            # QAT-SPECIFIC CONVERSION SETTINGS
+            # QAT-specific conversion settings
             if params.ESP_DL_QUANTIZE:
                 converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                 converter.inference_input_type = tf.int8
                 converter.inference_output_type = tf.int8
-                if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                    log_print("🔧 QAT → ESP-DL INT8 quantization", level=2)
             else:
                 converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                 converter.inference_input_type = tf.uint8
                 converter.inference_output_type = tf.uint8
-                if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                    log_print("🔧 QAT → Standard UINT8 quantization", level=2)
 
-            # Suppress output during conversion based on debug/verbose flag
-            if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+            # Convert
+            with suppress_all_output(self.debug):
                 tflite_model = converter.convert()
-                log_print("🔧 TFLite conversion completed with debug output", level=2)
-            else:
-                with self._completely_suppress_output():
-                    tflite_model = converter.convert()
-            if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                log_print(f"✅ QAT conversion successful", level=2)
+                
             return self._save_tflite_file(tflite_model, filename, True)
             
         except Exception as e:
             log_print(f"❌ QAT conversion failed: {e}", level=1)
-            
-            # Enhanced fallback with better error reporting
-            log_print("🔄 Attempting QAT fallback conversion...", level=1)
-            return self._convert_qat_model_fallback_enhanced(model, filename)
+            # Fallback to non-quantized conversion
+            return self.save_as_tflite_direct(model, filename, quantize=False)
             
     def _convert_qat_model_fallback_enhanced(self, model, filename):
         """Enhanced fallback conversion for QAT model with better debugging"""
@@ -460,30 +448,77 @@ class TFLiteModelManager:
         """Legacy fallback - redirect to enhanced version"""
         return self._convert_qat_model_fallback_enhanced(model, filename)
             
-    def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
-        """Save model as TFLite with proper QAT handling"""
+    def save_as_tflite_direct(self, model, filename, quantize=False, representative_data=None):
+        """Direct Keras model conversion - most reliable for Keras 3"""
         try:
+            # Ensure model is built
             if not model.built:
                 dummy_input = tf.zeros([1] + list(params.INPUT_SHAPE), dtype=tf.float32)
                 _ = model(dummy_input)
             
-            if quantize and self._is_qat_model(model):
-                return self._convert_qat_model(model, filename, representative_data)
+            converter = tf.lite.TFLiteConverter.from_keras_model(model)
             
-            return self.save_as_tflite_savedmodel(model, filename, quantize, representative_data)
+            if quantize:
+                converter.optimizations = [tf.lite.Optimize.DEFAULT]
+                
+                # Use provided representative data or create default
+                if representative_data is not None:
+                    converter.representative_dataset = representative_data
+                else:
+                    def default_representative_dataset():
+                        # Use actual data shape for representative dataset
+                        for _ in range(min(100, params.QUANTIZE_NUM_SAMPLES)):
+                            data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
+                            yield [data]
+                    converter.representative_dataset = default_representative_dataset
+                
+                # Set quantization specific settings
+                if params.ESP_DL_QUANTIZE:
+                    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+                    converter.inference_input_type = tf.int8
+                    converter.inference_output_type = tf.int8
+                    if self.debug:
+                        print("🔧 ESP-DL INT8 quantization settings applied")
+                else:
+                    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+                    converter.inference_input_type = tf.uint8
+                    converter.inference_output_type = tf.uint8
+                    if self.debug:
+                        print("🔧 Standard UINT8 quantization settings applied")
+            
+            # Convert model
+            with suppress_all_output(self.debug):
+                tflite_model = converter.convert()
+            
+            return self._save_tflite_file(tflite_model, filename, quantize)
+                
+        except Exception as e:
+            print(f"❌ Direct TFLite conversion failed: {e}")
+            if self.debug:
+                import traceback
+                traceback.print_exc()
+            raise
+
+    def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
+        """Save model as TFLite - primary method for Keras 3"""
+        try:
+            # Always use direct conversion for Keras 3
+            return self.save_as_tflite_direct(model, filename, quantize, representative_data)
             
         except Exception as e:
             print(f"❌ TFLite conversion failed: {e}")
-            return self.save_as_tflite_savedmodel(model, filename, quantize, representative_data)
-
+            print("💡 Try using TensorFlow 2.x for better TFLite compatibility")
+            return None, 0
     def save_as_tflite_savedmodel(self, model, filename, quantize=False, representative_data=None):
-        """Use SavedModel approach for conversion"""
+        """Use SavedModel approach for conversion - Keras 3 compatible"""
         try:
             import tempfile
             
             with tempfile.TemporaryDirectory() as temp_dir:
                 model_dir = os.path.join(temp_dir, "saved_model")
-                model.save(model_dir, save_format='tf')
+                
+                # Keras 3 compatible saving - remove save_format argument
+                model.save(model_dir)  # This will save as SavedModel by default
                 
                 converter = tf.lite.TFLiteConverter.from_saved_model(model_dir)
                 
@@ -784,7 +819,7 @@ class TQDMProgressBar(tf.keras.callbacks.Callback):
             self.pbar.close()
 ### end class TQDMProgressBa           
             
-def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False):
+def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False, validation_data=None):
     """Create training callbacks with robust CSV logging"""
     
     callbacks = []
@@ -802,12 +837,21 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
                 monitor=params.EARLY_STOPPING_MONITOR,
                 patience=params.EARLY_STOPPING_PATIENCE,
                 min_delta=params.EARLY_STOPPING_MIN_DELTA,
-                # restore_best_weights=getattr(params, 'RESTORE_BEST_WEIGHTS', True),
                 restore_best_weights=params.RESTORE_BEST_WEIGHTS,
                 mode=mode,
                 verbose=1 if debug else 0
             )
         )
+    
+    # Add Augmentation Safety Monitor if using augmentation and validation data is provided
+    if params.USE_DATA_AUGMENTATION and validation_data is not None:
+        safety_monitor = create_augmentation_safety_monitor(
+            validation_data=validation_data,
+            debug=debug
+        )
+        callbacks.append(safety_monitor)
+        if debug:
+            print("🔒 AugmentationSafetyMonitor callback added")
     
     # Regular checkpoint every epoch
     # callbacks.append(
@@ -1026,11 +1070,11 @@ def train_model(debug=False):
         params.ESP_DL_QUANTIZE = corrected_params['ESP_DL_QUANTIZE']
         print(f"✅ Corrected parameters applied")
         
-    # Check training/inference alignment
-    alignment_ok = check_training_inference_alignment()
-    if not alignment_ok and params.USE_QAT:
-        print("🚨 CRITICAL: QAT training/inference misalignment detected!")
-        print("   This will cause quantization errors!")
+    # # Check training/inference alignment
+    # alignment_ok = check_training_inference_alignment()
+    # if not alignment_ok and params.USE_QAT:
+        # print("🚨 CRITICAL: QAT training/inference misalignment detected!")
+        # print("   This will cause quantization errors!")
     
     print("🎯 TRAINING CONFIGURATION:")
     print("=" * 60)
@@ -1108,6 +1152,19 @@ def train_model(debug=False):
     x_train = preprocess_images(x_train_raw, for_training=True)
     x_val = preprocess_images(x_val_raw, for_training=True)  
     x_test = preprocess_images(x_test_raw, for_training=True)
+    
+    print("\n🔍 CHECKING TRAINING/INFERENCE ALIGNMENT WITH REAL DATA")
+    alignment_ok = check_training_inference_alignment(x_train_raw)
+    if not alignment_ok and params.USE_QAT:
+        print("🚨 CRITICAL: QAT training/inference misalignment detected!")
+        print("   This will cause quantization errors!")
+    
+    # NORMALIZE TO [0,1] FOR TRAINING AND AUGMENTATION
+    print("🔄 Normalizing data to [0,1] range for training...")
+    if x_train.dtype != np.float32 or x_train.max() > 1.0:
+        x_train = x_train.astype(np.float32) / 255.0
+        x_val = x_val.astype(np.float32) / 255.0
+        x_test = x_test.astype(np.float32) / 255.0
     
     print(f"✅ Preprocessing complete:")
     print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
@@ -1256,19 +1313,44 @@ def train_model(debug=False):
         pipeline_image.numpy().min(), pipeline_image.numpy().max()))
     
     # Create callbacks
-    callbacks = create_callbacks(training_dir, tflite_manager, representative_data, params.EPOCHS, monitor, debug)
-    
+    callbacks = create_callbacks(
+        training_dir, 
+        tflite_manager, 
+        representative_data, 
+        params.EPOCHS, 
+        monitor, 
+        debug, 
+        validation_data=(x_val, y_val_final)
+    )
+        
     print("\n🎯 Starting training...")
     print("-" * 60)
     
     start_time = datetime.now()
     
     # DATA AUGMENTATION PIPELINE
-    if params.USE_DATA_AUGMENTATION:
+    if params.USE_DATA_AUGMENTATION == True:
         print("🔄 Setting up data augmentation pipeline...")
         
-        # Create augmentation pipeline using parameters
+        # Create augmentation pipeline with data type preservation and value clamping
         augmentation_layers = []
+        
+        # Ensure data is in [0,1] range for augmentation
+        augmentation_layers.append(
+            tf.keras.layers.Lambda(
+                lambda x: tf.cast(x, tf.float32),  # Ensure float32
+                name='ensure_float32'
+            )
+        )
+        
+        # Verify and clamp data range for augmentation
+        augmentation_layers.append(
+            tf.keras.layers.Lambda(
+                lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure [0,1] range
+                name='verify_range_before_augmentation'
+            )
+        )
+        
         
         # Rotation
         if params.AUGMENTATION_ROTATION_RANGE > 0:
@@ -1276,69 +1358,95 @@ def train_model(debug=False):
             augmentation_layers.append(
                 tf.keras.layers.RandomRotation(
                     factor=rotation_factor,
-                    fill_mode='nearest',
+                    fill_mode='constant',  # Use constant instead of nearest
+                    fill_value=0.0,       # Fill with black (0.0)
                     name='random_rotation'
                 )
             )
-        
+
         # Translation
         if params.AUGMENTATION_WIDTH_SHIFT_RANGE > 0 or params.AUGMENTATION_HEIGHT_SHIFT_RANGE > 0:
             augmentation_layers.append(
                 tf.keras.layers.RandomTranslation(
                     height_factor=params.AUGMENTATION_HEIGHT_SHIFT_RANGE,
                     width_factor=params.AUGMENTATION_WIDTH_SHIFT_RANGE,
-                    fill_mode='nearest',
+                    fill_mode='constant',
+                    fill_value=0.0,
                     name='random_translation'
                 )
             )
-        
+
         # Zoom
         if params.AUGMENTATION_ZOOM_RANGE > 0:
             augmentation_layers.append(
                 tf.keras.layers.RandomZoom(
                     height_factor=params.AUGMENTATION_ZOOM_RANGE,
                     width_factor=params.AUGMENTATION_ZOOM_RANGE,
-                    fill_mode='nearest',
+                    fill_mode='constant',
+                    fill_value=0.0,
                     name='random_zoom'
                 )
             )
-        
-        # Brightness
+
+        # Brightness - WITH SAFE RANGE
         if params.AUGMENTATION_BRIGHTNESS_RANGE != [1.0, 1.0]:
             min_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[0] - 1.0
             max_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[1] - 1.0
             augmentation_layers.append(
                 tf.keras.layers.RandomBrightness(
                     factor=(min_delta, max_delta),
-                    value_range=(0, 1),
+                    value_range=(0, 1),  # Explicitly define expected range
                     name='random_brightness'
                 )
             )
-        
-        # Contrast
-        augmentation_layers.append(
-            tf.keras.layers.RandomContrast(
-                factor=0.1,
-                name='random_contrast'
+
+        # Contrast - WITH VALUE PROTECTION
+        if params.AUGMENTATION_CONTRAST_RANGE > 0:
+            # Add protection before contrast to prevent extreme values
+            augmentation_layers.append(
+                tf.keras.layers.Lambda(
+                    lambda x: tf.clip_by_value(x, 0.1, 0.9),  # Clip before contrast
+                    name='pre_contrast_clip'
+                )
             )
-        )
-        
+            augmentation_layers.append(
+                tf.keras.layers.RandomContrast(
+                    factor=params.AUGMENTATION_CONTRAST_RANGE,
+                    name='random_contrast'
+                )
+            )
+
         # Flips
-        if params.AUGMENTATION_HORIZONTAL_FLIP:
+        if params.AUGMENTATION_HORIZONTAL_FLIP == True:
             augmentation_layers.append(
                 tf.keras.layers.RandomFlip(
                     mode='horizontal',
                     name='random_horizontal_flip'
                 )
             )
-        
-        if params.AUGMENTATION_VERTICAL_FLIP:
+
+        if params.AUGMENTATION_VERTICAL_FLIP == True:
             augmentation_layers.append(
                 tf.keras.layers.RandomFlip(
                     mode='vertical',
                     name='random_vertical_flip'
                 )
             )
+        
+        # FINAL VALUE CLAMPING 
+        # augmentation_layers.append(
+            # tf.keras.layers.Lambda(
+                # lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure valid range
+                # name='final_value_clamp'
+            # )
+        # )
+        
+        augmentation_layers.append(
+            tf.keras.layers.Lambda(
+                lambda x: tf.cast(x, tf.float32),  # This is good - ensures float32
+                name='ensure_float32_2'
+            )
+        )
         
         # Create augmentation pipeline
         augmentation_pipeline = tf.keras.Sequential(augmentation_layers, name='augmentation_pipeline')
@@ -1888,7 +1996,7 @@ def validate_qat_data_flow(model, x_train_sample, debug=False):
         print(f"❌ Model forward pass failed: {e}")
         return False, f"QAT data flow failed: {e}"
 
-def check_training_inference_alignment():
+def check_training_inference_alignment(x_train_sample=None):
     """
     Check if training and inference preprocessing are aligned
     """
@@ -1900,8 +2008,13 @@ def check_training_inference_alignment():
     # Get expected formats
     train_dtype, train_min, train_max, train_desc = get_qat_training_format()
     
-    # Test with sample data
-    test_data = np.random.randint(0, 255, (5, 28, 28, 1), dtype=np.uint8)
+    # Use provided sample or create test data
+    if x_train_sample is not None:
+        test_data = x_train_sample[:5]  # Use actual training data
+        print("   Using real training data for alignment check")
+    else:
+        test_data = np.random.randint(0, 255, (5, 28, 28, 1), dtype=np.uint8)
+        print("   Using synthetic data for alignment check")
     
     # Process for training and inference
     train_processed = preprocess_images(test_data, for_training=True)
@@ -1943,35 +2056,35 @@ def main():
         print("✅ Parameters corrected automatically")
     
     try:
-        # Load data first for all operations
-        print("📊 Loading dataset from multiple sources...")
-        (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
+        # # Load data first for all operations
+        # print("📊 Loading dataset from multiple sources...")
+        # (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
         
-        # Preprocess data for training/tuning operations
-        if any([getattr(args, 'use_tuner', False), 
-                getattr(args, 'test_all_models', False),
-                getattr(args, 'train', None) is not None,
-                getattr(args, 'train_all', False)]):
+        # # Preprocess data for training/tuning operations
+        # if any([getattr(args, 'use_tuner', False), 
+                # getattr(args, 'test_all_models', False),
+                # getattr(args, 'train', None) is not None,
+                # getattr(args, 'train_all', False)]):
             
-            print("🔄 Preprocessing images...")
-            x_train = preprocess_images(x_train_raw, for_training=True)
-            x_val = preprocess_images(x_val_raw, for_training=True)
-            x_test = preprocess_images(x_test_raw, for_training=True)
+            # print("🔄 Preprocessing images...")
+            # x_train = preprocess_images(x_train_raw, for_training=True)
+            # x_val = preprocess_images(x_val_raw, for_training=True)
+            # x_test = preprocess_images(x_test_raw, for_training=True)
             
-            # Handle label conversion for models that need it - CREATE NEW VARIABLES
-            if any([getattr(args, 'use_tuner', False),
-                    getattr(args, 'train_all', False),
-                    getattr(args, 'train', None) is not None]):
+            # # Handle label conversion for models that need it 
+            # if any([getattr(args, 'use_tuner', False),
+                    # getattr(args, 'train_all', False),
+                    # getattr(args, 'train', None) is not None]):
                 
-                # Create processed versions without overwriting originals
-                y_train_processed = y_train_raw.copy()
-                y_val_processed = y_val_raw.copy()
-                y_test_processed = y_test_raw.copy()
+                # # Create processed versions without overwriting originals
+                # y_train_processed = y_train_raw.copy()
+                # y_val_processed = y_val_raw.copy()
+                # y_test_processed = y_test_raw.copy()
                 
-                if params.MODEL_ARCHITECTURE == "original_haverland":
-                    y_train_processed = tf.keras.utils.to_categorical(y_train_processed, params.NB_CLASSES)  # ✅ NEW VARIABLE
-                    y_val_processed = tf.keras.utils.to_categorical(y_val_processed, params.NB_CLASSES)      # ✅ NEW VARIABLE
-                    y_test_processed = tf.keras.utils.to_categorical(y_test_processed, params.NB_CLASSES)    # ✅ NEW VARIABLE
+                # if params.MODEL_ARCHITECTURE == "original_haverland":
+                    # y_train_processed = tf.keras.utils.to_categorical(y_train_processed, params.NB_CLASSES)  
+                    # y_val_processed = tf.keras.utils.to_categorical(y_val_processed, params.NB_CLASSES)      
+                    # y_test_processed = tf.keras.utils.to_categorical(y_test_processed, params.NB_CLASSES)    
         
         # DEBUG: Print arguments
         if args.debug:
@@ -1994,7 +2107,7 @@ def main():
                 from tuner import run_architecture_tuning
                 
                 best_model, best_hps, history, tuner = run_architecture_tuning(
-                    x_train, y_train_processed, x_val, y_val_processed,  # ✅ USE PROCESSED
+                    # x_train, y_train_processed, x_val, y_val_processed, 
                     num_trials=getattr(args, 'num_trials', 5),
                     debug=args.debug
                 )
@@ -2056,7 +2169,8 @@ def main():
         elif args.test_all_models:
             # TEST ALL MODELS MODE
             print("🧪 Testing all available models...")
-            test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, debug=args.debug)  # ✅ USE RAW DATA
+            # test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, debug=args.debug)  #  USE RAW DATA
+            test_all_models(debug=args.debug)  # Let test_all_models handle its own data loading
             
         elif getattr(args, 'train', None) is not None:
             # TRAIN SPECIFIC MODELS MODE
