@@ -37,7 +37,8 @@ from utils.augmentation import (
     apply_augmentation_to_dataset, 
     test_augmentation_pipeline, 
     print_augmentation_summary,
-    create_augmentation_safety_monitor 
+    create_augmentation_safety_monitor,
+    setup_augmentation_for_training
 )
 
 # import tensorflow_model_optimization as tfmot
@@ -1148,6 +1149,90 @@ def train_model(debug=False):
     print("\n📊 Loading dataset from multiple sources...")
     (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
     
+    # # HYPERPARAMETER TUNING  (BEFORE NORMAL TRAINING)
+    # if use_tuner:
+        # print("\n🎯 STARTING HYPERPARAMETER TUNING...")
+        # print("=" * 50)
+        
+        # try:
+            # from tuner import run_architecture_tuning
+            
+            # # Preprocess data for tuning
+            # print("🔄 Preprocessing images for tuning...")
+            # x_train_tune = preprocess_images(x_train_raw, for_training=True)
+            # x_val_tune = preprocess_images(x_val_raw, for_training=True)
+            
+            # # Handle labels for tuning
+            # if params.MODEL_ARCHITECTURE == "original_haverland":
+                # y_train_tune = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
+                # y_val_tune = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES)
+            # else:
+                # y_train_tune = y_train_raw.copy()
+                # y_val_tune = y_val_raw.copy()
+            
+            # # Run tuning
+            # best_model, best_hps, history, tuner = run_architecture_tuning(
+                # x_train=x_train_tune,
+                # y_train=y_train_tune, 
+                # x_val=x_val_tune,
+                # y_val=y_val_tune,
+                # num_trials=num_trials,
+                # debug=debug
+            # )
+            
+            # if best_model and best_hps:
+                # # Update parameters with best values
+                # best_lr = best_hps.get('learning_rate')
+                # best_batch_size = best_hps.get('batch_size')
+                # best_optimizer = best_hps.get('optimizer')
+                
+                # params.LEARNING_RATE = best_lr
+                # params.BATCH_SIZE = best_batch_size
+                
+                # print(f"\n🎯 Optimized hyperparameters found:")
+                # print(f"   Learning Rate: {best_lr}")
+                # print(f"   Batch Size: {best_batch_size}")
+                # if best_optimizer:
+                    # print(f"   Optimizer: {best_optimizer}")
+                # print(f"   Architecture: {params.MODEL_ARCHITECTURE}")
+                
+                # if advanced:
+                    # # Use the tuned model directly
+                    # print("🏁 Using tuned model directly (advanced mode)")
+                    
+                    # # Save the tuned model
+                    # best_model.save(os.path.join(training_dir, "tuned_model.keras"))
+                    
+                    # # Also save tuning configuration
+                    # config_path = os.path.join(training_dir, "tuning_config.txt")
+                    # with open(config_path, 'w') as f:
+                        # f.write(f"Tuned Model Configuration\n")
+                        # f.write("=" * 40 + "\n")
+                        # f.write(f"Model: {params.MODEL_ARCHITECTURE}\n")
+                        # f.write(f"Learning Rate: {best_lr}\n")
+                        # f.write(f"Batch Size: {best_batch_size}\n")
+                        # if best_optimizer:
+                            # f.write(f"Optimizer: {best_optimizer}\n")
+                        # f.write(f"Final Val Accuracy: {history.history['val_accuracy'][-1]:.4f}\n")
+                    
+                    # print(f"💾 Tuned model saved to: {training_dir}")
+                    # return best_model, history, training_dir
+                # else:
+                    # # Continue with normal training using best hyperparameters
+                    # print("🔄 Continuing with normal training using optimized hyperparameters...")
+                    # # We'll continue with the normal training flow below
+            
+            # else:
+                # print("❌ Hyperparameter tuning failed, continuing with default parameters")
+                
+        # except ImportError as e:
+            # print(f"❌ Keras Tuner not available: {e}")
+            # print("💡 Install with: pip install keras-tuner")
+            # print("🔄 Falling back to normal training...")
+        # except Exception as e:
+            # print(f"❌ Hyperparameter tuning failed: {e}")
+            # print("🔄 Falling back to normal training...")
+    
     print("🔄 Preprocessing images...")
     x_train = preprocess_images(x_train_raw, for_training=True)
     x_val = preprocess_images(x_val_raw, for_training=True)  
@@ -1307,6 +1392,7 @@ def train_model(debug=False):
 
     # Check data pipeline doesn't reprocess
     print("\n🔍 Checking data pipeline...")
+    from utils.data_pipeline import create_tf_dataset_from_arrays
     sample_batch = next(iter(create_tf_dataset_from_arrays(x_train[:1], y_train_final[:1], training=False)))
     pipeline_image, pipeline_label = sample_batch
     print("   Data pipeline output range: [{:.3f}, {:.3f}]".format(
@@ -1329,186 +1415,20 @@ def train_model(debug=False):
     start_time = datetime.now()
     
     # DATA AUGMENTATION PIPELINE
-    if params.USE_DATA_AUGMENTATION == True:
-        print("🔄 Setting up data augmentation pipeline...")
-        
-        # Create augmentation pipeline with data type preservation and value clamping
-        augmentation_layers = []
-        
-        # Ensure data is in [0,1] range for augmentation
-        augmentation_layers.append(
-            tf.keras.layers.Lambda(
-                lambda x: tf.cast(x, tf.float32),  # Ensure float32
-                name='ensure_float32'
-            )
+    if params.USE_DATA_AUGMENTATION:
+        # Use the centralized augmentation setup
+        train_dataset, val_dataset, augmentation_pipeline = setup_augmentation_for_training(
+            x_train, y_train_final, x_val, y_val_final, debug=debug
         )
         
-        # Verify and clamp data range for augmentation
-        augmentation_layers.append(
-            tf.keras.layers.Lambda(
-                lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure [0,1] range
-                name='verify_range_before_augmentation'
-            )
+        # Train with augmented dataset
+        history = model.fit(
+            train_dataset,
+            epochs=params.EPOCHS,
+            validation_data=val_dataset,
+            callbacks=callbacks,
+            verbose=0
         )
-        
-        
-        # Rotation
-        if params.AUGMENTATION_ROTATION_RANGE > 0:
-            rotation_factor = params.AUGMENTATION_ROTATION_RANGE / 360.0
-            augmentation_layers.append(
-                tf.keras.layers.RandomRotation(
-                    factor=rotation_factor,
-                    fill_mode='constant',  # Use constant instead of nearest
-                    fill_value=0.0,       # Fill with black (0.0)
-                    name='random_rotation'
-                )
-            )
-
-        # Translation
-        if params.AUGMENTATION_WIDTH_SHIFT_RANGE > 0 or params.AUGMENTATION_HEIGHT_SHIFT_RANGE > 0:
-            augmentation_layers.append(
-                tf.keras.layers.RandomTranslation(
-                    height_factor=params.AUGMENTATION_HEIGHT_SHIFT_RANGE,
-                    width_factor=params.AUGMENTATION_WIDTH_SHIFT_RANGE,
-                    fill_mode='constant',
-                    fill_value=0.0,
-                    name='random_translation'
-                )
-            )
-
-        # Zoom
-        if params.AUGMENTATION_ZOOM_RANGE > 0:
-            augmentation_layers.append(
-                tf.keras.layers.RandomZoom(
-                    height_factor=params.AUGMENTATION_ZOOM_RANGE,
-                    width_factor=params.AUGMENTATION_ZOOM_RANGE,
-                    fill_mode='constant',
-                    fill_value=0.0,
-                    name='random_zoom'
-                )
-            )
-
-        # Brightness - WITH SAFE RANGE
-        if params.AUGMENTATION_BRIGHTNESS_RANGE != [1.0, 1.0]:
-            min_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[0] - 1.0
-            max_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[1] - 1.0
-            augmentation_layers.append(
-                tf.keras.layers.RandomBrightness(
-                    factor=(min_delta, max_delta),
-                    value_range=(0, 1),  # Explicitly define expected range
-                    name='random_brightness'
-                )
-            )
-
-        # Contrast - WITH VALUE PROTECTION
-        if params.AUGMENTATION_CONTRAST_RANGE > 0:
-            # Add protection before contrast to prevent extreme values
-            augmentation_layers.append(
-                tf.keras.layers.Lambda(
-                    lambda x: tf.clip_by_value(x, 0.1, 0.9),  # Clip before contrast
-                    name='pre_contrast_clip'
-                )
-            )
-            augmentation_layers.append(
-                tf.keras.layers.RandomContrast(
-                    factor=params.AUGMENTATION_CONTRAST_RANGE,
-                    name='random_contrast'
-                )
-            )
-
-        # Flips
-        if params.AUGMENTATION_HORIZONTAL_FLIP == True:
-            augmentation_layers.append(
-                tf.keras.layers.RandomFlip(
-                    mode='horizontal',
-                    name='random_horizontal_flip'
-                )
-            )
-
-        if params.AUGMENTATION_VERTICAL_FLIP == True:
-            augmentation_layers.append(
-                tf.keras.layers.RandomFlip(
-                    mode='vertical',
-                    name='random_vertical_flip'
-                )
-            )
-        
-        # FINAL VALUE CLAMPING 
-        # augmentation_layers.append(
-            # tf.keras.layers.Lambda(
-                # lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure valid range
-                # name='final_value_clamp'
-            # )
-        # )
-        
-        augmentation_layers.append(
-            tf.keras.layers.Lambda(
-                lambda x: tf.cast(x, tf.float32),  # This is good - ensures float32
-                name='ensure_float32_2'
-            )
-        )
-        
-        # Create augmentation pipeline
-        augmentation_pipeline = tf.keras.Sequential(augmentation_layers, name='augmentation_pipeline')
-        
-        print(f"✅ Augmentation pipeline created with {len(augmentation_layers)} layers")
-        
-        if params.USE_TF_DATA_PIPELINE:
-            print("🔧 Using tf.data pipeline with augmentation...")
-            train_dataset = create_tf_dataset_from_arrays(x_train, y_train_final, training=True)
-            
-            # Apply augmentation to training dataset only
-            train_dataset = train_dataset.map(
-                lambda x, y: (augmentation_pipeline(x, training=True), y),
-                num_parallel_calls=tf.data.AUTOTUNE
-            )
-            
-            # Validation dataset WITHOUT augmentation
-            val_dataset = create_tf_dataset_from_arrays(x_val, y_val_final, training=False)
-            
-            # TEMPORARY VERIFICATION
-            print("🧪 Testing data pipeline...")
-            sample_batch = next(iter(train_dataset))
-            sample_x, sample_y = sample_batch
-            print(f"   Sample batch - X range: [{sample_x.numpy().min():.3f}, {sample_x.numpy().max():.3f}]")
-            print(f"   Sample batch - Y shape: {sample_y.numpy().shape}")   
-            
-            # Train with augmented dataset
-            history = model.fit(
-                train_dataset,
-                epochs=params.EPOCHS,
-                validation_data=val_dataset,
-                callbacks=callbacks,
-                verbose=0
-            )
-            
-        else:
-            print("🔧 Using standard arrays with augmentation...")
-            train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train_final))
-            train_dataset = train_dataset.map(
-                lambda x, y: (augmentation_pipeline(x, training=True), y),
-                num_parallel_calls=tf.data.AUTOTUNE
-            )
-            train_dataset = train_dataset.shuffle(1000).batch(params.BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
-            
-            # Validation dataset WITHOUT augmentation
-            val_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val_final))
-            val_dataset = val_dataset.batch(params.BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
-            
-            # TEMPORARY VERIFICATION
-            print("🧪 Testing data pipeline...")
-            sample_batch = next(iter(train_dataset))
-            sample_x, sample_y = sample_batch
-            print(f"   Sample batch - X range: [{sample_x.numpy().min():.3f}, {sample_x.numpy().max():.3f}]")
-            print(f"   Sample batch - Y shape: {sample_y.numpy().shape}")        
-            
-            history = model.fit(
-                train_dataset,
-                epochs=params.EPOCHS,
-                validation_data=val_dataset,
-                callbacks=callbacks,
-                verbose=0
-            )
         
     else:
         # Training without augmentation
@@ -1516,10 +1436,11 @@ def train_model(debug=False):
         
         if getattr(params, 'USE_TF_DATA_PIPELINE', False):
             print("🔧 Using tf.data pipeline without augmentation...")
+            from utils.data_pipeline import create_tf_dataset_from_arrays
             train_dataset = create_tf_dataset_from_arrays(x_train, y_train_final, training=True)
             val_dataset = create_tf_dataset_from_arrays(x_val, y_val_final, training=False)
             
-            # TEMPORARY VERIFICATION
+            # Test data pipeline
             print("🧪 Testing data pipeline...")
             sample_batch = next(iter(train_dataset))
             sample_x, sample_y = sample_batch
@@ -1535,7 +1456,7 @@ def train_model(debug=False):
             )
         else:
             print("🔧 Using standard arrays without augmentation...")
-            # TEMPORARY VERIFICATION
+            # Test data
             print("🧪 Testing data pipeline...")
             sample_x, sample_y = x_train[:1], y_train_final[:1]
             print(f"   Sample batch - X range: [{sample_x.min():.3f}, {sample_x.max():.3f}]")
@@ -2056,36 +1977,7 @@ def main():
         print("✅ Parameters corrected automatically")
     
     try:
-        # # Load data first for all operations
-        # print("📊 Loading dataset from multiple sources...")
-        # (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
-        
-        # # Preprocess data for training/tuning operations
-        # if any([getattr(args, 'use_tuner', False), 
-                # getattr(args, 'test_all_models', False),
-                # getattr(args, 'train', None) is not None,
-                # getattr(args, 'train_all', False)]):
-            
-            # print("🔄 Preprocessing images...")
-            # x_train = preprocess_images(x_train_raw, for_training=True)
-            # x_val = preprocess_images(x_val_raw, for_training=True)
-            # x_test = preprocess_images(x_test_raw, for_training=True)
-            
-            # # Handle label conversion for models that need it 
-            # if any([getattr(args, 'use_tuner', False),
-                    # getattr(args, 'train_all', False),
-                    # getattr(args, 'train', None) is not None]):
-                
-                # # Create processed versions without overwriting originals
-                # y_train_processed = y_train_raw.copy()
-                # y_val_processed = y_val_raw.copy()
-                # y_test_processed = y_test_raw.copy()
-                
-                # if params.MODEL_ARCHITECTURE == "original_haverland":
-                    # y_train_processed = tf.keras.utils.to_categorical(y_train_processed, params.NB_CLASSES)  
-                    # y_val_processed = tf.keras.utils.to_categorical(y_val_processed, params.NB_CLASSES)      
-                    # y_test_processed = tf.keras.utils.to_categorical(y_test_processed, params.NB_CLASSES)    
-        
+       
         # DEBUG: Print arguments
         if args.debug:
             print("🔍 Command line arguments:")
@@ -2103,65 +1995,83 @@ def main():
             # HYPERPARAMETER TUNING MODE
             print("🚀 Starting training with hyperparameter tuning...")
             
-            try:
-                from tuner import run_architecture_tuning
+            # REMOVE THE EXTRA try: STATEMENT AND FIX INDENTATION
+            # LOAD DATA FIRST
+            print("📊 Loading dataset for tuning...")
+            (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
+            
+            # PREPROCESS DATA
+            print("🔄 Preprocessing images for tuning...")
+            x_train = preprocess_images(x_train_raw, for_training=True)
+            x_val = preprocess_images(x_val_raw, for_training=True)
+            
+            # HANDLE LABELS BASED ON MODEL TYPE
+            if params.MODEL_ARCHITECTURE == "original_haverland":
+                y_train = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
+                y_val = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES)
+            else:
+                y_train = y_train_raw
+                y_val = y_val_raw
+            
+            from tuner import run_architecture_tuning
+            
+            # NOW CALL WITH ALL REQUIRED ARGUMENTS
+            best_model, best_hps, history, tuner = run_architecture_tuning(
+                x_train=x_train,
+                y_train=y_train, 
+                x_val=x_val,
+                y_val=y_val,
+                num_trials=getattr(args, 'num_trials', 5),
+                debug=args.debug
+            )
+            
+            if best_model and best_hps:
+                # Update parameters with best values
+                best_lr = best_hps.get('learning_rate')
+                best_batch_size = best_hps.get('batch_size')
+                best_optimizer = best_hps.get('optimizer')
                 
-                best_model, best_hps, history, tuner = run_architecture_tuning(
-                    # x_train, y_train_processed, x_val, y_val_processed, 
-                    num_trials=getattr(args, 'num_trials', 5),
-                    debug=args.debug
-                )
+                params.LEARNING_RATE = best_lr
+                params.BATCH_SIZE = best_batch_size
                 
-                if best_model and best_hps:
-                    # Update parameters with best values
-                    best_lr = best_hps.get('learning_rate')
-                    best_batch_size = best_hps.get('batch_size')
+                print(f"\n🎯 Updated with optimized hyperparameters:")
+                print(f"   Learning Rate: {best_lr}")
+                print(f"   Batch Size: {best_batch_size}")
+                if best_optimizer:
+                    print(f"   Optimizer: {best_optimizer}")
+                print(f"   Architecture: {params.MODEL_ARCHITECTURE} (fixed)")
+                
+                if getattr(args, 'advanced', False):
+                    # Use the tuned model directly
+                    print("🏁 Using tuned model directly (advanced mode)")
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_tuned_{timestamp}")
+                    os.makedirs(training_dir, exist_ok=True)
                     
-                    params.LEARNING_RATE = best_lr
-                    params.BATCH_SIZE = best_batch_size
+                    # Save the tuned model
+                    best_model.save(os.path.join(training_dir, "tuned_model.keras"))
                     
-                    print(f"\n🎯 Updated with optimized hyperparameters:")
-                    print(f"   Learning Rate: {best_lr}")
-                    print(f"   Batch Size: {best_batch_size}")
-                    print(f"   Architecture: {params.MODEL_ARCHITECTURE} (fixed)")
+                    # Also save tuning configuration
+                    config_path = os.path.join(training_dir, "tuning_config.txt")
+                    with open(config_path, 'w') as f:
+                        f.write(f"Tuned Model Configuration\n")
+                        f.write("=" * 40 + "\n")
+                        f.write(f"Model: {params.MODEL_ARCHITECTURE}\n")
+                        f.write(f"Learning Rate: {best_lr}\n")
+                        f.write(f"Batch Size: {best_batch_size}\n")
+                        if best_optimizer:
+                            f.write(f"Optimizer: {best_optimizer}\n")
+                        f.write(f"Final Val Accuracy: {history.history['val_accuracy'][-1]:.4f}\n")
                     
-                    if getattr(args, 'advanced', False):
-                        # Use the tuned model directly
-                        print("🏁 Using tuned model directly (advanced mode)")
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_tuned_{timestamp}")
-                        os.makedirs(training_dir, exist_ok=True)
-                        
-                        # Save the tuned model
-                        best_model.save(os.path.join(training_dir, "tuned_model.keras"))
-                        
-                        # Also save tuning configuration
-                        config_path = os.path.join(training_dir, "tuning_config.txt")
-                        with open(config_path, 'w') as f:
-                            f.write(f"Tuned Model Configuration\n")
-                            f.write("=" * 40 + "\n")
-                            f.write(f"Model: {params.MODEL_ARCHITECTURE}\n")
-                            f.write(f"Learning Rate: {best_lr}\n")
-                            f.write(f"Batch Size: {best_batch_size}\n")
-                            f.write(f"Final Val Accuracy: {history.history['val_accuracy'][-1]:.4f}\n")
-                        
-                        print(f"💾 Tuned model saved to: {training_dir}")
-                    else:
-                        # Continue with normal training using best hyperparameters
-                        print("🔄 Retraining from scratch with optimized hyperparameters...")
-                        model, history, output_dir = train_model(debug=args.debug)
-                        print(f"\n✅ Training completed successfully!")
-                        print(f"📁 Output directory: {output_dir}")
+                    print(f"💾 Tuned model saved to: {training_dir}")
                 else:
-                    print("❌ Hyperparameter tuning failed, falling back to normal training")
+                    # Continue with normal training using best hyperparameters
+                    print("🔄 Retraining from scratch with optimized hyperparameters...")
                     model, history, output_dir = train_model(debug=args.debug)
                     print(f"\n✅ Training completed successfully!")
                     print(f"📁 Output directory: {output_dir}")
-                    
-            except ImportError as e:
-                print(f"❌ Keras Tuner not available: {e}")
-                print("💡 Install with: pip install keras-tuner")
-                print("🔄 Falling back to normal training...")
+            else:
+                print("❌ Hyperparameter tuning failed, falling back to normal training")
                 model, history, output_dir = train_model(debug=args.debug)
                 print(f"\n✅ Training completed successfully!")
                 print(f"📁 Output directory: {output_dir}")
@@ -2169,7 +2079,6 @@ def main():
         elif args.test_all_models:
             # TEST ALL MODELS MODE
             print("🧪 Testing all available models...")
-            # test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, debug=args.debug)  #  USE RAW DATA
             test_all_models(debug=args.debug)  # Let test_all_models handle its own data loading
             
         elif getattr(args, 'train', None) is not None:

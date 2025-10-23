@@ -2,6 +2,7 @@
 import tensorflow as tf
 import numpy as np
 import parameters as params
+from utils.data_pipeline import create_tf_dataset_from_arrays
 
 def create_augmentation_pipeline():
     """
@@ -14,6 +15,14 @@ def create_augmentation_pipeline():
         tf.keras.layers.Lambda(
             lambda x: tf.cast(x, tf.float32),
             name='ensure_float32'
+        )
+    )
+    
+    # Verify and clamp data range for augmentation
+    augmentation_layers.append(
+        tf.keras.layers.Lambda(
+            lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure [0,1] range
+            name='verify_range_before_augmentation'
         )
     )
     
@@ -111,6 +120,14 @@ def create_augmentation_pipeline():
         tf.keras.layers.Lambda(
             lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure valid range
             name='final_value_clamp'
+        )
+    )
+    
+    # Ensure final float32 output
+    augmentation_layers.append(
+        tf.keras.layers.Lambda(
+            lambda x: tf.cast(x, tf.float32),
+            name='ensure_float32_output'
         )
     )
     
@@ -348,3 +365,63 @@ def create_augmentation_safety_monitor(validation_data, debug=False):
         learning_threshold=0.15,
         patience_epochs=5
     )
+
+def setup_augmentation_for_training(x_train, y_train_final, x_val, y_val_final, debug=False):
+    """
+    Setup data augmentation for training with proper dataset creation
+    
+    Returns:
+        train_dataset: Training dataset with augmentation
+        val_dataset: Validation dataset without augmentation
+        augmentation_pipeline: The augmentation pipeline for testing
+    """
+    print("🔄 Setting up data augmentation pipeline...")
+    
+    # Create augmentation pipeline
+    augmentation_pipeline, num_layers = create_augmentation_pipeline()
+    
+    print(f"✅ Augmentation pipeline created with {num_layers} layers")
+    print_augmentation_summary()
+    
+    # Test the augmentation pipeline
+    if debug:
+        sample_data = tf.convert_to_tensor(x_train[:1], dtype=tf.float32)
+        test_augmentation_pipeline(augmentation_pipeline, sample_data, debug=True)
+    
+    # Create datasets
+    if params.USE_TF_DATA_PIPELINE:
+        print("🔧 Using tf.data pipeline with augmentation...")
+        from utils.data_pipeline import create_tf_dataset_from_arrays
+        
+        train_dataset = create_tf_dataset_from_arrays(x_train, y_train_final, training=True)
+        
+        # Apply augmentation to training dataset only
+        train_dataset = train_dataset.map(
+            lambda x, y: (augmentation_pipeline(x, training=True), y),
+            num_parallel_calls=tf.data.AUTOTUNE
+        )
+        
+        # Validation dataset WITHOUT augmentation
+        val_dataset = create_tf_dataset_from_arrays(x_val, y_val_final, training=False)
+        
+    else:
+        print("🔧 Using standard arrays with augmentation...")
+        train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train_final))
+        train_dataset = train_dataset.map(
+            lambda x, y: (augmentation_pipeline(x, training=True), y),
+            num_parallel_calls=tf.data.AUTOTUNE
+        )
+        train_dataset = train_dataset.shuffle(1000).batch(params.BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+        
+        # Validation dataset WITHOUT augmentation
+        val_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val_final))
+        val_dataset = val_dataset.batch(params.BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+    
+    # Test data pipeline
+    print("🧪 Testing data pipeline...")
+    sample_batch = next(iter(train_dataset))
+    sample_x, sample_y = sample_batch
+    print(f"   Sample batch - X range: [{sample_x.numpy().min():.3f}, {sample_x.numpy().max():.3f}]")
+    print(f"   Sample batch - Y shape: {sample_y.numpy().shape}")
+    
+    return train_dataset, val_dataset, augmentation_pipeline
