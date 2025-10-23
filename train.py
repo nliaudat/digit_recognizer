@@ -377,13 +377,32 @@ class TFLiteModelManager:
             # QAT models need representative dataset
             if representative_data is None:
                 # Create representative dataset from training data
+                # def qat_representative_dataset():
+                    # # Use a small subset of actual data
+                    # sample_size = min(100, params.QUANTIZE_NUM_SAMPLES)
+                    # for i in range(sample_size):
+                        # # Create dummy data in the correct format
+                        # data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
+                        # yield [data]
                 def qat_representative_dataset():
-                    # Use a small subset of actual data
-                    sample_size = min(100, params.QUANTIZE_NUM_SAMPLES)
-                    for i in range(sample_size):
-                        # Create dummy data in the correct format
-                        data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
-                        yield [data]
+                    from utils import get_data_splits, preprocess_images
+                    (x_train_raw, y_train_raw), _, _ = get_data_splits()
+                    calibration_data = x_train_raw[:params.QUANTIZE_NUM_SAMPLES]
+                    calibration_processed = preprocess_images(calibration_data, for_training=False)
+                    if calibration_processed.dtype != np.float32:
+                        if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                            print(f"🔄 Converting calibration data from {calibration_processed.dtype} to float32")
+                        calibration_processed = calibration_processed.astype(np.float32)
+                        if calibration_processed.max() > 1.0:
+                            calibration_processed = calibration_processed / 255.0
+                    if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
+                        print(f"🔧 QAT Calibration: {len(calibration_processed)} samples, "
+                              f"dtype: {calibration_processed.dtype}, "
+                              f"range: [{calibration_processed.min():.3f}, {calibration_processed.max():.3f}]")
+                    if calibration_processed.dtype != np.float32:
+                        raise ValueError(f"QAT calibration data must be float32, got {calibration_processed.dtype}")
+                    for i in range(len(calibration_processed)):
+                        yield [calibration_processed[i:i+1]]
                 converter.representative_dataset = qat_representative_dataset
             else:
                 converter.representative_dataset = representative_data
@@ -510,6 +529,8 @@ class TFLiteModelManager:
             print(f"❌ TFLite conversion failed: {e}")
             print("💡 Try using TensorFlow 2.x for better TFLite compatibility")
             return None, 0
+            
+
     def save_as_tflite_savedmodel(self, model, filename, quantize=False, representative_data=None):
         """Use SavedModel approach for conversion - Keras 3 compatible"""
         try:
