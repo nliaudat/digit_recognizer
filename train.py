@@ -336,9 +336,11 @@ class TFLiteModelManager:
             return False
             
     def save_trainable_checkpoint(self, model, accuracy, epoch):
-        """Save model in trainable format"""
+        """Save model in trainable format - Keras 3 compatible"""
         timestamp = datetime.now().strftime("%H%M%S")
         checkpoint_path = os.path.join(self.output_dir, f"checkpoint_epoch_{epoch:03d}_acc_{accuracy:.4f}_{timestamp}.keras")
+        
+        # Keras 3 compatible saving
         model.save(checkpoint_path)
         
         if self.debug:
@@ -347,7 +349,7 @@ class TFLiteModelManager:
         if accuracy > self.best_accuracy:
             self.best_accuracy = accuracy
             best_checkpoint_path = os.path.join(self.output_dir, "best_model.keras")
-            model.save(best_checkpoint_path)
+            model.save(best_checkpoint_path)  # Remove save_format argument
             if self.debug:
                 print(f"🏆 New best model saved: {best_checkpoint_path}")
         
@@ -484,13 +486,15 @@ class TFLiteModelManager:
             return self.save_as_tflite_savedmodel(model, filename, quantize, representative_data)
 
     def save_as_tflite_savedmodel(self, model, filename, quantize=False, representative_data=None):
-        """Use SavedModel approach for conversion"""
+        """Use SavedModel approach for conversion - Keras 3 compatible"""
         try:
             import tempfile
             
             with tempfile.TemporaryDirectory() as temp_dir:
                 model_dir = os.path.join(temp_dir, "saved_model")
-                model.save(model_dir, save_format='tf')
+                
+                # Keras 3 compatible saving - remove save_format argument
+                model.save(model_dir)  # This will save as SavedModel by default
                 
                 converter = tf.lite.TFLiteConverter.from_saved_model(model_dir)
                 
@@ -1042,11 +1046,11 @@ def train_model(debug=False):
         params.ESP_DL_QUANTIZE = corrected_params['ESP_DL_QUANTIZE']
         print(f"✅ Corrected parameters applied")
         
-    # Check training/inference alignment
-    alignment_ok = check_training_inference_alignment()
-    if not alignment_ok and params.USE_QAT:
-        print("🚨 CRITICAL: QAT training/inference misalignment detected!")
-        print("   This will cause quantization errors!")
+    # # Check training/inference alignment
+    # alignment_ok = check_training_inference_alignment()
+    # if not alignment_ok and params.USE_QAT:
+        # print("🚨 CRITICAL: QAT training/inference misalignment detected!")
+        # print("   This will cause quantization errors!")
     
     print("🎯 TRAINING CONFIGURATION:")
     print("=" * 60)
@@ -1124,6 +1128,19 @@ def train_model(debug=False):
     x_train = preprocess_images(x_train_raw, for_training=True)
     x_val = preprocess_images(x_val_raw, for_training=True)  
     x_test = preprocess_images(x_test_raw, for_training=True)
+    
+    print("\n🔍 CHECKING TRAINING/INFERENCE ALIGNMENT WITH REAL DATA")
+    alignment_ok = check_training_inference_alignment(x_train_raw)
+    if not alignment_ok and params.USE_QAT:
+        print("🚨 CRITICAL: QAT training/inference misalignment detected!")
+        print("   This will cause quantization errors!")
+    
+    # NORMALIZE TO [0,1] FOR TRAINING AND AUGMENTATION
+    print("🔄 Normalizing data to [0,1] range for training...")
+    if x_train.dtype != np.float32 or x_train.max() > 1.0:
+        x_train = x_train.astype(np.float32) / 255.0
+        x_val = x_val.astype(np.float32) / 255.0
+        x_test = x_test.astype(np.float32) / 255.0
     
     print(f"✅ Preprocessing complete:")
     print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
@@ -1294,10 +1311,19 @@ def train_model(debug=False):
         # Create augmentation pipeline with data type preservation and value clamping
         augmentation_layers = []
         
+        # Ensure data is in [0,1] range for augmentation
         augmentation_layers.append(
             tf.keras.layers.Lambda(
-                lambda x: tf.cast(x, tf.float32),
+                lambda x: tf.cast(x, tf.float32),  # Ensure float32
                 name='ensure_float32'
+            )
+        )
+        
+        # Verify and clamp data range for augmentation
+        augmentation_layers.append(
+            tf.keras.layers.Lambda(
+                lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure [0,1] range
+                name='verify_range_before_augmentation'
             )
         )
         
@@ -1383,11 +1409,18 @@ def train_model(debug=False):
                 )
             )
         
-        # 3. FINAL VALUE CLAMPING 
+        # FINAL VALUE CLAMPING 
+        # augmentation_layers.append(
+            # tf.keras.layers.Lambda(
+                # lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure valid range
+                # name='final_value_clamp'
+            # )
+        # )
+        
         augmentation_layers.append(
             tf.keras.layers.Lambda(
-                lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure valid range
-                name='final_value_clamp'
+                lambda x: tf.cast(x, tf.float32),  # This is good - ensures float32
+                name='ensure_float32_2'
             )
         )
         
@@ -1939,7 +1972,7 @@ def validate_qat_data_flow(model, x_train_sample, debug=False):
         print(f"❌ Model forward pass failed: {e}")
         return False, f"QAT data flow failed: {e}"
 
-def check_training_inference_alignment():
+def check_training_inference_alignment(x_train_sample=None):
     """
     Check if training and inference preprocessing are aligned
     """
@@ -1951,8 +1984,13 @@ def check_training_inference_alignment():
     # Get expected formats
     train_dtype, train_min, train_max, train_desc = get_qat_training_format()
     
-    # Test with sample data
-    test_data = np.random.randint(0, 255, (5, 28, 28, 1), dtype=np.uint8)
+    # Use provided sample or create test data
+    if x_train_sample is not None:
+        test_data = x_train_sample[:5]  # Use actual training data
+        print("   Using real training data for alignment check")
+    else:
+        test_data = np.random.randint(0, 255, (5, 28, 28, 1), dtype=np.uint8)
+        print("   Using synthetic data for alignment check")
     
     # Process for training and inference
     train_processed = preprocess_images(test_data, for_training=True)

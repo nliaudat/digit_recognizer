@@ -34,7 +34,7 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v6",
 ]
 
-MODEL_ARCHITECTURE = "original_haverland" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
