@@ -285,6 +285,7 @@ class AugmentationSafetyMonitor(tf.keras.callbacks.Callback):
             x_sample = x_val[:sample_size]
             print(f"   Validation data range: [{x_sample.min():.3f}, {x_sample.max():.3f}]")
             print(f"   Validation data mean: {x_sample.mean():.3f}")
+            print(f"   Validation data dtype: {x_sample.dtype}")
             
             # Check for NaN/inf
             if np.any(np.isnan(x_sample)):
@@ -293,12 +294,20 @@ class AugmentationSafetyMonitor(tf.keras.callbacks.Callback):
                 print("   ❌ Inf values detected in validation data!")
                 
             # Check label distribution
-            unique_labels = np.unique(y_val[:sample_size])
+            unique_labels, counts = np.unique(y_val[:sample_size], return_counts=True)
             print(f"   Unique labels in sample: {len(unique_labels)}")
+            print(f"   Label distribution: {dict(zip(unique_labels, counts))}")
             
+            # CRITICAL: Check if data is normalized
+            if x_sample.max() > 5.0:  # Data should be normalized to ~0-1 range
+                print("   🚨 CRITICAL: Data appears to be unnormalized!")
+                print("   Expected range: [0, 1] or [-1, 1]")
+                print("   Actual range: [{:.3f}, {:.3f}]".format(x_sample.min(), x_sample.max()))
+                print("   This will cause massive loss values!")
+                
         except Exception as e:
             print(f"   ⚠️ Emergency validation failed: {e}")
-    
+        
     def _sanity_check(self, epoch, logs):
         """
         Regular sanity checks during training

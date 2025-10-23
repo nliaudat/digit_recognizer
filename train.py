@@ -1994,35 +1994,35 @@ def main():
         print("✅ Parameters corrected automatically")
     
     try:
-        # Load data first for all operations
-        print("📊 Loading dataset from multiple sources...")
-        (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
+        # # Load data first for all operations
+        # print("📊 Loading dataset from multiple sources...")
+        # (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
         
-        # Preprocess data for training/tuning operations
-        if any([getattr(args, 'use_tuner', False), 
-                getattr(args, 'test_all_models', False),
-                getattr(args, 'train', None) is not None,
-                getattr(args, 'train_all', False)]):
+        # # Preprocess data for training/tuning operations
+        # if any([getattr(args, 'use_tuner', False), 
+                # getattr(args, 'test_all_models', False),
+                # getattr(args, 'train', None) is not None,
+                # getattr(args, 'train_all', False)]):
             
-            print("🔄 Preprocessing images...")
-            x_train = preprocess_images(x_train_raw, for_training=True)
-            x_val = preprocess_images(x_val_raw, for_training=True)
-            x_test = preprocess_images(x_test_raw, for_training=True)
+            # print("🔄 Preprocessing images...")
+            # x_train = preprocess_images(x_train_raw, for_training=True)
+            # x_val = preprocess_images(x_val_raw, for_training=True)
+            # x_test = preprocess_images(x_test_raw, for_training=True)
             
-            # Handle label conversion for models that need it - CREATE NEW VARIABLES
-            if any([getattr(args, 'use_tuner', False),
-                    getattr(args, 'train_all', False),
-                    getattr(args, 'train', None) is not None]):
+            # # Handle label conversion for models that need it 
+            # if any([getattr(args, 'use_tuner', False),
+                    # getattr(args, 'train_all', False),
+                    # getattr(args, 'train', None) is not None]):
                 
-                # Create processed versions without overwriting originals
-                y_train_processed = y_train_raw.copy()
-                y_val_processed = y_val_raw.copy()
-                y_test_processed = y_test_raw.copy()
+                # # Create processed versions without overwriting originals
+                # y_train_processed = y_train_raw.copy()
+                # y_val_processed = y_val_raw.copy()
+                # y_test_processed = y_test_raw.copy()
                 
-                if params.MODEL_ARCHITECTURE == "original_haverland":
-                    y_train_processed = tf.keras.utils.to_categorical(y_train_processed, params.NB_CLASSES)  # ✅ NEW VARIABLE
-                    y_val_processed = tf.keras.utils.to_categorical(y_val_processed, params.NB_CLASSES)      # ✅ NEW VARIABLE
-                    y_test_processed = tf.keras.utils.to_categorical(y_test_processed, params.NB_CLASSES)    # ✅ NEW VARIABLE
+                # if params.MODEL_ARCHITECTURE == "original_haverland":
+                    # y_train_processed = tf.keras.utils.to_categorical(y_train_processed, params.NB_CLASSES)  
+                    # y_val_processed = tf.keras.utils.to_categorical(y_val_processed, params.NB_CLASSES)      
+                    # y_test_processed = tf.keras.utils.to_categorical(y_test_processed, params.NB_CLASSES)    
         
         # DEBUG: Print arguments
         if args.debug:
@@ -2045,7 +2045,7 @@ def main():
                 from tuner import run_architecture_tuning
                 
                 best_model, best_hps, history, tuner = run_architecture_tuning(
-                    x_train, y_train_processed, x_val, y_val_processed,  # ✅ USE PROCESSED
+                    # x_train, y_train_processed, x_val, y_val_processed, 
                     num_trials=getattr(args, 'num_trials', 5),
                     debug=args.debug
                 )
@@ -2107,7 +2107,8 @@ def main():
         elif args.test_all_models:
             # TEST ALL MODELS MODE
             print("🧪 Testing all available models...")
-            test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, debug=args.debug)  # ✅ USE RAW DATA
+            # test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, debug=args.debug)  #  USE RAW DATA
+            test_all_models(debug=args.debug)  # Let test_all_models handle its own data loading
             
         elif getattr(args, 'train', None) is not None:
             # TRAIN SPECIFIC MODELS MODE
