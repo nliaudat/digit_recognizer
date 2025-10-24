@@ -76,7 +76,7 @@ def parse_arguments():
                        help='Train all available model architectures sequentially')
     parser.add_argument('--advanced', action='store_true',
                        help='Enable advanced training features')
-    parser.add_argument('--num_trials', type=int, default=5,
+    parser.add_argument('--num_trials', type=int, default=100,
                        help='Number of tuning trials (default: 5)')
     return parser.parse_args()
     
@@ -130,7 +130,10 @@ def setup_tensorflow_logging(debug=False):
         
         # Suppress all Python warnings
         import warnings
-        warnings.filterwarnings('ignore')
+        # warnings.filterwarnings('ignore')
+        warnings.filterwarnings('ignore', category=UserWarning, module='tensorflow')
+        warnings.filterwarnings('ignore', category=FutureWarning, module='tensorflow')
+        warnings.filterwarnings('ignore', category=DeprecationWarning)
         
         # Suppress other loggers
         import logging
@@ -481,7 +484,7 @@ class TFLiteModelManager:
         
             
     def save_as_tflite_direct(self, model, filename, quantize=False, representative_data=None):
-        """Direct Keras model conversion - Keras 3 compatible"""
+        """Direct Keras model conversion - Keras 3 compatible with REAL data"""
         try:
             # Ensure model is built
             if not model.built:
@@ -493,20 +496,36 @@ class TFLiteModelManager:
             if quantize:
                 converter.optimizations = [tf.lite.Optimize.DEFAULT]
                 
-                # Use provided representative data or create default
+                # Use provided representative data or create REAL default
                 if representative_data is not None:
                     converter.representative_dataset = representative_data
                 else:
-                    def default_representative_dataset():
-                        # Use actual data shape for representative dataset
-                        for _ in range(min(100, params.QUANTIZE_NUM_SAMPLES)):
-                            data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
-                            yield [data]
-                    converter.representative_dataset = default_representative_dataset
+                    def real_representative_dataset():
+                        from utils import get_data_splits, preprocess_images
+                        
+                        # Use real data instead of random
+                        (x_train_raw, _), _, _ = get_data_splits()
+                        num_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                        calibration_data = x_train_raw[:num_samples]
+                        
+                        # Preprocess properly
+                        calibration_processed = preprocess_images(calibration_data, for_training=False)
+                        
+                        # Ensure proper format
+                        if calibration_processed.dtype != np.float32:
+                            calibration_processed = calibration_processed.astype(np.float32)
+                        if calibration_processed.max() > 1.0:
+                            calibration_processed = calibration_processed / 255.0
+                        
+                        if self.debug:
+                            print(f"🔧 Direct conversion - Real calibration: {calibration_processed.dtype}")
+                        
+                        for i in range(len(calibration_processed)):
+                            yield [calibration_processed[i:i+1]]
+                    
+                    converter.representative_dataset = real_representative_dataset
                 
-                # For Keras 3, use dynamic range only initially
-                print("🎯 Using dynamic range quantization (Keras 3 safe)")
-                # Don't set integer I/O types initially
+                print("🎯 Using dynamic range quantization with REAL data (Keras 3 safe)")
             
             # Convert model
             with suppress_all_output(self.debug):
@@ -740,7 +759,7 @@ class TFLiteModelManager:
             raise
             
     def save_as_tflite_simple_keras3(self, model, filename, quantize=False):
-        """Simple reliable method for Keras 3 - with complete output suppression"""
+        """Simple reliable method for Keras 3 - with REAL representative data"""
         try:
             if self.debug:
                 print("🔧 Using simple Keras 3 conversion...")
@@ -754,13 +773,36 @@ class TFLiteModelManager:
                 if self.debug:
                     print("🎯 Dynamic range quantization only (Keras 3 safe)")
                 
-                # Optional: Add representative dataset for better quantization
-                def simple_representative_dataset():
-                    # Create simple representative data
-                    for _ in range(100):
-                        data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
-                        yield [data]
-                converter.representative_dataset = simple_representative_dataset
+                # Use REAL representative dataset instead of random data
+                def real_representative_dataset():
+                    from utils import get_data_splits, preprocess_images
+                    
+                    # Get real training data
+                    (x_train_raw, _), _, _ = get_data_splits()
+                    
+                    # Use a subset for calibration
+                    num_calibration_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                    calibration_data = x_train_raw[:num_calibration_samples]
+                    
+                    # Preprocess the same way as inference
+                    calibration_processed = preprocess_images(calibration_data, for_training=False)
+                    
+                    # Ensure proper format for quantization
+                    if calibration_processed.dtype != np.float32:
+                        calibration_processed = calibration_processed.astype(np.float32)
+                    if calibration_processed.max() > 1.0:
+                        calibration_processed = calibration_processed / 255.0
+                    
+                    if self.debug:
+                        print(f"🔧 Real calibration data: {len(calibration_processed)} samples")
+                        print(f"   Data type: {calibration_processed.dtype}")
+                        print(f"   Range: [{calibration_processed.min():.3f}, {calibration_processed.max():.3f}]")
+                        print(f"   Shape: {calibration_processed.shape}")
+                    
+                    for i in range(len(calibration_processed)):
+                        yield [calibration_processed[i:i+1]]
+                
+                converter.representative_dataset = real_representative_dataset
             
             # Convert with complete output suppression
             with suppress_all_output(self.debug):
@@ -1024,7 +1066,7 @@ class TrainingMonitor:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
         
-        print(f"📊 Training plots saved to: {plot_path}")
+        print(f"Training plots saved to: {plot_path}")
 
 class TFLiteCheckpoint(tf.keras.callbacks.Callback):
     def __init__(self, tflite_manager, representative_data, save_frequency=10):
@@ -1177,7 +1219,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     
     # TQDM progress bar
     callbacks.append(
-        TQDMProgressBar(total_epochs, monitor, tflite_manager, debug)
+        TQDMProgressBar(total_epochs, monitor, debug)
     )
     
     # ROBUST CSV Logger with proper error handling
@@ -1222,63 +1264,26 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     return callbacks
     
 def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    """Create representative dataset that preserves the correct data type"""
+    """Create representative dataset that preserves the correct data type for QAT"""
     def representative_dataset():
         # Use the sophisticated preprocess_images with for_training=False
         x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
         
+        # FOR QAT: Always convert to float32
+        if x_calibration.dtype != np.float32:
+            x_calibration = x_calibration.astype(np.float32)
+            
+        # normalization consistency checking    
+        if x_calibration.max() > 1.0:
+            x_calibration = x_calibration / 255.0
+        
+        print(f"QAT Representative: {x_calibration.dtype}, "
+              f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
+        
         for i in range(len(x_calibration)):
-            # ✅ DON'T convert to float32 - preserve the data type from preprocess_images
-            yield [x_calibration[i:i+1]]  # Keep original dtype (UINT8 for ESP-DL, float32 for others)
+            yield [x_calibration[i:i+1]]  # Keep as float32 for QAT
     
     return representative_dataset
-    
-
-# def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    # """Create representative dataset that preserves the correct data type for QAT"""
-    # def representative_dataset():
-        # # Use the sophisticated preprocess_images with for_training=False
-        # x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
-        
-        # # FOR QAT: Always convert to float32
-        # if x_calibration.dtype != np.float32:
-            # x_calibration = x_calibration.astype(np.float32)
-        
-        # print(f"QAT Representative: {x_calibration.dtype}, "
-              # f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
-        
-        # for i in range(len(x_calibration)):
-            # yield [x_calibration[i:i+1]]  # Keep as float32 for QAT
-    
-    # return representative_dataset
-    
-    
-# def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    # """Create representative dataset with CORRECT data format"""
-    # def representative_dataset():
-        # # Use the same preprocessing as inference
-        # x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
-        
-        # # CRITICAL: Match TFLite expected input format
-        # if params.QUANTIZE_MODEL:
-            # # For quantization: UINT8 [0, 255]
-            # if x_calibration.dtype != np.uint8:
-                # if x_calibration.max() <= 1.0:
-                    # x_calibration = (x_calibration * 255).astype(np.uint8)
-                # else:
-                    # x_calibration = x_calibration.astype(np.uint8)
-        # else:
-            # # For float32: Float32 [0, 1]
-            # if x_calibration.dtype != np.float32:
-                # x_calibration = x_calibration.astype(np.float32)
-        
-        # print(f"Representative dataset: {x_calibration.dtype}, "
-              # f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
-        
-        # for i in range(len(x_calibration)):
-            # yield [x_calibration[i:i+1]]
-    
-    # return representative_dataset
     
 def setup_gpu():
     """Comprehensive GPU configuration"""
@@ -1377,10 +1382,30 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     print(f"  Debug mode: {'Enabled' if debug else 'Disabled'}")
     
 
-def train_model(debug=False):
+def train_model(debug=False, best_hps=None):
     """Main training function with comprehensive handling of all 9 quantization cases"""
     setup_tensorflow_logging(debug)
     set_all_seeds(params.SHUFFLE_SEED)
+    
+    # Apply tuned hyperparameters if provided
+    # if best_hps is not None:
+        # print("🎯 APPLYING TUNED HYPERPARAMETERS:")
+        # print("=" * 50)
+        
+        # # Extract best hyperparameters
+        # best_optimizer = best_hps.get('optimizer')
+        # best_lr = best_hps.get('learning_rate')
+        # best_batch_size = best_hps.get('batch_size')
+        
+        # # Apply to parameters
+        # params.OPTIMIZER_TYPE = best_optimizer
+        # params.LEARNING_RATE = best_lr
+        # params.BATCH_SIZE = best_batch_size
+        
+        # print(f"   Optimizer: {best_optimizer}")
+        # print(f"   Learning Rate: {best_lr}")
+        # print(f"   Batch Size: {best_batch_size}")
+        # print("=" * 50)
     
     # VALIDATE AND CORRECT QUANTIZATION PARAMETERS FIRST
     print("🎯 VALIDATING QUANTIZATION PARAMETERS...")
@@ -1471,92 +1496,9 @@ def train_model(debug=False):
         return None, None, None
     
     # LOAD AND PREPROCESS DATA
-    print("\n📊 Loading dataset from multiple sources...")
+    print("\nLoading dataset from multiple sources...")
     (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
     
-    # # HYPERPARAMETER TUNING  (BEFORE NORMAL TRAINING)
-    # if use_tuner:
-        # print("\n🎯 STARTING HYPERPARAMETER TUNING...")
-        # print("=" * 50)
-        
-        # try:
-            # from tuner import run_architecture_tuning
-            
-            # # Preprocess data for tuning
-            # print("🔄 Preprocessing images for tuning...")
-            # x_train_tune = preprocess_images(x_train_raw, for_training=True)
-            # x_val_tune = preprocess_images(x_val_raw, for_training=True)
-            
-            # # Handle labels for tuning
-            # if params.MODEL_ARCHITECTURE == "original_haverland":
-                # y_train_tune = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
-                # y_val_tune = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES)
-            # else:
-                # y_train_tune = y_train_raw.copy()
-                # y_val_tune = y_val_raw.copy()
-            
-            # # Run tuning
-            # best_model, best_hps, history, tuner = run_architecture_tuning(
-                # x_train=x_train_tune,
-                # y_train=y_train_tune, 
-                # x_val=x_val_tune,
-                # y_val=y_val_tune,
-                # num_trials=num_trials,
-                # debug=debug
-            # )
-            
-            # if best_model and best_hps:
-                # # Update parameters with best values
-                # best_lr = best_hps.get('learning_rate')
-                # best_batch_size = best_hps.get('batch_size')
-                # best_optimizer = best_hps.get('optimizer')
-                
-                # params.LEARNING_RATE = best_lr
-                # params.BATCH_SIZE = best_batch_size
-                
-                # print(f"\n🎯 Optimized hyperparameters found:")
-                # print(f"   Learning Rate: {best_lr}")
-                # print(f"   Batch Size: {best_batch_size}")
-                # if best_optimizer:
-                    # print(f"   Optimizer: {best_optimizer}")
-                # print(f"   Architecture: {params.MODEL_ARCHITECTURE}")
-                
-                # if advanced:
-                    # # Use the tuned model directly
-                    # print("🏁 Using tuned model directly (advanced mode)")
-                    
-                    # # Save the tuned model
-                    # best_model.save(os.path.join(training_dir, "tuned_model.keras"))
-                    
-                    # # Also save tuning configuration
-                    # config_path = os.path.join(training_dir, "tuning_config.txt")
-                    # with open(config_path, 'w') as f:
-                        # f.write(f"Tuned Model Configuration\n")
-                        # f.write("=" * 40 + "\n")
-                        # f.write(f"Model: {params.MODEL_ARCHITECTURE}\n")
-                        # f.write(f"Learning Rate: {best_lr}\n")
-                        # f.write(f"Batch Size: {best_batch_size}\n")
-                        # if best_optimizer:
-                            # f.write(f"Optimizer: {best_optimizer}\n")
-                        # f.write(f"Final Val Accuracy: {history.history['val_accuracy'][-1]:.4f}\n")
-                    
-                    # print(f"💾 Tuned model saved to: {training_dir}")
-                    # return best_model, history, training_dir
-                # else:
-                    # # Continue with normal training using best hyperparameters
-                    # print("🔄 Continuing with normal training using optimized hyperparameters...")
-                    # # We'll continue with the normal training flow below
-            
-            # else:
-                # print("❌ Hyperparameter tuning failed, continuing with default parameters")
-                
-        # except ImportError as e:
-            # print(f"❌ Keras Tuner not available: {e}")
-            # print("💡 Install with: pip install keras-tuner")
-            # print("🔄 Falling back to normal training...")
-        # except Exception as e:
-            # print(f"❌ Hyperparameter tuning failed: {e}")
-            # print("🔄 Falling back to normal training...")
     
     print("🔄 Preprocessing images...")
     x_train = preprocess_images(x_train_raw, for_training=True)
@@ -1620,13 +1562,6 @@ def train_model(debug=False):
     print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
     print(f"   Mean: {x_train.mean():.3f}, Std: {x_train.std():.3f}")
 
-    if x_train.std() < 0.01:
-        print("❌ WARNING: Data has very low variance - might be over-normalized!")
-        
-    print(f"✅ Data verification:")
-    print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
-    print(f"   Mean: {x_train.mean():.3f}, Std: {x_train.std():.3f}")
-    
     if x_train.std() < 0.01:
         print("❌ WARNING: Data has very low variance - might be over-normalized!")
     
@@ -1890,7 +1825,7 @@ def train_model(debug=False):
     
     # Save training configuration
     save_training_config(training_dir, final_quantized_size, final_float_size, tflite_manager,
-                        test_accuracy, tflite_accuracy, training_time, debug)
+                        test_accuracy, tflite_accuracy, training_time, debug, model=model)
                         
     # Save final model checkpoint
     print("💾 Saving final model checkpoint...")
@@ -1927,7 +1862,7 @@ def train_model(debug=False):
     
 
 def save_training_config(training_dir, quantized_size, float_size, tflite_manager, 
-                        test_accuracy, tflite_accuracy, training_time, debug=False):
+                        test_accuracy, tflite_accuracy, training_time, debug=False, model=None):
     """Save training configuration and results to file with enhanced parameters"""
     config_path = os.path.join(training_dir, "training_config.txt")
     
@@ -1995,6 +1930,13 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
         except ImportError:
             print("⚠️  Could not import hyperparameter summary function")
             
+        f.write(f"\nMODEL SUMMARY:\n")    
+        model_summary_text = model_summary(model)
+        if model_summary_text is not None:
+            f.write(model_summary_text)
+        else:
+            f.write("Model summary not available\n")
+            
         f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     
     # Also save as CSV for benchmarking
@@ -2056,12 +1998,13 @@ def test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, models_to_te
         print(f"\n🔍 Testing: {model_name}")
         print("-" * 40)
         
+        # Set current model - IMPORTANT: Update the actual parameter
         params.MODEL_ARCHITECTURE = model_name
         
         try:
             model = create_model()
             
-            if model_name == "original_haverland":
+            if params.MODEL_ARCHITECTURE == "original_haverland":  # Use current model name
                 loss_fn = 'categorical_crossentropy'
                 y_train_current = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)  
                 y_val_current = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES)      
@@ -2110,7 +2053,11 @@ def test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, models_to_te
                 'params': 0,
                 'error': str(e)
             }
+        
+        # Clear session between models
+        tf.keras.backend.clear_session()
     
+    # Restore original model - IMPORTANT: Reset the parameter
     params.MODEL_ARCHITECTURE = original_model
     
     print("\n" + "="*60)
@@ -2139,46 +2086,55 @@ def train_specific_models(models_to_train, debug=False):
         print(f"\n🎯 Training: {model_name}")
         print("=" * 50)
         
-        # Set current model
+        # Set current model - IMPORTANT: Update the actual parameter
         params.MODEL_ARCHITECTURE = model_name
         
         try:
             # Train model with full configuration
             model, history, output_dir = train_model(debug=debug)
             
-            # Extract results
-            from analyse import evaluate_tflite_model
-            quantized_tflite_path = os.path.join(output_dir, params.TFLITE_FILENAME)
-            
-            # Load test data for evaluation
-            (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
-            x_test = preprocess_images(x_test_raw)
-            
-            if model_name == "original_haverland":
-                y_test_current = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES) 
+            if model is not None:  # Only process if training was successful
+                # Extract results
+                from analyse import evaluate_tflite_model
+                quantized_tflite_path = os.path.join(output_dir, params.TFLITE_FILENAME)
+                
+                # Load test data for evaluation
+                (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
+                x_test = preprocess_images(x_test_raw, for_training=False)
+                
+                # Handle labels based on current model type
+                if params.MODEL_ARCHITECTURE == "original_haverland":
+                    y_test_current = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES) 
+                else:
+                    y_test_current = y_test_raw 
+                
+                # Evaluate models
+                keras_test_accuracy = model.evaluate(x_test, y_test_current, verbose=0)[1]
+                
+                tflite_accuracy = 0.0
+                if os.path.exists(quantized_tflite_path) and params.QUANTIZE_MODEL:
+                    tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test_current)
+                
+                results[model_name] = {
+                    'keras_test_accuracy': keras_test_accuracy,
+                    'tflite_accuracy': tflite_accuracy,
+                    'output_dir': output_dir,
+                    'params': model.count_params(),
+                    'model': model
+                }
+                
+                print(f"✅ {model_name} completed:")
+                print(f"   Keras Test Accuracy: {keras_test_accuracy:.4f}")
+                print(f"   TFLite Accuracy: {tflite_accuracy:.4f}")
+                print(f"   Output: {output_dir}")
             else:
-                y_test_current = y_test_raw 
-            
-            # Evaluate models
-            keras_test_accuracy = model.evaluate(x_test, y_test_current, verbose=0)[1]
-            
-            tflite_accuracy = 0.0
-            if os.path.exists(quantized_tflite_path):
-                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test_current)
-            
-            results[model_name] = {
-                'keras_test_accuracy': keras_test_accuracy,
-                'tflite_accuracy': tflite_accuracy,
-                'output_dir': output_dir,
-                'params': model.count_params(),
-                'model': model
-            }
-            
-            print(f"✅ {model_name} completed:")
-            print(f"   Keras Test Accuracy: {keras_test_accuracy:.4f}")
-            print(f"   TFLite Accuracy: {tflite_accuracy:.4f}")
-            print(f"   Output: {output_dir}")
-            
+                print(f"❌ {model_name} training failed (returned None)")
+                results[model_name] = {
+                    'keras_test_accuracy': 0.0,
+                    'tflite_accuracy': 0.0,
+                    'error': 'Training returned None'
+                }
+                
         except Exception as e:
             print(f"❌ {model_name} training failed: {e}")
             if debug:
@@ -2189,8 +2145,11 @@ def train_specific_models(models_to_train, debug=False):
                 'tflite_accuracy': 0.0,
                 'error': str(e)
             }
+        
+        # Clear session to free memory between models
+        tf.keras.backend.clear_session()
     
-    # Restore original model
+    # Restore original model - IMPORTANT: Reset the parameter
     params.MODEL_ARCHITECTURE = original_model
     
     # Print summary
@@ -2318,19 +2277,18 @@ def main():
         # Handle different operation modes
         if getattr(args, 'use_tuner', False):
             # HYPERPARAMETER TUNING MODE
-            print("🚀 Starting training with hyperparameter tuning...")
+            print("🚀 Starting hyperparameter tuning...")
             
-            # REMOVE THE EXTRA try: STATEMENT AND FIX INDENTATION
-            # LOAD DATA FIRST
+            # Load data for tuning
             print("📊 Loading dataset for tuning...")
             (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
             
-            # PREPROCESS DATA
+            # Preprocess data
             print("🔄 Preprocessing images for tuning...")
             x_train = preprocess_images(x_train_raw, for_training=True)
             x_val = preprocess_images(x_val_raw, for_training=True)
             
-            # HANDLE LABELS BASED ON MODEL TYPE
+            # Handle labels based on model type
             if params.MODEL_ARCHITECTURE == "original_haverland":
                 y_train = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
                 y_val = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES)
@@ -2340,66 +2298,49 @@ def main():
             
             from tuner import run_architecture_tuning
             
-            # NOW CALL WITH ALL REQUIRED ARGUMENTS
-            best_model, best_hps, history, tuner = run_architecture_tuning(
+            # Run tuning to find best hyperparameters
+            tuning_results = run_architecture_tuning(
                 x_train=x_train,
                 y_train=y_train, 
                 x_val=x_val,
                 y_val=y_val,
-                num_trials=getattr(args, 'num_trials', 5),
+                num_trials=getattr(args, 'num_trials', params.TUNER_MAX_TRIALS),
                 debug=args.debug
             )
             
-            if best_model and best_hps:
-                # Update parameters with best values
-                best_lr = best_hps.get('learning_rate')
-                best_batch_size = best_hps.get('batch_size')
-                best_optimizer = best_hps.get('optimizer')
+            # if tuning_results:
+                # print(f"\n🎯 APPLYING TUNED HYPERPARAMETERS TO MAIN TRAINING:")
+                # print("=" * 50)
                 
-                params.LEARNING_RATE = best_lr
-                params.BATCH_SIZE = best_batch_size
+                # # Apply tuned parameters
+                # params.OPTIMIZER_TYPE = tuning_results['optimizer']
+                # params.LEARNING_RATE = tuning_results['learning_rate']
+                # params.BATCH_SIZE = tuning_results['batch_size']
                 
-                print(f"\n🎯 Updated with optimized hyperparameters:")
-                print(f"   Learning Rate: {best_lr}")
-                print(f"   Batch Size: {best_batch_size}")
-                if best_optimizer:
-                    print(f"   Optimizer: {best_optimizer}")
-                print(f"   Architecture: {params.MODEL_ARCHITECTURE} (fixed)")
+                # print(f"   Optimizer: {tuning_results['optimizer']}")
+                # print(f"   Learning Rate: {tuning_results['learning_rate']}")
+                # print(f"   Batch Size: {tuning_results['batch_size']}")
+                # print(f"   Tuned Val Accuracy: {tuning_results['val_accuracy']:.4f}")
+                # print("=" * 50)
                 
-                if getattr(args, 'advanced', False):
-                    # Use the tuned model directly
-                    print("🏁 Using tuned model directly (advanced mode)")
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    training_dir = os.path.join(params.OUTPUT_DIR, f"{params.MODEL_ARCHITECTURE}_tuned_{timestamp}")
-                    os.makedirs(training_dir, exist_ok=True)
+                # # Now run the main training with tuned parameters
+                # print("🚀 Starting main training with tuned hyperparameters...")
+                # model, history, output_dir = train_model(debug=args.debug)
+                
+                # if model is not None:
+                    # print(f"\n✅ Training completed successfully!")
+                    # print(f"📁 Output directory: {output_dir}")
                     
-                    # Save the tuned model
-                    best_model.save(os.path.join(training_dir, "tuned_model.keras"))
-                    
-                    # Also save tuning configuration
-                    config_path = os.path.join(training_dir, "tuning_config.txt")
-                    with open(config_path, 'w') as f:
-                        f.write(f"Tuned Model Configuration\n")
-                        f.write("=" * 40 + "\n")
-                        f.write(f"Model: {params.MODEL_ARCHITECTURE}\n")
-                        f.write(f"Learning Rate: {best_lr}\n")
-                        f.write(f"Batch Size: {best_batch_size}\n")
-                        if best_optimizer:
-                            f.write(f"Optimizer: {best_optimizer}\n")
-                        f.write(f"Final Val Accuracy: {history.history['val_accuracy'][-1]:.4f}\n")
-                    
-                    print(f"💾 Tuned model saved to: {training_dir}")
-                else:
-                    # Continue with normal training using best hyperparameters
-                    print("🔄 Retraining from scratch with optimized hyperparameters...")
-                    model, history, output_dir = train_model(debug=args.debug)
-                    print(f"\n✅ Training completed successfully!")
-                    print(f"📁 Output directory: {output_dir}")
-            else:
-                print("❌ Hyperparameter tuning failed, falling back to normal training")
-                model, history, output_dir = train_model(debug=args.debug)
-                print(f"\n✅ Training completed successfully!")
-                print(f"📁 Output directory: {output_dir}")
+                    # # Compare tuned vs final results
+                    # if hasattr(history, 'history') and history.history:
+                        # final_val_acc = history.history['val_accuracy'][-1] if 'val_accuracy' in history.history else 0
+                        # improvement = final_val_acc - tuning_results['val_accuracy']
+                        # print(f"📈 Tuning vs Final: {tuning_results['val_accuracy']:.4f} → {final_val_acc:.4f} (Δ{improvement:+.4f})")
+                # else:
+                    # print("❌ Main training failed after tuning")
+            # else:
+                # print("❌ Hyperparameter tuning failed, using default parameters")
+                # model, history, output_dir = train_model(debug=args.debug)
                 
         elif args.test_all_models:
             # TEST ALL MODELS MODE
@@ -2454,7 +2395,7 @@ def main():
         print("\n⚠️  Operation interrupted by user")
         
     except Exception as e:
-        print(f"\n❌ Operation failed: {e}")
+        print(f"\n❌ MAIN - Operation failed: {e}")
         if args.debug:
             import traceback
             traceback.print_exc()

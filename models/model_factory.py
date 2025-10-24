@@ -138,6 +138,15 @@ def compile_model(model, loss_type='sparse'):
         )
         print(f"🔧 Using AdaGrad optimizer")
         
+    elif params.OPTIMIZER_TYPE == "nadam":
+        optimizer = tf.keras.optimizers.Nadam(
+            learning_rate=params.LEARNING_RATE,
+            beta_1=params.ADAM_BETA_1,  # Use Adam parameters for consistency
+            beta_2=params.ADAM_BETA_2,
+            epsilon=params.ADAM_EPSILON
+        )
+        print(f"🔧 Using Nadam optimizer (beta1={params.ADAM_BETA_1}, beta2={params.ADAM_BETA_2})")
+        
     elif params.OPTIMIZER_TYPE == "adamw":
         # Note: AdamW might require tensorflow-addons or newer TF version
         try:
