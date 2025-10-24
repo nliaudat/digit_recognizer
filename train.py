@@ -102,32 +102,41 @@ def set_all_seeds(seed=params.SHUFFLE_SEED):
 
 # Set TensorFlow logging level based on debug flag
 def setup_tensorflow_logging(debug=False):
-    """Configure TensorFlow logging verbosity"""
+    """Configure TensorFlow logging verbosity - enhanced version"""
     if debug:
         # Enable all TensorFlow logs
         tf.get_logger().setLevel('INFO')
         tf.autograph.set_verbosity(3)
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
+        
+        # Enable other logging
+        import logging
+        logging.getLogger().setLevel(logging.INFO)
     else:
-        # Suppress TensorFlow info and warning messages
+        # MAXIMUM SUPPRESSION - Completely silent
         tf.get_logger().setLevel('ERROR')
         tf.autograph.set_verbosity(0)
         
-        # Suppress ALL TensorFlow C++ logs including warnings and errors
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' ## 0 = all logs, 3 = errors only
+        # Suppress ALL TensorFlow C++ logs
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
         os.environ['TF_CPP_MAX_VLOG_LEVEL'] = '0'
         
         # Suppress absl logging
-        import absl.logging
-        absl.logging.set_verbosity(absl.logging.ERROR)
+        try:
+            import absl.logging
+            absl.logging.set_verbosity(absl.logging.ERROR)
+        except ImportError:
+            pass
         
-        # Suppress specific TensorFlow warnings that still get through
+        # Suppress all Python warnings
         import warnings
-        warnings.filterwarnings('ignore', category=UserWarning, module='tensorflow')
-        warnings.filterwarnings('ignore', category=FutureWarning, module='tensorflow')
+        warnings.filterwarnings('ignore')
         
-        # Also suppress deprecation warnings
-        warnings.filterwarnings('ignore', category=DeprecationWarning, module='tensorflow')
+        # Suppress other loggers
+        import logging
+        logging.getLogger('tensorflow').setLevel(logging.ERROR)
+        logging.getLogger('h5py').setLevel(logging.ERROR)
+        logging.getLogger('numexpr').setLevel(logging.ERROR)
 
 @contextmanager
 def suppress_all_output(debug=False):
@@ -426,7 +435,9 @@ class TFLiteModelManager:
         except Exception as e:
             log_print(f"❌ QAT conversion failed: {e}", level=1)
             # Fallback to non-quantized conversion
-            return self.save_as_tflite_direct(model, filename, quantize=False)
+            # return self.save_as_tflite_direct(model, filename, quantize=False)
+            # Fallback: try without full integer quantization
+            return self._convert_qat_model_fallback(model, filename)
             
     def _convert_qat_model_fallback_enhanced(self, model, filename):
         """Enhanced fallback conversion for QAT model with better debugging"""
@@ -467,9 +478,10 @@ class TFLiteModelManager:
     def _convert_qat_model_fallback(self, model, filename):
         """Legacy fallback - redirect to enhanced version"""
         return self._convert_qat_model_fallback_enhanced(model, filename)
+        
             
     def save_as_tflite_direct(self, model, filename, quantize=False, representative_data=None):
-        """Direct Keras model conversion - most reliable for Keras 3"""
+        """Direct Keras model conversion - Keras 3 compatible"""
         try:
             # Ensure model is built
             if not model.built:
@@ -492,19 +504,9 @@ class TFLiteModelManager:
                             yield [data]
                     converter.representative_dataset = default_representative_dataset
                 
-                # Set quantization specific settings
-                if params.ESP_DL_QUANTIZE:
-                    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-                    converter.inference_input_type = tf.int8
-                    converter.inference_output_type = tf.int8
-                    if self.debug:
-                        print("🔧 ESP-DL INT8 quantization settings applied")
-                else:
-                    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-                    converter.inference_input_type = tf.uint8
-                    converter.inference_output_type = tf.uint8
-                    if self.debug:
-                        print("🔧 Standard UINT8 quantization settings applied")
+                # For Keras 3, use dynamic range only initially
+                print("🎯 Using dynamic range quantization (Keras 3 safe)")
+                # Don't set integer I/O types initially
             
             # Convert model
             with suppress_all_output(self.debug):
@@ -520,50 +522,168 @@ class TFLiteModelManager:
             raise
 
     def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
-        """Save model as TFLite - primary method for Keras 3"""
+        """Save model as TFLite with proper QAT handling and debug control"""
         try:
-            # Always use direct conversion for Keras 3
-            return self.save_as_tflite_direct(model, filename, quantize, representative_data)
+            if self.debug:
+                print(f"🔧 Converting {filename} to TFLite...")
+                print(f"   Quantize: {quantize}, QAT Model: {self._is_qat_model(model)}")
+            
+            # Ensure model is built
+            if not model.built:
+                dummy_input = tf.zeros([1] + list(params.INPUT_SHAPE), dtype=tf.float32)
+                _ = model(dummy_input)
+            
+            # Handle QAT models specifically
+            if quantize and self._is_qat_model(model):
+                if self.debug:
+                    print("🎯 Converting QAT model to quantized TFLite...")
+                return self._convert_qat_model(model, filename, representative_data)
+            
+            # For non-QAT models, use the simple Keras 3 approach but ensure quantization works
+            if quantize:
+                if self.debug:
+                    print("🎯 Converting standard model to quantized TFLite...")
+                return self._convert_standard_quantized(model, filename, representative_data)
+            else:
+                if self.debug:
+                    print("🔧 Converting to float TFLite...")
+                return self.save_as_tflite_simple_keras3(model, filename, quantize=False)
+                
+        except Exception as e:
+            if self.debug:
+                print(f"❌ Primary TFLite conversion failed: {e}")
+                print("🔄 Falling back to saved model approach...")
+            
+            # Fallback to saved model approach
+            return self.save_as_tflite_savedmodel(model, filename, quantize, representative_data)
+            
+    def _convert_standard_quantized(self, model, filename, representative_data=None):
+        """Convert standard (non-QAT) model to quantized TFLite"""
+        try:
+            if self.debug:
+                print("🔧 Converting standard model with quantization...")
+            
+            converter = tf.lite.TFLiteConverter.from_keras_model(model)
+            converter.optimizations = [tf.lite.Optimize.DEFAULT]
+            
+            # Use representative dataset for proper quantization
+            if representative_data is None:
+                def default_representative_dataset():
+                    from utils import get_data_splits, preprocess_images
+                    (x_train_raw, _), _, _ = get_data_splits()
+                    calibration_data = x_train_raw[:params.QUANTIZE_NUM_SAMPLES]
+                    calibration_processed = preprocess_images(calibration_data, for_training=False)
+                    
+                    # Ensure proper format for quantization
+                    if calibration_processed.dtype != np.float32:
+                        calibration_processed = calibration_processed.astype(np.float32)
+                    if calibration_processed.max() > 1.0:
+                        calibration_processed = calibration_processed / 255.0
+                    
+                    if self.debug:
+                        print(f"🔧 Calibration data: {calibration_processed.dtype}, "
+                              f"range: [{calibration_processed.min():.3f}, {calibration_processed.max():.3f}]")
+                    
+                    for i in range(len(calibration_processed)):
+                        yield [calibration_processed[i:i+1]]
+                
+                converter.representative_dataset = default_representative_dataset
+            else:
+                converter.representative_dataset = representative_data
+            
+            # Set quantization based on ESP-DL setting
+            if params.ESP_DL_QUANTIZE:
+                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+                converter.inference_input_type = tf.int8
+                converter.inference_output_type = tf.int8
+                if self.debug:
+                    print("🎯 ESP-DL INT8 quantization")
+            else:
+                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+                converter.inference_input_type = tf.uint8
+                converter.inference_output_type = tf.uint8
+                if self.debug:
+                    print("🎯 Standard UINT8 quantization")
+            
+            # Convert with output suppression
+            with suppress_all_output(self.debug):
+                tflite_model = converter.convert()
+            
+            return self._save_tflite_file(tflite_model, filename, True)
             
         except Exception as e:
-            print(f"❌ TFLite conversion failed: {e}")
-            print("💡 Try using TensorFlow 2.x for better TFLite compatibility")
-            return None, 0
+            if self.debug:
+                print(f"❌ Standard quantization failed: {e}")
+                print("🔄 Falling back to dynamic range quantization...")
             
+            # Fallback to dynamic range only
+            return self.save_as_tflite_simple_keras3(model, filename, quantize=True)
 
     def save_as_tflite_savedmodel(self, model, filename, quantize=False, representative_data=None):
-        """Use SavedModel approach for conversion - Keras 3 compatible"""
+        """Use SavedModel approach for conversion - Keras 3 FIXED"""
         try:
             import tempfile
             
             with tempfile.TemporaryDirectory() as temp_dir:
+                # Keras 3: Use model.export() for SavedModel format
                 model_dir = os.path.join(temp_dir, "saved_model")
                 
-                # Keras 3 compatible saving - remove save_format argument
-                model.save(model_dir)  # This will save as SavedModel by default
+                # Use export() method for SavedModel in Keras 3
+                model.export(model_dir)
                 
+                # Verify the SavedModel was created
+                saved_model_pb = os.path.join(model_dir, "saved_model.pb")
+                if not os.path.exists(saved_model_pb):
+                    raise FileNotFoundError(f"SavedModel not properly created at {model_dir}")
+                
+                print(f"✅ SavedModel created at: {model_dir}")
+                
+                # Load from SavedModel
                 converter = tf.lite.TFLiteConverter.from_saved_model(model_dir)
                 
                 if quantize:
                     converter.optimizations = [tf.lite.Optimize.DEFAULT]
+                    
+                    # Use proper representative dataset
                     if representative_data is not None:
                         converter.representative_dataset = representative_data
                     else:
                         def default_representative_dataset():
-                            for _ in range(params.QUANTIZE_NUM_SAMPLES):
-                                data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
-                                yield [data]
+                            # Use actual data instead of random data
+                            from utils import get_data_splits, preprocess_images
+                            (x_train_raw, _), _, _ = get_data_splits()
+                            calib_data = x_train_raw[:min(100, params.QUANTIZE_NUM_SAMPLES)]
+                            
+                            # Use inference preprocessing
+                            calib_processed = preprocess_images(calib_data, for_training=False)
+                            
+                            # Ensure float32 for calibration
+                            if calib_processed.dtype != np.float32:
+                                calib_processed = calib_processed.astype(np.float32)
+                            if calib_processed.max() > 1.0:
+                                calib_processed = calib_processed / 255.0
+                                
+                            print(f"🔧 SavedModel Calibration: {calib_processed.dtype}, "
+                                  f"range: [{calib_processed.min():.3f}, {calib_processed.max():.3f}]")
+                            
+                            for i in range(len(calib_processed)):
+                                yield [calib_processed[i:i+1]]
+                        
                         converter.representative_dataset = default_representative_dataset
                     
+                    # Set quantization settings
                     if params.ESP_DL_QUANTIZE:
                         converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                         converter.inference_input_type = tf.int8
                         converter.inference_output_type = tf.int8
+                        print("🎯 ESP-DL INT8 quantization for SavedModel")
                     else:
                         converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                         converter.inference_input_type = tf.uint8
                         converter.inference_output_type = tf.uint8
+                        print("🎯 Standard UINT8 quantization for SavedModel")
                 
+                # Convert model
                 with suppress_all_output(self.debug):
                     tflite_model = converter.convert()
                 
@@ -571,20 +691,163 @@ class TFLiteModelManager:
                     
         except Exception as e:
             print(f"❌ SavedModel conversion failed: {e}")
+            print("🔄 Trying Keras 3 alternative approach...")
+            return self.save_as_tflite_keras3_alternative(model, filename, quantize, representative_data)
+            
+    def save_as_tflite_keras3_alternative(self, model, filename, quantize=False, representative_data=None):
+        """Keras 3 alternative conversion method"""
+        try:
+            print("🔧 Using Keras 3 alternative conversion...")
+            
+            # Method 1: Direct conversion (should work in Keras 3)
+            converter = tf.lite.TFLiteConverter.from_keras_model(model)
+            
+            if quantize:
+                converter.optimizations = [tf.lite.Optimize.DEFAULT]
+                
+                # Use representative dataset
+                if representative_data is None:
+                    def representative_dataset():
+                        from utils import get_data_splits, preprocess_images
+                        (x_train_raw, _), _, _ = get_data_splits()
+                        calib_data = x_train_raw[:min(100, params.QUANTIZE_NUM_SAMPLES)]
+                        calib_processed = preprocess_images(calib_data, for_training=False)
+                        
+                        # Ensure float32
+                        if calib_processed.dtype != np.float32:
+                            calib_processed = calib_processed.astype(np.float32)
+                        if calib_processed.max() > 1.0:
+                            calib_processed = calib_processed / 255.0
+                        
+                        print(f"🔧 Keras3 Calibration: {calib_processed.dtype}, "
+                              f"range: [{calib_processed.min():.3f}, {calib_processed.max():.3f}]")
+                        
+                        for i in range(len(calib_processed)):
+                            yield [calib_processed[i:i+1]]
+                    
+                    converter.representative_dataset = representative_dataset
+                
+                # For Keras 3, start with dynamic range only (more reliable)
+                print("🎯 Using dynamic range quantization (Keras 3 compatible)")
+            
+            # Convert
+            tflite_model = converter.convert()
+            
+            return self._save_tflite_file(tflite_model, filename, quantize)
+            
+        except Exception as e:
+            print(f"❌ Keras 3 alternative failed: {e}")
             raise
+            
+    def save_as_tflite_simple_keras3(self, model, filename, quantize=False):
+        """Simple reliable method for Keras 3 - with complete output suppression"""
+        try:
+            if self.debug:
+                print("🔧 Using simple Keras 3 conversion...")
+            
+            # Always use direct conversion in Keras 3
+            converter = tf.lite.TFLiteConverter.from_keras_model(model)
+            
+            if quantize:
+                # Use ONLY dynamic range quantization (most reliable in Keras 3)
+                converter.optimizations = [tf.lite.Optimize.DEFAULT]
+                if self.debug:
+                    print("🎯 Dynamic range quantization only (Keras 3 safe)")
+                
+                # Optional: Add representative dataset for better quantization
+                def simple_representative_dataset():
+                    # Create simple representative data
+                    for _ in range(100):
+                        data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
+                        yield [data]
+                converter.representative_dataset = simple_representative_dataset
+            
+            # Convert with complete output suppression
+            with suppress_all_output(self.debug):
+                tflite_model = converter.convert()
+            
+            # Save
+            model_path = os.path.join(self.output_dir, filename)
+            with open(model_path, 'wb') as f:
+                f.write(tflite_model)
+            
+            model_size_kb = len(tflite_model) / 1024
+            quant_type = "DynamicQuant" if quantize else "Float32"
+            
+            # Only print if debug is enabled
+            if self.debug:
+                print(f"💾 Saved {filename} ({quant_type}): {model_size_kb:.1f} KB")
+                
+                # Test the converted model (only in debug mode)
+                self.test_tflite_model(model_path)
+            else:
+                # Silent mode: just do a basic check without output
+                try:
+                    interpreter = tf.lite.Interpreter(model_path=model_path)
+                    interpreter.allocate_tensors()
+                except Exception:
+                    # If basic check fails, we still want to know even in non-debug mode
+                    print(f"❌ TFLite model verification failed for {filename}")
+                    return None, 0
+            
+            return tflite_model, model_size_kb
+            
+        except Exception as e:
+            # Always show errors, even in non-debug mode
+            print(f"❌ Simple Keras 3 conversion failed: {e}")
+            return None, 0
 
-    def _save_tflite_file(self, tflite_model, filename, quantize):
-        """Save TFLite model to file"""
-        model_path = os.path.join(self.output_dir, filename)
-        with open(model_path, 'wb') as f:
-            f.write(tflite_model)
-        
-        model_size_kb = len(tflite_model) / 1024
-        if self.debug:
-            quant_type = "INT8" if (quantize and params.ESP_DL_QUANTIZE) else "UINT8" if quantize else "Float32"
-            print(f"💾 Saved {filename} ({quant_type}): {model_size_kb:.1f} KB")
-        
-        return tflite_model, model_size_kb
+    def test_tflite_model(self, tflite_path):
+        """Quick test of TFLite model - only outputs in debug mode"""
+        try:
+            interpreter = tf.lite.Interpreter(model_path=tflite_path)
+            interpreter.allocate_tensors()
+            
+            if self.debug:
+                input_details = interpreter.get_input_details()
+                output_details = interpreter.get_output_details()
+                
+                print(f"✅ TFLite model loaded successfully:")
+                print(f"   Input: {input_details[0]['dtype']}, shape: {input_details[0]['shape']}")
+                print(f"   Output: {output_details[0]['dtype']}, shape: {output_details[0]['shape']}")
+            
+            return True
+        except Exception as e:
+            # Always show errors, even in non-debug mode
+            print(f"❌ TFLite model test failed: {e}")
+            return False
+
+    def _save_tflite_file(self, tflite_model, filename, quantize=False):
+        """Save TFLite model to file with debug control"""
+        try:
+            model_path = os.path.join(self.output_dir, filename)
+            with open(model_path, 'wb') as f:
+                f.write(tflite_model)
+            
+            model_size_kb = len(tflite_model) / 1024
+            quant_type = "Quantized" if quantize else "Float32"
+            
+            # Only print in debug mode
+            if self.debug:
+                print(f"💾 Saved {filename} ({quant_type}): {model_size_kb:.1f} KB")
+                
+                # Test the model only in debug mode
+                self.test_tflite_model(model_path)
+            else:
+                # Silent verification
+                try:
+                    interpreter = tf.lite.Interpreter(model_path=model_path)
+                    interpreter.allocate_tensors()
+                except Exception as e:
+                    print(f"❌ TFLite model verification failed: {e}")
+                    return None, 0
+            
+            return tflite_model, model_size_kb
+            
+        except Exception as e:
+            print(f"❌ Failed to save TFLite file: {e}")
+            return None, 0
+
     
     def save_best_model(self, model, accuracy, representative_data=None):
         """Save model if it's the best so far"""
@@ -622,7 +885,7 @@ class TFLiteModelManager:
                 
                 return size_kb
             except Exception as e:
-                print(f"❌ TFLite conversion failed: {e}")
+                print(f"❌ TFLite conversion failed in save best model: {e}")
                 return None
         return None
         
@@ -957,24 +1220,65 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
                 print(f"      File: {getattr(callback, 'filename', 'N/A')}")
     
     return callbacks
-
+    
 def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    """Create representative dataset that preserves the correct data type for QAT"""
+    """Create representative dataset that preserves the correct data type"""
     def representative_dataset():
         # Use the sophisticated preprocess_images with for_training=False
         x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
         
-        # FOR QAT: Always convert to float32
-        if x_calibration.dtype != np.float32:
-            x_calibration = x_calibration.astype(np.float32)
-        
-        print(f"QAT Representative: {x_calibration.dtype}, "
-              f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
-        
         for i in range(len(x_calibration)):
-            yield [x_calibration[i:i+1]]  # Keep as float32 for QAT
+            # ✅ DON'T convert to float32 - preserve the data type from preprocess_images
+            yield [x_calibration[i:i+1]]  # Keep original dtype (UINT8 for ESP-DL, float32 for others)
     
     return representative_dataset
+    
+
+# def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
+    # """Create representative dataset that preserves the correct data type for QAT"""
+    # def representative_dataset():
+        # # Use the sophisticated preprocess_images with for_training=False
+        # x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
+        
+        # # FOR QAT: Always convert to float32
+        # if x_calibration.dtype != np.float32:
+            # x_calibration = x_calibration.astype(np.float32)
+        
+        # print(f"QAT Representative: {x_calibration.dtype}, "
+              # f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
+        
+        # for i in range(len(x_calibration)):
+            # yield [x_calibration[i:i+1]]  # Keep as float32 for QAT
+    
+    # return representative_dataset
+    
+    
+# def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
+    # """Create representative dataset with CORRECT data format"""
+    # def representative_dataset():
+        # # Use the same preprocessing as inference
+        # x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
+        
+        # # CRITICAL: Match TFLite expected input format
+        # if params.QUANTIZE_MODEL:
+            # # For quantization: UINT8 [0, 255]
+            # if x_calibration.dtype != np.uint8:
+                # if x_calibration.max() <= 1.0:
+                    # x_calibration = (x_calibration * 255).astype(np.uint8)
+                # else:
+                    # x_calibration = x_calibration.astype(np.uint8)
+        # else:
+            # # For float32: Float32 [0, 1]
+            # if x_calibration.dtype != np.float32:
+                # x_calibration = x_calibration.astype(np.float32)
+        
+        # print(f"Representative dataset: {x_calibration.dtype}, "
+              # f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
+        
+        # for i in range(len(x_calibration)):
+            # yield [x_calibration[i:i+1]]
+    
+    # return representative_dataset
     
 def setup_gpu():
     """Comprehensive GPU configuration"""

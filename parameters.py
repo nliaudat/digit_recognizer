@@ -80,10 +80,10 @@ DATA_SOURCES = [
         # 'weight': 0.3,
     # },
     # {
-    #     'name': 'meterdigits_10',
-    #     'type': 'folder_structure',
-    #     'path': 'datasets/meterdigits_10',
-    #     'weight': 1.0,
+        # 'name': 'meterdigits_10',
+        # 'type': 'folder_structure',
+        # 'path': 'datasets/meterdigits_10',
+        # 'weight': 1.0,
     # },
     # {
         # 'name': 'meterdigits_10_augmented',

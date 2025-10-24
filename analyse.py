@@ -589,3 +589,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+    
+# py analyse.py --model_dir exported_models/digit_recognizer_v4_10cls_QAT_QUANT_GRAY
