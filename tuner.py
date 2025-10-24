@@ -8,6 +8,9 @@ from datetime import datetime
 import random
 import numpy as np
 from itertools import product
+import json
+import csv  # Add CSV import
+import pandas as pd  # Add pandas for better CSV handling
 
 class GuaranteedBayesianOptimization(kt.BayesianOptimization):
     """Bayesian Optimization that guarantees unique hyperparameter combinations"""
@@ -127,6 +130,183 @@ def build_model(hp):
     
     return model
 
+def save_tuning_results_csv(tuner, output_dir, search_type="guaranteed_unique"):
+    """Save detailed tuning results to CSV file"""
+    
+    # Get all trials
+    trials = tuner.oracle.get_best_trials(num_trials=len(tuner.oracle.trials))
+    
+    # Prepare CSV data
+    csv_data = []
+    
+    for i, trial in enumerate(trials):
+        if trial and trial.score is not None:
+            csv_data.append({
+                'trial_id': i + 1,
+                'trial_trial_id': trial.trial_id,
+                'optimizer': trial.hyperparameters.get('optimizer'),
+                'learning_rate': trial.hyperparameters.get('learning_rate'),
+                'batch_size': trial.hyperparameters.get('batch_size'),
+                'val_accuracy': trial.score,
+                'status': trial.status,
+                'score': trial.score,
+                'search_type': search_type,
+                'model_architecture': params.MODEL_ARCHITECTURE,
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+    
+    # Create CSV file path
+    csv_path = os.path.join(output_dir, "detailed_tuning_results.csv")
+    
+    # Write to CSV
+    if csv_data:
+        df = pd.DataFrame(csv_data)
+        
+        # Sort by validation accuracy (descending)
+        df = df.sort_values('val_accuracy', ascending=False)
+        
+        # Save to CSV
+        df.to_csv(csv_path, index=False)
+        
+        print(f"📊 Detailed tuning results saved to CSV: {csv_path}")
+        print(f"   📈 Total trials recorded: {len(csv_data)}")
+        print(f"   🏆 Best accuracy: {df['val_accuracy'].max():.4f}")
+        print(f"   📉 Worst accuracy: {df['val_accuracy'].min():.4f}")
+        print(f"   📊 Average accuracy: {df['val_accuracy'].mean():.4f}")
+        
+        return csv_path
+    else:
+        print("⚠️  No trial data available for CSV export")
+        return None
+
+def save_manual_search_results_csv(results, output_dir):
+    """Save manual search results to CSV file"""
+    
+    csv_data = []
+    
+    for i, result in enumerate(results):
+        csv_data.append({
+            'trial_id': i + 1,
+            'trial_trial_id': f"manual_{i+1}",
+            'optimizer': result['optimizer'],
+            'learning_rate': result['learning_rate'],
+            'batch_size': result['batch_size'],
+            'val_accuracy': result['val_accuracy'],
+            'status': 'COMPLETED',
+            'score': result['val_accuracy'],
+            'search_type': 'manual',
+            'model_architecture': params.MODEL_ARCHITECTURE,
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+    
+    # Create CSV file path
+    csv_path = os.path.join(output_dir, "detailed_tuning_results.csv")
+    
+    if csv_data:
+        df = pd.DataFrame(csv_data)
+        
+        # Sort by validation accuracy (descending)
+        df = df.sort_values('val_accuracy', ascending=False)
+        
+        # Save to CSV
+        df.to_csv(csv_path, index=False)
+        
+        print(f"📊 Manual search results saved to CSV: {csv_path}")
+        print(f"   📈 Total trials recorded: {len(csv_data)}")
+        print(f"   🏆 Best accuracy: {df['val_accuracy'].max():.4f}")
+        print(f"   📉 Worst accuracy: {df['val_accuracy'].min():.4f}")
+        print(f"   📊 Average accuracy: {df['val_accuracy'].mean():.4f}")
+        
+        return csv_path
+    else:
+        print("⚠️  No manual search data available for CSV export")
+        return None
+
+def save_best_hyperparameters_json(best_params, output_dir):
+    """Save best hyperparameters to JSON file for use in parameters.py"""
+    
+    json_data = {
+        "BEST_OPTIMIZER": best_params['optimizer'],
+        "BEST_LEARNING_RATE": best_params['learning_rate'],
+        "BEST_BATCH_SIZE": best_params['batch_size'],
+        "BEST_VAL_ACCURACY": float(best_params['val_accuracy']),
+        "TUNING_TIMESTAMP": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "MODEL_ARCHITECTURE": params.MODEL_ARCHITECTURE,
+        "SEARCH_STRATEGY": best_params.get('search_strategy', 'guaranteed_unique')
+    }
+    
+    json_path = os.path.join(output_dir, "best_hyperparameters.json")
+    
+    with open(json_path, 'w') as f:
+        json.dump(json_data, f, indent=4)
+    
+    print(f"💾 Best hyperparameters saved to JSON: {json_path}")
+    
+    # Also create a Python-friendly version for easy copying to parameters.py
+    py_path = os.path.join(output_dir, "best_hyperparameters_for_parameters.py")
+    with open(py_path, 'w') as f:
+        f.write("# Best Hyperparameters for parameters.py\n")
+        f.write("# Copy these values to your parameters.py file\n\n")
+        f.write(f"BEST_OPTIMIZER = '{best_params['optimizer']}'\n")
+        f.write(f"BEST_LEARNING_RATE = {best_params['learning_rate']}\n")
+        f.write(f"BEST_BATCH_SIZE = {best_params['batch_size']}\n")
+        f.write(f"# Best validation accuracy: {best_params['val_accuracy']:.4f}\n")
+        f.write(f"# Tuning completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"# Model architecture: {params.MODEL_ARCHITECTURE}\n")
+    
+    print(f"🐍 Python version saved to: {py_path}")
+    
+    return json_path, py_path
+
+def create_tuning_summary(tuner, output_dir, best_params, search_type="guaranteed_unique"):
+    """Create a comprehensive tuning summary"""
+    
+    summary_path = os.path.join(output_dir, "tuning_summary.txt")
+    
+    with open(summary_path, 'w') as f:
+        f.write("HYPERPARAMETER TUNING SUMMARY\n")
+        f.write("=" * 60 + "\n\n")
+        
+        f.write(f"Model Architecture: {params.MODEL_ARCHITECTURE}\n")
+        f.write(f"Search Type: {search_type}\n")
+        f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Input Shape: {params.INPUT_SHAPE}\n")
+        f.write(f"Output Directory: {output_dir}\n\n")
+        
+        f.write("BEST HYPERPARAMETERS:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Optimizer: {best_params['optimizer']}\n")
+        f.write(f"Learning Rate: {best_params['learning_rate']}\n")
+        f.write(f"Batch Size: {best_params['batch_size']}\n")
+        f.write(f"Validation Accuracy: {best_params['val_accuracy']:.4f}\n\n")
+        
+        # Trial statistics
+        trials = tuner.oracle.get_best_trials(num_trials=len(tuner.oracle.trials))
+        valid_trials = [t for t in trials if t and t.score is not None]
+        
+        if valid_trials:
+            accuracies = [t.score for t in valid_trials]
+            f.write("TRIAL STATISTICS:\n")
+            f.write("-" * 40 + "\n")
+            f.write(f"Total Trials: {len(valid_trials)}\n")
+            f.write(f"Best Accuracy: {max(accuracies):.4f}\n")
+            f.write(f"Worst Accuracy: {min(accuracies):.4f}\n")
+            f.write(f"Average Accuracy: {np.mean(accuracies):.4f}\n")
+            f.write(f"Standard Deviation: {np.std(accuracies):.4f}\n\n")
+            
+            # Top 5 configurations
+            f.write("TOP 5 CONFIGURATIONS:\n")
+            f.write("-" * 40 + "\n")
+            sorted_trials = sorted(valid_trials, key=lambda x: x.score, reverse=True)[:5]
+            for i, trial in enumerate(sorted_trials):
+                f.write(f"{i+1}. Optimizer: {trial.hyperparameters.get('optimizer')}, "
+                       f"LR: {trial.hyperparameters.get('learning_rate')}, "
+                       f"BS: {trial.hyperparameters.get('batch_size')}, "
+                       f"Accuracy: {trial.score:.4f}\n")
+    
+    print(f"📋 Tuning summary saved to: {summary_path}")
+    return summary_path
+
 def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, debug=False):
     """Tune hyperparameters using Guaranteed Bayesian Optimization"""
     
@@ -222,7 +402,7 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
         print(f"  Validation Accuracy: {best_score:.4f}")
         print("=" * 50)
         
-        # Save results
+        # Save results to text file
         results_path = os.path.join(output_dir, "guaranteed_tuning_results.txt")
         with open(results_path, 'w') as f:
             f.write(f"Guaranteed Unique Hyperparameter Optimization Results\n")
@@ -250,7 +430,8 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
         
         print(f"💾 Guaranteed unique optimization results saved to: {results_path}")
         
-        return {
+        # Create best parameters dictionary
+        best_params = {
             'optimizer': best_optimizer,
             'learning_rate': best_lr,
             'batch_size': best_batch_size,
@@ -258,6 +439,24 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
             'output_dir': output_dir,
             'search_strategy': 'guaranteed_unique'
         }
+        
+        # Save detailed CSV results
+        csv_path = save_tuning_results_csv(tuner, output_dir, "guaranteed_unique")
+        
+        # Create comprehensive summary
+        summary_path = create_tuning_summary(tuner, output_dir, best_params, "guaranteed_unique")
+        
+        # Save to JSON for use in parameters.py
+        json_path, py_path = save_best_hyperparameters_json(best_params, output_dir)
+        
+        print(f"\n🎉 Tuning completed successfully!")
+        print(f"📁 All results saved in: {output_dir}")
+        print(f"   📊 CSV: detailed_tuning_results.csv")
+        print(f"   📋 Summary: tuning_summary.txt")
+        print(f"   🏆 Best params: best_hyperparameters.json")
+        print(f"   🐍 Python ready: best_hyperparameters_for_parameters.py")
+        
+        return best_params
         
     except Exception as e:
         print(f"❌ Guaranteed unique optimization failed: {e}")
@@ -345,5 +544,51 @@ def manual_hyperparameter_search(x_train, y_train, x_val, y_val, num_trials=10, 
     print(f"  Batch size: {best_result['batch_size']}")
     print(f"  Validation Accuracy: {best_result['val_accuracy']:.4f}")
     print("=" * 50)
+    
+    # Create output directory for manual search results
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = os.path.join(params.OUTPUT_DIR, f"manual_tune_{params.MODEL_ARCHITECTURE}_{timestamp}")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Add output directory to result
+    best_result['output_dir'] = output_dir
+    best_result['search_strategy'] = 'manual'
+    
+    # Save detailed CSV results
+    csv_path = save_manual_search_results_csv(results, output_dir)
+    
+    # Save to JSON for use in parameters.py
+    json_path, py_path = save_best_hyperparameters_json(best_result, output_dir)
+    
+    # Create comprehensive summary for manual search
+    summary_path = os.path.join(output_dir, "tuning_summary.txt")
+    with open(summary_path, 'w') as f:
+        f.write("MANUAL HYPERPARAMETER TUNING SUMMARY\n")
+        f.write("=" * 60 + "\n\n")
+        f.write(f"Model Architecture: {params.MODEL_ARCHITECTURE}\n")
+        f.write(f"Search Type: Manual\n")
+        f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Trials Completed: {len(results)}\n\n")
+        
+        f.write("BEST HYPERPARAMETERS:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Optimizer: {best_result['optimizer']}\n")
+        f.write(f"Learning Rate: {best_result['learning_rate']}\n")
+        f.write(f"Batch Size: {best_result['batch_size']}\n")
+        f.write(f"Validation Accuracy: {best_result['val_accuracy']:.4f}\n\n")
+        
+        # Statistics
+        accuracies = [r['val_accuracy'] for r in results]
+        f.write("SEARCH STATISTICS:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Total Trials: {len(results)}\n")
+        f.write(f"Best Accuracy: {max(accuracies):.4f}\n")
+        f.write(f"Worst Accuracy: {min(accuracies):.4f}\n")
+        f.write(f"Average Accuracy: {np.mean(accuracies):.4f}\n")
+        f.write(f"Standard Deviation: {np.std(accuracies):.4f}\n")
+    
+    print(f"📋 Manual search summary saved to: {summary_path}")
+    print(f"\n🎉 Manual search completed successfully!")
+    print(f"📁 All results saved in: {output_dir}")
     
     return best_result
