@@ -1759,12 +1759,12 @@ def test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, models_to_te
             
             if model_name == "original_haverland":
                 loss_fn = 'categorical_crossentropy'
-                y_train_current = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)  # ✅ NEW VARIABLE
-                y_val_current = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES)      # ✅ NEW VARIABLE
+                y_train_current = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)  
+                y_val_current = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES)      
             else:
                 loss_fn = 'sparse_categorical_crossentropy'
-                y_train_current = y_train_raw  # ✅ NEW VARIABLE
-                y_val_current = y_val_raw      # ✅ NEW VARIABLE
+                y_train_current = y_train_raw  
+                y_val_current = y_val_raw      
             
             model.compile(
                 optimizer='adam',
@@ -1776,8 +1776,8 @@ def test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, models_to_te
             val_samples = min(200, len(x_val_raw))
             
             history = model.fit(
-                x_train_raw[:train_samples], y_train_current[:train_samples],  # ✅ USE NEW VARIABLE
-                validation_data=(x_val_raw[:val_samples], y_val_current[:val_samples]),  # ✅ USE NEW VARIABLE
+                x_train_raw[:train_samples], y_train_current[:train_samples],  
+                validation_data=(x_val_raw[:val_samples], y_val_current[:val_samples]),  
                 epochs=5,
                 batch_size=32,
                 verbose=1 if debug else 0
@@ -1851,16 +1851,16 @@ def train_specific_models(models_to_train, debug=False):
             x_test = preprocess_images(x_test_raw)
             
             if model_name == "original_haverland":
-                y_test_current = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)  # ✅ NEW VARIABLE
+                y_test_current = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES) 
             else:
-                y_test_current = y_test_raw  # ✅ NEW VARIABLE
+                y_test_current = y_test_raw 
             
             # Evaluate models
-            keras_test_accuracy = model.evaluate(x_test, y_test_current, verbose=0)[1]  # ✅ USE NEW VARIABLE
+            keras_test_accuracy = model.evaluate(x_test, y_test_current, verbose=0)[1]
             
             tflite_accuracy = 0.0
             if os.path.exists(quantized_tflite_path):
-                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test_current)  # ✅ USE NEW VARIABLE
+                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test_current)
             
             results[model_name] = {
                 'keras_test_accuracy': keras_test_accuracy,

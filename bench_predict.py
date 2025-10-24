@@ -13,6 +13,8 @@ import csv
 from datetime import datetime
 import time
 import matplotlib.pyplot as plt
+from pathlib import Path
+from utils.multi_source_loader import MultiSourceDataLoader, load_combined_dataset
 
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
@@ -33,82 +35,219 @@ class TFLiteDigitPredictor:
         
         print(f"Input shape: {self.input_details[0]['shape']}")
         print(f"Input type: {self.input_details[0]['dtype']}")
-        print(f"Output type: {self.output_details[0]['dtype']}")
         print(f"Output shape: {self.output_details[0]['shape']}")
-        
-        # Print quantization info
-        if self.input_details[0]['quantization'][0] != 0:
-            input_scale, input_zero_point = self.input_details[0]['quantization']
-            print(f"Input quantization: scale={input_scale}, zero_point={input_zero_point}")
-        else:
-            print("Model type: Float32 (non-quantized)")
     
-    def predict(self, image, rgb_mode=False, debug=False):
+    def predict(self, image, debug=False):
         """Predict digit from image using TFLite"""
-        # Preprocess image
-        processed_image = self.preprocess_image_for_prediction(image, rgb_mode=rgb_mode)
+        # Preprocess image - use silent mode to avoid debug outputs
+        processed_image = predict_single_image_silent(image)
         
-        # Add batch dimension
-        input_data = np.expand_dims(processed_image, axis=0)
+        # Handle channel mismatch - if model expects 3 channels but we have 1
+        expected_channels = self.input_details[0]['shape'][3]
+        if len(processed_image.shape) == 3 and processed_image.shape[2] == 1 and expected_channels == 3:
+            processed_image = np.repeat(processed_image, 3, axis=2)
+        
+        # Add batch dimension if not already present
+        if len(processed_image.shape) == 3:
+            input_data = np.expand_dims(processed_image, axis=0)
+        else:
+            input_data = processed_image
         
         # Handle quantization if needed
         if self.input_details[0]['dtype'] == np.uint8:
             input_data = input_data.astype(np.uint8)
         elif self.input_details[0]['dtype'] == np.int8:
             input_scale, input_zero_point = self.input_details[0]['quantization']
-            input_data = (input_data / input_scale + input_zero_point).astype(np.int8)
+            if input_data.dtype == np.float32:
+                input_data = (input_data / input_scale + input_zero_point).astype(np.int8)
+            else:
+                input_data = input_data.astype(np.int8)
         else:
             input_data = input_data.astype(np.float32)
         
-        # Set input tensor
-        self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
+        # Verify shape matches expected input shape
+        expected_shape = self.input_details[0]['shape']
+        if input_data.shape != tuple(expected_shape):
+            if input_data.size == np.prod(expected_shape):
+                input_data = input_data.reshape(expected_shape)
+            else:
+                return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
         
-        # Run inference
-        self.interpreter.invoke()
+        try:
+            # Set input tensor
+            self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
+            
+            # Run inference
+            self.interpreter.invoke()
+            
+            # Get output
+            output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
+            
+            # Handle output quantization if needed
+            if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
+                output_scale, output_zero_point = self.output_details[0]['quantization']
+                output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
+            
+            # Get prediction and confidence
+            prediction = np.argmax(output_data[0])
+            confidence = np.max(output_data[0])
+            
+            return prediction, confidence, output_data[0]
         
-        # Get output
-        output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
-        
-        # Handle output quantization if needed
-        if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
-            output_scale, output_zero_point = self.output_details[0]['quantization']
-            output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
-        
-        # DEBUG: Print raw output only in debug mode
-        if debug:
-            print(f"Raw output: {output_data[0]}")
-            print(f"Output sum: {np.sum(output_data[0]):.6f}")
-        
-        # Get prediction and confidence
-        prediction = np.argmax(output_data[0])
-        confidence = np.max(output_data[0])
-        
-        return prediction, confidence, output_data[0]
+        except Exception as e:
+            return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
 
-    def preprocess_image_for_prediction(self, image, rgb_mode=False):
-        """Preprocess image for prediction with RGB support"""
-        if rgb_mode:
-            # If image is grayscale but we need RGB, convert it
-            if len(image.shape) == 2:
-                image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-            # If image is RGB, ensure it's the right format
-            elif len(image.shape) == 3 and image.shape[2] == 3:
-                # Already RGB, do nothing
-                pass
-            else:
-                raise ValueError(f"Unsupported image shape for RGB mode: {image.shape}")
+def predict_single_image_silent(image):
+    """
+    Silent version of predict_single_image that doesn't print debug outputs
+    """
+    # Copy the preprocessing logic from preprocess.py but without prints
+    target_size = (params.INPUT_WIDTH, params.INPUT_HEIGHT)
+    grayscale = params.USE_GRAYSCALE
+    
+    # Resize to target size
+    image = cv2.resize(image, target_size)
+    
+    # Convert to grayscale if required
+    if grayscale and len(image.shape) == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    elif not grayscale and len(image.shape) == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+    
+    # Add channel dimension if missing
+    if len(image.shape) == 2:
+        image = np.expand_dims(image, axis=-1)
+    
+    # Apply the same preprocessing logic as preprocess_images but silently
+    if params.QUANTIZE_MODEL:
+        if params.ESP_DL_QUANTIZE:
+            # ESP-DL INT8 quantization: Use UINT8 [0, 255]
+            if image.dtype != np.uint8:
+                if image.max() <= 1.0:
+                    image = (image * 255).astype(np.uint8)
+                else:
+                    image = image.astype(np.uint8)
         else:
-            # If image is RGB but we need grayscale, convert it
-            if len(image.shape) == 3 and image.shape[2] == 3:
-                image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-            # If image is already grayscale, do nothing
-            elif len(image.shape) == 2:
-                pass
-            else:
-                raise ValueError(f"Unsupported image shape for grayscale mode: {image.shape}")
+            # Standard TFLite UINT8 quantization: Use UINT8 [0, 255]
+            if image.dtype != np.uint8:
+                if image.max() <= 1.0:
+                    image = (image * 255).astype(np.uint8)
+                else:
+                    image = image.astype(np.uint8)
+    else:
+        # No quantization: Use float32 [0, 1]
+        if image.dtype != np.float32:
+            image = image.astype(np.float32)
+        if image.max() > 1.0:
+            image = image / 255.0
+    
+    return image
+
+def load_image_from_path(image_path, input_channels):
+    """Load image from specified path based on model's input requirements"""
+    if not os.path.exists(image_path):
+        return None
+    
+    # Load image based on model's input requirements
+    if input_channels == 1:
+        # Model expects grayscale - load as 2D array
+        image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    else:
+        # Model expects color (RGB) - load as 3D array with 3 channels
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        if image is not None:
+            # Convert BGR to RGB
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    
+    return image
+
+def find_model_path(model_name=None):
+    """Find the model path based on model name"""
+    # Look for training directories - exclude test_results and other non-training dirs
+    all_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
+    
+    # Filter out non-training directories
+    training_dirs = []
+    for dir_name in all_dirs:
+        dir_path = os.path.join(params.OUTPUT_DIR, dir_name)
+        # Check if this directory contains .tflite files and is likely a training directory
+        tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite')]
+        if tflite_files and not dir_name.startswith('test_results'):
+            training_dirs.append(dir_name)
+    
+    if not training_dirs:
+        print("No training directories with TFLite models found.")
+        print(f"Please check if models exist in: {params.OUTPUT_DIR}")
+        return None
+    
+    if model_name:
+        # Remove .tflite extension if present for easier matching
+        model_name_clean = model_name.replace('.tflite', '')
         
-        # Use the existing preprocess function
-        return predict_single_image(image)
+        # First, check if model_name matches a training directory
+        matching_dirs = [d for d in training_dirs if model_name_clean in d]
+        if matching_dirs:
+            # Use the best matching directory (exact match first, then partial)
+            best_match = None
+            for dir_name in matching_dirs:
+                if dir_name == model_name_clean:
+                    best_match = dir_name
+                    break
+            if not best_match and matching_dirs:
+                best_match = matching_dirs[0]  # Use first partial match
+            
+            training_path = os.path.join(params.OUTPUT_DIR, best_match)
+            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+            
+            if tflite_files:
+                # Prefer quantized models
+                quantized_models = [f for f in tflite_files if 'quantized' in f.lower()]
+                if quantized_models:
+                    model_path = os.path.join(training_path, quantized_models[0])
+                    return model_path
+                else:
+                    model_path = os.path.join(training_path, tflite_files[0])
+                    return model_path
+        
+        # If no directory match, search for specific model files
+        for training_dir in sorted(training_dirs, reverse=True):
+            training_path = os.path.join(params.OUTPUT_DIR, training_dir)
+            
+            # Check for exact model file matches
+            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+            for model_file in tflite_files:
+                model_file_clean = model_file.replace('.tflite', '')
+                
+                # Exact match or partial match
+                if (model_name_clean == model_file_clean or 
+                    model_name_clean in model_file_clean or
+                    model_name == model_file):
+                    
+                    model_path = os.path.join(training_path, model_file)
+                    return model_path
+        
+        print(f"Model or directory '{model_name}' not found in any training directory.")
+        return None
+    else:
+        # Use default behavior - latest training directory
+        latest_training = sorted(training_dirs)[-1]
+        latest_dir_path = os.path.join(params.OUTPUT_DIR, latest_training)
+        
+        # Look for any .tflite file in the latest directory
+        tflite_files = [f for f in os.listdir(latest_dir_path) if f.endswith('.tflite')]
+        
+        if tflite_files:
+            # Prefer quantized models if available
+            quantized_models = [f for f in tflite_files if 'quantized' in f.lower()]
+            if quantized_models:
+                model_path = os.path.join(latest_dir_path, quantized_models[0])
+                return model_path
+            else:
+                model_path = os.path.join(latest_dir_path, tflite_files[0])
+                return model_path
+        
+        print(f"No TFLite model found in: {latest_dir_path}")
+        return None
 
 def get_model_parameters_count(model_path):
     """Get the number of parameters in a TFLite model"""
@@ -127,7 +266,6 @@ def get_model_parameters_count(model_path):
         
         return total_params
     except Exception as e:
-        print(f"Error counting parameters for {model_path}: {e}")
         return 0
 
 def is_quantized_model(model_path):
@@ -143,183 +281,37 @@ def is_quantized_model(model_path):
     except:
         return False
 
-def find_model_path(model_name=None, quantized_only=False):
-    """Find the model path based on model name or use default behavior"""
-    # Look for training directories
-    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
-    if not training_dirs:
-        print("No training directories found. Please run train.py first.")
-        return None
-    
-    if model_name:
-        # Remove .tflite extension if present for easier matching
-        model_name_clean = model_name.replace('.tflite', '')
-        
-        print(f"Searching for model: {model_name}")
-        
-        # Search through all training directories
-        found_models = []
-        
-        for training_dir in sorted(training_dirs, reverse=True):
-            training_path = os.path.join(params.OUTPUT_DIR, training_dir)
-            
-            # Check if model_name matches the training directory name
-            if model_name_clean in training_dir:
-                # Look for all models in this directory
-                tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
-                for model_file in tflite_files:
-                    model_path = os.path.join(training_path, model_file)
-                    if quantized_only and not is_quantized_model(model_path):
-                        continue
-                    found_models.append(model_path)
-            
-            # Check for exact model file matches
-            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
-            for model_file in tflite_files:
-                model_file_clean = model_file.replace('.tflite', '')
-                
-                # Exact match or partial match
-                if (model_name_clean == model_file_clean or 
-                    model_name_clean in model_file_clean or
-                    model_name == model_file):
-                    
-                    model_path = os.path.join(training_path, model_file)
-                    if quantized_only and not is_quantized_model(model_path):
-                        continue
-                    found_models.append(model_path)
-        
-        # Remove duplicates and sort
-        found_models = list(set(found_models))
-        found_models.sort()
-        
-        if found_models:
-            if len(found_models) > 1:
-                print(f"Multiple models found matching '{model_name}':")
-                for i, model_path in enumerate(found_models, 1):
-                    model_dir = os.path.basename(os.path.dirname(model_path))
-                    model_file = os.path.basename(model_path)
-                    model_type = "quantized" if is_quantized_model(model_path) else "float"
-                    print(f"  {i}. {model_dir}/{model_file} ({model_type})")
-                
-                # Use the first one (usually most recent)
-                selected_model = found_models[0]
-                model_dir = os.path.basename(os.path.dirname(selected_model))
-                model_file = os.path.basename(selected_model)
-                print(f"Using: {model_dir}/{model_file}")
-                return selected_model
-            else:
-                model_dir = os.path.basename(os.path.dirname(found_models[0]))
-                model_file = os.path.basename(found_models[0])
-                print(f"Found: {model_dir}/{model_file}")
-                return found_models[0]
-        
-        print(f"Model '{model_name}' not found in any training directory")
-        if quantized_only:
-            print("No quantized model found with the specified name.")
-        print("Available training directories and models:")
-        for training_dir in training_dirs:
-            print(f"  - {training_dir}")
-            training_dir_path = os.path.join(params.OUTPUT_DIR, training_dir)
-            if os.path.exists(training_dir_path):
-                files = [f for f in os.listdir(training_dir_path) if f.endswith('.tflite')]
-                for file in files:
-                    file_path = os.path.join(training_dir_path, file)
-                    model_type = "quantized" if is_quantized_model(file_path) else "float"
-                    print(f"    └── {file} ({model_type})")
-        return None
-    else:
-        # Use default behavior - latest training directory
-        latest_training = sorted(training_dirs)[-1]
-        
-        # Define possible paths based on quantization preference
-        possible_paths = []
-        
-        if quantized_only:
-            # Only look for quantized models in the latest directory
-            possible_paths = [
-                os.path.join(params.OUTPUT_DIR, latest_training, "final_quantized.tflite"),
-                os.path.join(params.OUTPUT_DIR, latest_training, "model_quantized.tflite"),
-                os.path.join(params.OUTPUT_DIR, latest_training, "quantized.tflite"),
-            ]
-        else:
-            # Look for all models in the latest directory
-            possible_paths = [
-                os.path.join(params.OUTPUT_DIR, latest_training, params.TFLITE_FILENAME),
-                os.path.join(params.OUTPUT_DIR, latest_training, "final_quantized.tflite"),
-                os.path.join(params.OUTPUT_DIR, latest_training, "final_float.tflite"),
-            ]
-        
-        # First, try the specific paths
-        for model_path in possible_paths:
-            if os.path.exists(model_path):
-                if quantized_only and not is_quantized_model(model_path):
-                    continue
-                return model_path
-        
-        # If no specific model found, look for any .tflite file in the latest directory
-        latest_dir_path = os.path.join(params.OUTPUT_DIR, latest_training)
-        tflite_files = [f for f in os.listdir(latest_dir_path) if f.endswith('.tflite')]
-        
-        if quantized_only:
-            # Filter for quantized models only
-            tflite_files = [f for f in tflite_files if is_quantized_model(os.path.join(latest_dir_path, f))]
-        
-        if tflite_files:
-            model_path = os.path.join(latest_dir_path, tflite_files[0])
-            return model_path
-        
-        print(f"No {'quantized ' if quantized_only else ''}TFLite model found in: {latest_dir_path}")
-        print("Available files:")
-        for file in os.listdir(latest_dir_path):
-            if file.endswith('.tflite'):
-                file_path = os.path.join(latest_dir_path, file)
-                model_type = "quantized" if is_quantized_model(file_path) else "float"
-                print(f"  - {file} ({model_type})")
-        return None
-
 def get_all_models(quantized_only=False):
     """Get all available models with parameters count - with error handling"""
-    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
+    # Look for training directories - exclude test_results and other non-training dirs
+    all_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
+    
+    # Filter out non-training directories
+    training_dirs = []
+    for dir_name in all_dirs:
+        dir_path = os.path.join(params.OUTPUT_DIR, dir_name)
+        # Check if this directory contains .tflite files and is likely a training directory
+        tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite')]
+        if tflite_files and not dir_name.startswith('test_results'):
+            training_dirs.append(dir_name)
+    
     all_models = []
     
     for training_dir in training_dirs:
         training_path = os.path.join(params.OUTPUT_DIR, training_dir)
         
-        # Look for the standard model file names
-        possible_model_files = [
-            "final_quantized.tflite",
-            "final_float.tflite", 
-            "model_quantized.tflite",
-            "model_float.tflite",
-            "quantized.tflite",
-            "float.tflite",
-            params.TFLITE_FILENAME  # Use the filename from parameters
-        ]
+        # Look for any .tflite files in the directory
+        tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
         
-        # Also look for any .tflite files in the directory
-        all_tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
-        
-        # Combine both approaches
-        model_files_to_check = []
-        for model_file in possible_model_files:
-            if model_file in all_tflite_files:
-                model_files_to_check.append(model_file)
-        
-        # If no standard files found, use all available .tflite files
-        if not model_files_to_check and all_tflite_files:
-            model_files_to_check = all_tflite_files
-        
-        for model_file in model_files_to_check:
+        for model_file in tflite_files:
             model_path = os.path.join(training_path, model_file)
             
             # Skip if file doesn't exist or is empty
             if not os.path.exists(model_path) or os.path.getsize(model_path) == 0:
-                print(f"⚠️  Skipping invalid model file: {training_dir}/{model_file}")
                 continue
                 
             # Verify the model can be loaded
             if not is_valid_tflite_model(model_path):
-                print(f"⚠️  Skipping corrupted model file: {training_dir}/{model_file}")
                 continue
                 
             if quantized_only and not is_quantized_model(model_path):
@@ -332,16 +324,14 @@ def get_all_models(quantized_only=False):
                 
                 all_models.append({
                     'path': model_path,
-                    'name': model_file,  # Use the actual filename
+                    'name': model_file,
                     'directory': training_dir,
                     'size_kb': model_size,
                     'type': model_type,
                     'parameters': parameters_count
                 })
-                print(f"✅ Found valid model: {training_dir}/{model_file}")
                 
-            except Exception as e:
-                print(f"⚠️  Error processing model {training_dir}/{model_file}: {e}")
+            except Exception:
                 continue
     
     # Remove duplicates and sort by directory name
@@ -359,119 +349,95 @@ def is_valid_tflite_model(model_path):
         interpreter = tf.lite.Interpreter(model_path=model_path)
         interpreter.allocate_tensors()
         return True
-    except Exception as e:
-        print(f"❌ Invalid TFLite model {os.path.basename(model_path)}: {e}")
+    except Exception:
         return False
 
-def count_total_images_in_datasets():
-    """Count total number of images available in all datasets"""
-    if not params.DATA_SOURCES:
-        return 0
+def load_test_dataset_with_labels(num_samples=100, use_all_datasets=False):
+    """
+    Load test dataset with proper labels using multi_source_loader
+    Returns: list of (image_array, true_label) tuples
+    """
+    print("📊 Loading test dataset with labels...")
     
-    total_images = 0
-    for data_source in params.DATA_SOURCES:
-        dataset_path = data_source['path']
-        dataset_images = 0
-        
-        for digit in range(10):
-            digit_folder = os.path.join(dataset_path, str(digit))
-            if os.path.exists(digit_folder):
-                image_files = [f for f in os.listdir(digit_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-                dataset_images += len(image_files)
-        
-        print(f"  - {data_source['name']}: {dataset_images} images")
-        total_images += dataset_images
+    # Use the multi_source_loader to get properly labeled data
+    loader = MultiSourceDataLoader()
+    images, labels = loader.load_all_sources()
     
-    return total_images
+    if len(images) == 0:
+        print("❌ No data loaded from any source")
+        return []
+    
+    # Combine images and labels
+    test_data = list(zip(images, labels))
+    
+    # Shuffle and limit samples
+    np.random.shuffle(test_data)
+    
+    if not use_all_datasets and len(test_data) > num_samples:
+        test_data = test_data[:num_samples]
+    
+    print(f"  Using {len(test_data)} test samples")
+    return test_data
 
-def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug=False, use_all_datasets=False):
+def test_model_on_dataset(model_path, num_test_images=100, debug=False, use_all_datasets=False):
     """Test a model on random images from dataset and return accuracy and performance metrics"""
     predictor = TFLiteDigitPredictor(model_path)
     correct_predictions = 0
     total_tested = 0
     total_inference_time = 0.0
     
-    # Get dataset paths from all data sources
-    if not params.DATA_SOURCES:
-        print("No data sources found in parameters.py")
+    # Load test data with proper labels
+    test_data = load_test_dataset_with_labels(num_test_images, use_all_datasets)
+    
+    if not test_data:
+        print("❌ No test data available")
         return 0.0, 0, 0.0, 0.0
-    
-    # Collect all test images with their true labels from all datasets
-    test_data = []
-    
-    for data_source in params.DATA_SOURCES:
-        dataset_path = data_source['path']
-        weight = data_source.get('weight', 1.0)  # Default weight is 1.0 if not specified
-        
-        for digit in range(10):
-            digit_folder = os.path.join(dataset_path, str(digit))
-            if not os.path.exists(digit_folder):
-                continue
-                
-            # Get images for this digit
-            image_files = [f for f in os.listdir(digit_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-            if not image_files:
-                continue
-            
-            if use_all_datasets:
-                # Use all available images from this dataset
-                for image_file in image_files:
-                    test_data.append((os.path.join(digit_folder, image_file), digit, weight))
-            else:
-                # Calculate number of images to use from this dataset based on weight
-                dataset_images_count = int((num_test_images // 10) * weight)
-                dataset_images_count = max(1, dataset_images_count)  # At least 1 image per digit
-                
-                if len(image_files) > 0:
-                    test_images = np.random.choice(
-                        image_files, 
-                        min(dataset_images_count, len(image_files)), 
-                        replace=False
-                    )
-                    for image_file in test_images:
-                        test_data.append((os.path.join(digit_folder, image_file), digit, weight))
-    
-    # Shuffle test data
-    np.random.shuffle(test_data)
     
     # Warm-up run to avoid cold start timing issues
     if len(test_data) > 0:
-        warmup_image_path, warmup_digit, _ = test_data[0]
-        warmup_image = cv2.imread(warmup_image_path, cv2.IMREAD_GRAYSCALE if not rgb_mode else cv2.IMREAD_COLOR)
-        if warmup_image is not None and rgb_mode:
-            warmup_image = cv2.cvtColor(warmup_image, cv2.COLOR_BGR2RGB)
+        warmup_image, _ = test_data[0]
         if warmup_image is not None:
             try:
-                predictor.predict(warmup_image, rgb_mode=rgb_mode, debug=False)
+                predictor.predict(warmup_image, debug=False)
             except:
                 pass
     
-    # Test with progress bar
-    for image_path, true_digit, weight in tqdm(test_data, desc=f"Testing {os.path.basename(model_path)}", leave=False):
-        # Load image
-        if rgb_mode:
-            image = cv2.imread(image_path, cv2.IMREAD_COLOR)
-            if image is not None:
-                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        else:
-            image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-        
+    # Test with progress bar (only if not in debug mode)
+    if debug:
+        # Debug mode - no progress bar, show individual results
+        test_iterator = test_data
+        print(f"Testing {len(test_data)} images in debug mode...")
+    else:
+        # Normal mode - use progress bar
+        test_iterator = tqdm(test_data, desc=f"Testing {os.path.basename(model_path)}", leave=False)
+    
+    for image, true_label in test_iterator:
         if image is None:
             continue
         
         # Predict with timing
         try:
             start_time = time.perf_counter()
-            prediction, confidence, _ = predictor.predict(image, rgb_mode=rgb_mode, debug=debug)
+            prediction, confidence, _ = predictor.predict(image, debug=debug)
             end_time = time.perf_counter()
             
             inference_time = (end_time - start_time) * 1000  # Convert to milliseconds
             total_inference_time += inference_time
             
-            if prediction == true_digit:
+            # Check if prediction matches true label
+            if prediction == true_label:
                 correct_predictions += 1
+                if debug:
+                    print(f"✓ Correct: {prediction} (true: {true_label}, confidence: {confidence:.3f})")
+            else:
+                if debug:
+                    print(f"✗ Wrong: {prediction} (true: {true_label}, confidence: {confidence:.3f})")
+            
             total_tested += 1
+            
         except Exception as e:
+            if debug:
+                print(f"Prediction error: {e}")
             continue
     
     # Calculate performance metrics
@@ -480,16 +446,20 @@ def test_model_on_dataset(model_path, rgb_mode=False, num_test_images=100, debug
     avg_inference_time = total_inference_time / total_tested if total_tested > 0 else 0.0
     inferences_per_second = 1000 / avg_inference_time if avg_inference_time > 0 else 0.0
     
+    if debug:
+        print(f"Final accuracy: {accuracy:.3f} ({correct_predictions}/{total_tested})")
+        print(f"Average inference time: {avg_inference_time:.2f} ms")
+        print(f"Inferences per second: {inferences_per_second:.0f}")
+    
     return accuracy, total_tested, avg_inference_time, inferences_per_second
 
-def generate_comparison_graphs(results, rgb_mode=False, quantized_only=False, use_all_datasets=False):
+def generate_comparison_graphs(results, quantized_only=False, use_all_datasets=False):
     """Generate separate comparison graphs for the benchmark results"""
     # Create graphs directory
     graphs_dir = os.path.join(params.OUTPUT_DIR, "test_results", "graphs")
     os.makedirs(graphs_dir, exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    mode_suffix = "rgb" if rgb_mode else "grayscale"
     quant_suffix = "quantized" if quantized_only else "all"
     dataset_suffix = "full" if use_all_datasets else "sampled"
     
@@ -539,14 +509,14 @@ def generate_comparison_graphs(results, rgb_mode=False, quantized_only=False, us
     
     plt.xlabel('Inferences per Second', fontsize=12)
     plt.ylabel('Accuracy (%)', fontsize=12)
-    plt.title(f'Accuracy vs Speed\n({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
+    plt.title(f'Accuracy vs Speed\n({quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
     plt.grid(True, alpha=0.3)
     
     # Add legend outside the plot
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=9)
     
     plt.tight_layout()
-    graph1_filename = f"accuracy_vs_speed_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
+    graph1_filename = f"accuracy_vs_speed_{timestamp}_{quant_suffix}_{dataset_suffix}.png"
     graph1_path = os.path.join(graphs_dir, graph1_filename)
     plt.savefig(graph1_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -564,13 +534,13 @@ def generate_comparison_graphs(results, rgb_mode=False, quantized_only=False, us
     
     plt.xlabel('Model Size (KB)', fontsize=12)
     plt.ylabel('Accuracy (%)', fontsize=12)
-    plt.title(f'Accuracy vs Model Size\n({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
+    plt.title(f'Accuracy vs Model Size\n({quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
     plt.grid(True, alpha=0.3)
     cbar = plt.colorbar(scatter)
     cbar.set_label('Parameters (Millions)', fontsize=10)
     
     plt.tight_layout()
-    graph2_filename = f"accuracy_vs_size_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
+    graph2_filename = f"accuracy_vs_size_{timestamp}_{quant_suffix}_{dataset_suffix}.png"
     graph2_path = os.path.join(graphs_dir, graph2_filename)
     plt.savefig(graph2_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -584,14 +554,14 @@ def generate_comparison_graphs(results, rgb_mode=False, quantized_only=False, us
     
     plt.xlabel('Parameters (Millions)', fontsize=12)
     plt.ylabel('Inferences per Second', fontsize=12)
-    plt.title(f'Speed vs Model Complexity\n({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
+    plt.title(f'Speed vs Model Complexity\n({quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
     plt.grid(True, alpha=0.3)
     
     # Add legend outside the plot
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=9)
     
     plt.tight_layout()
-    graph3_filename = f"speed_vs_complexity_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
+    graph3_filename = f"speed_vs_complexity_{timestamp}_{quant_suffix}_{dataset_suffix}.png"
     graph3_path = os.path.join(graphs_dir, graph3_filename)
     plt.savefig(graph3_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -603,7 +573,7 @@ def generate_comparison_graphs(results, rgb_mode=False, quantized_only=False, us
     bars = plt.barh(y_pos, inferences_per_second, color=colors, alpha=0.7)
     plt.yticks(y_pos, [label.split('\n')[0] for label in labels], fontsize=10)  # Just directory names
     plt.xlabel('Inferences per Second', fontsize=12)
-    plt.title(f'Inference Speed Comparison\n({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
+    plt.title(f'Inference Speed Comparison\n({quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
     plt.grid(True, alpha=0.3, axis='x')
     
     # Add value labels on bars
@@ -622,7 +592,7 @@ def generate_comparison_graphs(results, rgb_mode=False, quantized_only=False, us
                borderaxespad=0., fontsize=8)
     
     plt.tight_layout()
-    graph4_filename = f"speed_comparison_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
+    graph4_filename = f"speed_comparison_{timestamp}_{quant_suffix}_{dataset_suffix}.png"
     graph4_path = os.path.join(graphs_dir, graph4_filename)
     plt.savefig(graph4_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -636,7 +606,7 @@ def generate_comparison_graphs(results, rgb_mode=False, quantized_only=False, us
     bars = plt.barh(y_pos, accuracies, color=bar_colors, alpha=0.7)
     plt.yticks(y_pos, [label.split('\n')[0] for label in labels], fontsize=10)  # Just directory names
     plt.xlabel('Accuracy (%)', fontsize=12)
-    plt.title(f'Accuracy Comparison\n({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
+    plt.title(f'Accuracy Comparison\n({quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
     plt.grid(True, alpha=0.3, axis='x')
     
     # Add value labels on bars
@@ -655,40 +625,19 @@ def generate_comparison_graphs(results, rgb_mode=False, quantized_only=False, us
                borderaxespad=0., fontsize=8)
     
     plt.tight_layout()
-    graph5_filename = f"accuracy_comparison_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
+    graph5_filename = f"accuracy_comparison_{timestamp}_{quant_suffix}_{dataset_suffix}.png"
     graph5_path = os.path.join(graphs_dir, graph5_filename)
     plt.savefig(graph5_path, dpi=300, bbox_inches='tight')
     plt.close()
     graph_paths.append(graph5_path)
     
-    # Graph 6: Size vs Speed Trade-off
-    plt.figure(figsize=(14, 10))
-    for i, (label, x, y) in enumerate(zip(labels, sizes_kb, inferences_per_second)):
-        plt.scatter(x, y, c=[colors[i]], s=120, marker=markers[i % len(markers)], 
-                   alpha=0.8, label=label, edgecolors='black', linewidth=0.5)
-    
-    plt.xlabel('Model Size (KB)', fontsize=12)
-    plt.ylabel('Inferences per Second', fontsize=12)
-    plt.title(f'Size vs Speed Trade-off\n({mode_suffix}, {quant_suffix}, {dataset_suffix})', fontsize=14, fontweight='bold')
-    plt.grid(True, alpha=0.3)
-    
-    # Add legend outside the plot
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=9)
-    
-    plt.tight_layout()
-    graph6_filename = f"size_vs_speed_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.png"
-    graph6_path = os.path.join(graphs_dir, graph6_filename)
-    plt.savefig(graph6_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    graph_paths.append(graph6_path)
-    
-    print(f"📊 Generated {len(graph_paths)} separate comparison graphs:")
+    print(f"📊 Generated {len(graph_paths)} comparison graphs:")
     for path in graph_paths:
         print(f"   📈 {os.path.basename(path)}")
     
     return graph_paths
 
-def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, debug=False, use_all_datasets=False):
+def test_all_models(quantized_only=False, num_test_images=100, debug=False, use_all_datasets=False):
     """Test all available models and print summary table"""
     models = get_all_models(quantized_only=quantized_only)
     
@@ -698,23 +647,29 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
     
     # Determine test configuration
     if use_all_datasets:
-        print(f"\nTesting {len(models)} models on ALL available images from all datasets:")
-        total_images = count_total_images_in_datasets()
-        actual_test_images = total_images
+        print(f"\nTesting {len(models)} models on ALL available images from all datasets...")
     else:
-        print(f"\nTesting {len(models)} models on {num_test_images} images (distributed across datasets by weight)...")
-        actual_test_images = num_test_images
+        print(f"\nTesting {len(models)} models on {num_test_images} images...")
     
-    print("Mode:", "RGB" if rgb_mode else "Grayscale")
     print("-" * 80)
     
     results = []
     
-    # Test all models with progress bar
-    for model_info in tqdm(models, desc="Testing all models"):
+    # Test all models (with or without progress bar based on debug mode)
+    if debug:
+        # Debug mode - no overall progress bar
+        model_iterator = models
+        print("Debug mode - showing detailed results for each model")
+    else:
+        # Normal mode - use progress bar for models
+        model_iterator = tqdm(models, desc="Testing all models")
+    
+    for model_info in model_iterator:
+        if debug:
+            print(f"\n🔍 Testing model: {model_info['directory']}/{model_info['name']}")
+        
         accuracy, tested_count, avg_inference_time, inferences_per_second = test_model_on_dataset(
             model_info['path'], 
-            rgb_mode=rgb_mode, 
             num_test_images=num_test_images,
             debug=debug,
             use_all_datasets=use_all_datasets
@@ -745,31 +700,33 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
             'Inf/s_Raw': inferences_per_second,
             'Tested': tested_count
         })
+        
+        if debug:
+            print(f"✅ Completed: {model_info['directory']}/{model_info['name']} - Accuracy: {accuracy:.3f}")
     
     # Sort by accuracy descending
     results.sort(key=lambda x: x['Accuracy_Raw'], reverse=True)
     
-    # Print simplified console table
+    # Print summary table
     print(f"\n{'='*80}")
-    print(f"SUMMARY RESULTS ({'RGB' if rgb_mode else 'Grayscale'} mode)")
+    print(f"SUMMARY RESULTS")
     if use_all_datasets:
-        print(f"DATASETS: ALL datasets ({actual_test_images} total images)")
+        print(f"DATASETS: ALL available images")
     else:
-        print(f"DATASETS: Distributed sampling ({actual_test_images} target images)")
+        print(f"DATASETS: {num_test_images} sampled images")
     print(f"{'='*80}")
     
-    # Simplified console output - only essential columns
-    headers = ['Directory', 'Params', 'Size', 'Accuracy', 'Inf/s', 'Images']
+    # Simplified console output
+    headers = ['Directory', 'Model', 'Type', 'Params', 'Size', 'Accuracy', 'Inf/s', 'Images']
     table_data = []
     for result in results:
-        # Shorten directory name for display
-        short_dir = result['Directory'][:20] + '...' if len(result['Directory']) > 23 else result['Directory']
-        
         table_data.append([
-            short_dir,
+            result['Directory'],
+            result['Model'],
+            result['Type'],
             result['Params'],
             result['Size (KB)'],
-            result['Accuracy'],
+            f"{float(result['Accuracy']):.3f}",
             result['Inf/s'],
             result['Tested']
         ])
@@ -779,32 +736,17 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
     # Print best models by different criteria
     if results and results[0]['Accuracy_Raw'] > 0:
         best_accuracy = max(results, key=lambda x: x['Accuracy_Raw'])
-        fastest_model = min(results, key=lambda x: x['Inf Time_Raw'])
-        
-        # Find best balanced (accuracy * speed)
-        balanced_scores = []
-        for result in results:
-            acc = result['Accuracy_Raw']
-            speed = result['Inf/s_Raw']
-            # Normalize and combine (you can adjust weights here)
-            balanced_score = acc * (speed / 1000)  # Normalize speed
-            balanced_scores.append((result, balanced_score))
-        
-        best_balanced = max(balanced_scores, key=lambda x: x[1])[0]
+        fastest_model = max(results, key=lambda x: x['Inf/s_Raw'])
         
         print(f"\n🏆 BEST BY ACCURACY: {best_accuracy['Directory']}/{best_accuracy['Model']}")
-        print(f"   Accuracy: {best_accuracy['Accuracy']}, Speed: {best_accuracy['Inf/s']} inf/s")
+        print(f"   Accuracy: {float(best_accuracy['Accuracy']):.3f}, Speed: {best_accuracy['Inf/s']} inf/s")
         
         print(f"⚡ FASTEST MODEL: {fastest_model['Directory']}/{fastest_model['Model']}")
-        print(f"   Speed: {fastest_model['Inf/s']} inf/s, Accuracy: {fastest_model['Accuracy']}")
-        
-        print(f"⭐ BEST BALANCED: {best_balanced['Directory']}/{best_balanced['Model']}")
-        print(f"   Accuracy: {best_balanced['Accuracy']}, Speed: {best_balanced['Inf/s']} inf/s")
+        print(f"   Speed: {fastest_model['Inf/s']} inf/s, Accuracy: {float(fastest_model['Accuracy']):.3f}")
     
     # Generate comparison graphs
-    graph_path = generate_comparison_graphs(
+    graph_paths = generate_comparison_graphs(
         results, 
-        rgb_mode=rgb_mode, 
         quantized_only=quantized_only,
         use_all_datasets=use_all_datasets
     )
@@ -812,15 +754,14 @@ def test_all_models(rgb_mode=False, quantized_only=False, num_test_images=100, d
     # Save full results to CSV
     csv_path = save_results_to_csv(
         results, 
-        rgb_mode=rgb_mode, 
         quantized_only=quantized_only,
         use_all_images=use_all_datasets,
-        test_images_count=actual_test_images
+        test_images_count=num_test_images
     )
     
     return results
 
-def save_results_to_csv(results, rgb_mode=False, quantized_only=False, use_all_images=False, test_images_count=100):
+def save_results_to_csv(results, quantized_only=False, use_all_images=False, test_images_count=100):
     """Save FULL results to CSV file with all information"""
     # Create results directory if it doesn't exist
     results_dir = os.path.join(params.OUTPUT_DIR, "test_results")
@@ -828,11 +769,10 @@ def save_results_to_csv(results, rgb_mode=False, quantized_only=False, use_all_i
     
     # Generate filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    mode_suffix = "rgb" if rgb_mode else "grayscale"
     quant_suffix = "quantized" if quantized_only else "all"
     dataset_suffix = "full" if use_all_images else f"{test_images_count}images"
     
-    filename = f"model_comparison_{timestamp}_{mode_suffix}_{quant_suffix}_{dataset_suffix}.csv"
+    filename = f"model_comparison_{timestamp}_{quant_suffix}_{dataset_suffix}.csv"
     csv_path = os.path.join(results_dir, filename)
     
     # Prepare FULL data for CSV (all information)
@@ -873,54 +813,23 @@ def save_results_to_csv(results, rgb_mode=False, quantized_only=False, use_all_i
 
 def list_available_models(quantized_only=False):
     """List all available models in training directories"""
-    training_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
-    if not training_dirs:
-        print("No training directories found.")
+    models = get_all_models(quantized_only=quantized_only)
+    
+    if not models:
+        print("No models found.")
         return
     
     print(f"Available {'quantized ' if quantized_only else ''}models:")
     print("-" * 50)
     
-    valid_models_found = False
-    for training_dir in sorted(training_dirs, reverse=True):
-        training_path = os.path.join(params.OUTPUT_DIR, training_dir)
-        
-        # Look for standard model files
-        model_files = []
-        for model_file in ["final_quantized.tflite", "final_float.tflite", "model_quantized.tflite", "model_float.tflite"]:
-            if os.path.exists(os.path.join(training_path, model_file)):
-                model_files.append(model_file)
-        
-        # If no standard files, look for any .tflite files
-        if not model_files:
-            model_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
-        
-        if quantized_only:
-            model_files = [f for f in model_files if is_quantized_model(os.path.join(training_path, f))]
-        
-        if model_files:
-            valid_models_found = True
-            print(f"\n{training_dir}:")
-            for model_file in model_files:
-                model_path = os.path.join(training_path, model_file)
-                if os.path.exists(model_path):
-                    model_size = os.path.getsize(model_path) / 1024
-                    model_type = "quantized" if is_quantized_model(model_path) else "float"
-                    print(f"  └── {model_file} ({model_size:.1f} KB, {model_type})")
-                else:
-                    print(f"  └── {model_file} (FILE NOT FOUND)")
-    
-    if not valid_models_found:
-        print("No valid model files found in any training directory.")
-        print("Expected model files: final_quantized.tflite, final_float.tflite, etc.")
-
+    for model in models:
+        print(f"{model['directory']}/{model['name']} ({model['type']}, {model['size_kb']:.1f} KB, {model['parameters']} params)")
 
 def main():
     """Main function with command line arguments"""
     parser = argparse.ArgumentParser(description='Digit Recognition Benchmarking')
     parser.add_argument('--model', type=str, help='Model name to use for prediction')
     parser.add_argument('--quantized', action='store_true', help='Use only quantized models')
-    parser.add_argument('--RGB', action='store_true', help='Process image as RGB instead of grayscale')
     parser.add_argument('--test_all', action='store_true', help='Test all available models and print accuracy summary')
     parser.add_argument('--test_images', type=int, default=100, help='Number of test images per model (default: 100)')
     parser.add_argument('--all_datasets', action='store_true', help='Use all available images from dataset (overrides --test_images, only for --test_all)')
@@ -940,7 +849,6 @@ def main():
             args.all_datasets = False
         
         test_all_models(
-            rgb_mode=args.RGB, 
             quantized_only=args.quantized, 
             num_test_images=args.test_images,
             debug=args.debug,
@@ -956,6 +864,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
-# py bench_predict.py --test_all --quantized --all_datasets
-# py bench_predict.py --test_all --quantized --test_images 18000 (+0.x weight from augmented datasource)
