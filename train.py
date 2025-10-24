@@ -1219,7 +1219,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     
     # TQDM progress bar
     callbacks.append(
-        TQDMProgressBar(total_epochs, monitor, tflite_manager, debug)
+        TQDMProgressBar(total_epochs, monitor, debug)
     )
     
     # ROBUST CSV Logger with proper error handling
@@ -1662,13 +1662,6 @@ def train_model(debug=False):
     print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
     print(f"   Mean: {x_train.mean():.3f}, Std: {x_train.std():.3f}")
 
-    if x_train.std() < 0.01:
-        print("❌ WARNING: Data has very low variance - might be over-normalized!")
-        
-    print(f"✅ Data verification:")
-    print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
-    print(f"   Mean: {x_train.mean():.3f}, Std: {x_train.std():.3f}")
-    
     if x_train.std() < 0.01:
         print("❌ WARNING: Data has very low variance - might be over-normalized!")
     
