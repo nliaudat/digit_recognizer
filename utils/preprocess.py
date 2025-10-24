@@ -190,9 +190,9 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
                 processed_images = processed_images / 255.0
             quantization_info = "Float32 [0, 1] (No quantization)"
     
-    print(f"DEBUG: Preprocessing - {quantization_info}")
-    print(f"   Range: [{processed_images.min():.3f}, {processed_images.max():.3f}]")
-    print(f"   dtype: {processed_images.dtype}")
+    # print(f"DEBUG: Preprocessing - {quantization_info}")
+    # print(f"   Range: [{processed_images.min():.3f}, {processed_images.max():.3f}]")
+    # print(f"   dtype: {processed_images.dtype}")
     
     return processed_images
 
