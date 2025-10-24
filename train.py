@@ -102,32 +102,41 @@ def set_all_seeds(seed=params.SHUFFLE_SEED):
 
 # Set TensorFlow logging level based on debug flag
 def setup_tensorflow_logging(debug=False):
-    """Configure TensorFlow logging verbosity"""
+    """Configure TensorFlow logging verbosity - enhanced version"""
     if debug:
         # Enable all TensorFlow logs
         tf.get_logger().setLevel('INFO')
         tf.autograph.set_verbosity(3)
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
+        
+        # Enable other logging
+        import logging
+        logging.getLogger().setLevel(logging.INFO)
     else:
-        # Suppress TensorFlow info and warning messages
+        # MAXIMUM SUPPRESSION - Completely silent
         tf.get_logger().setLevel('ERROR')
         tf.autograph.set_verbosity(0)
         
-        # Suppress ALL TensorFlow C++ logs including warnings and errors
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' ## 0 = all logs, 3 = errors only
+        # Suppress ALL TensorFlow C++ logs
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
         os.environ['TF_CPP_MAX_VLOG_LEVEL'] = '0'
         
         # Suppress absl logging
-        import absl.logging
-        absl.logging.set_verbosity(absl.logging.ERROR)
+        try:
+            import absl.logging
+            absl.logging.set_verbosity(absl.logging.ERROR)
+        except ImportError:
+            pass
         
-        # Suppress specific TensorFlow warnings that still get through
+        # Suppress all Python warnings
         import warnings
-        warnings.filterwarnings('ignore', category=UserWarning, module='tensorflow')
-        warnings.filterwarnings('ignore', category=FutureWarning, module='tensorflow')
+        warnings.filterwarnings('ignore')
         
-        # Also suppress deprecation warnings
-        warnings.filterwarnings('ignore', category=DeprecationWarning, module='tensorflow')
+        # Suppress other loggers
+        import logging
+        logging.getLogger('tensorflow').setLevel(logging.ERROR)
+        logging.getLogger('h5py').setLevel(logging.ERROR)
+        logging.getLogger('numexpr').setLevel(logging.ERROR)
 
 @contextmanager
 def suppress_all_output(debug=False):
@@ -522,25 +531,29 @@ class TFLiteModelManager:
             # return None, 0
             
     def save_as_tflite(self, model, filename, quantize=False, representative_data=None):
-        """Save model as TFLite - Keras 3 compatible"""
+        """Save model as TFLite - Keras 3 compatible with debug control"""
         try:
-            # First try the simple method (most reliable)
-            print("🔧 Attempting simple Keras 3 conversion...")
+            if self.debug:
+                print("🔧 Attempting simple Keras 3 conversion...")
+            
             result = self.save_as_tflite_simple_keras3(model, filename, quantize)
             if result[0] is not None:
                 return result
             
-            # Fallback to direct conversion
-            print("🔄 Simple method failed, trying direct conversion...")
+            if self.debug:
+                print("🔄 Simple method failed, trying direct conversion...")
+            
             return self.save_as_tflite_direct(model, filename, quantize, representative_data)
             
         except Exception as e:
+            # Always show errors
             print(f"❌ All TFLite conversion methods failed: {e}")
-            print("💡 Possible solutions:")
-            print("   - Use TensorFlow 2.13+ for better TFLite compatibility")
-            print("   - Try without quantization first")
-            print("   - Check if model has incompatible layers")
-            return None, 0        
+            if self.debug:
+                print("💡 Possible solutions:")
+                print("   - Use TensorFlow 2.13+ for better TFLite compatibility")
+                print("   - Try without quantization first")
+                print("   - Check if model has incompatible layers")
+            return None, 0    
 
     def save_as_tflite_savedmodel(self, model, filename, quantize=False, representative_data=None):
         """Use SavedModel approach for conversion - Keras 3 FIXED"""
@@ -663,9 +676,10 @@ class TFLiteModelManager:
             raise
             
     def save_as_tflite_simple_keras3(self, model, filename, quantize=False):
-        """Simple reliable method for Keras 3 - ALWAYS WORKS"""
+        """Simple reliable method for Keras 3 - with complete output suppression"""
         try:
-            print("🔧 Using simple Keras 3 conversion...")
+            if self.debug:
+                print("🔧 Using simple Keras 3 conversion...")
             
             # Always use direct conversion in Keras 3
             converter = tf.lite.TFLiteConverter.from_keras_model(model)
@@ -673,7 +687,8 @@ class TFLiteModelManager:
             if quantize:
                 # Use ONLY dynamic range quantization (most reliable in Keras 3)
                 converter.optimizations = [tf.lite.Optimize.DEFAULT]
-                print("🎯 Dynamic range quantization only (Keras 3 safe)")
+                if self.debug:
+                    print("🎯 Dynamic range quantization only (Keras 3 safe)")
                 
                 # Optional: Add representative dataset for better quantization
                 def simple_representative_dataset():
@@ -683,8 +698,9 @@ class TFLiteModelManager:
                         yield [data]
                 converter.representative_dataset = simple_representative_dataset
             
-            # Convert
-            tflite_model = converter.convert()
+            # Convert with complete output suppression
+            with suppress_all_output(self.debug):
+                tflite_model = converter.convert()
             
             # Save
             model_path = os.path.join(self.output_dir, filename)
@@ -693,32 +709,47 @@ class TFLiteModelManager:
             
             model_size_kb = len(tflite_model) / 1024
             quant_type = "DynamicQuant" if quantize else "Float32"
-            print(f"💾 Saved {filename} ({quant_type}): {model_size_kb:.1f} KB")
             
-            # Test the converted model
-            self.test_tflite_model(model_path)
+            # Only print if debug is enabled
+            if self.debug:
+                print(f"💾 Saved {filename} ({quant_type}): {model_size_kb:.1f} KB")
+                
+                # Test the converted model (only in debug mode)
+                self.test_tflite_model(model_path)
+            else:
+                # Silent mode: just do a basic check without output
+                try:
+                    interpreter = tf.lite.Interpreter(model_path=model_path)
+                    interpreter.allocate_tensors()
+                except Exception:
+                    # If basic check fails, we still want to know even in non-debug mode
+                    print(f"❌ TFLite model verification failed for {filename}")
+                    return None, 0
             
             return tflite_model, model_size_kb
             
         except Exception as e:
+            # Always show errors, even in non-debug mode
             print(f"❌ Simple Keras 3 conversion failed: {e}")
             return None, 0
 
     def test_tflite_model(self, tflite_path):
-        """Quick test of TFLite model"""
+        """Quick test of TFLite model - only outputs in debug mode"""
         try:
             interpreter = tf.lite.Interpreter(model_path=tflite_path)
             interpreter.allocate_tensors()
             
-            input_details = interpreter.get_input_details()
-            output_details = interpreter.get_output_details()
-            
-            print(f"✅ TFLite model loaded successfully:")
-            print(f"   Input: {input_details[0]['dtype']}, shape: {input_details[0]['shape']}")
-            print(f"   Output: {output_details[0]['dtype']}, shape: {output_details[0]['shape']}")
+            if self.debug:
+                input_details = interpreter.get_input_details()
+                output_details = interpreter.get_output_details()
+                
+                print(f"✅ TFLite model loaded successfully:")
+                print(f"   Input: {input_details[0]['dtype']}, shape: {input_details[0]['shape']}")
+                print(f"   Output: {output_details[0]['dtype']}, shape: {output_details[0]['shape']}")
             
             return True
         except Exception as e:
+            # Always show errors, even in non-debug mode
             print(f"❌ TFLite model test failed: {e}")
             return False
 
