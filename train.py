@@ -130,7 +130,10 @@ def setup_tensorflow_logging(debug=False):
         
         # Suppress all Python warnings
         import warnings
-        warnings.filterwarnings('ignore')
+        # warnings.filterwarnings('ignore')
+        warnings.filterwarnings('ignore', category=UserWarning, module='tensorflow')
+        warnings.filterwarnings('ignore', category=FutureWarning, module='tensorflow')
+        warnings.filterwarnings('ignore', category=DeprecationWarning)
         
         # Suppress other loggers
         import logging
@@ -481,7 +484,7 @@ class TFLiteModelManager:
         
             
     def save_as_tflite_direct(self, model, filename, quantize=False, representative_data=None):
-        """Direct Keras model conversion - Keras 3 compatible"""
+        """Direct Keras model conversion - Keras 3 compatible with REAL data"""
         try:
             # Ensure model is built
             if not model.built:
@@ -493,20 +496,36 @@ class TFLiteModelManager:
             if quantize:
                 converter.optimizations = [tf.lite.Optimize.DEFAULT]
                 
-                # Use provided representative data or create default
+                # Use provided representative data or create REAL default
                 if representative_data is not None:
                     converter.representative_dataset = representative_data
                 else:
-                    def default_representative_dataset():
-                        # Use actual data shape for representative dataset
-                        for _ in range(min(100, params.QUANTIZE_NUM_SAMPLES)):
-                            data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
-                            yield [data]
-                    converter.representative_dataset = default_representative_dataset
+                    def real_representative_dataset():
+                        from utils import get_data_splits, preprocess_images
+                        
+                        # Use real data instead of random
+                        (x_train_raw, _), _, _ = get_data_splits()
+                        num_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                        calibration_data = x_train_raw[:num_samples]
+                        
+                        # Preprocess properly
+                        calibration_processed = preprocess_images(calibration_data, for_training=False)
+                        
+                        # Ensure proper format
+                        if calibration_processed.dtype != np.float32:
+                            calibration_processed = calibration_processed.astype(np.float32)
+                        if calibration_processed.max() > 1.0:
+                            calibration_processed = calibration_processed / 255.0
+                        
+                        if self.debug:
+                            print(f"🔧 Direct conversion - Real calibration: {calibration_processed.dtype}")
+                        
+                        for i in range(len(calibration_processed)):
+                            yield [calibration_processed[i:i+1]]
+                    
+                    converter.representative_dataset = real_representative_dataset
                 
-                # For Keras 3, use dynamic range only initially
-                print("🎯 Using dynamic range quantization (Keras 3 safe)")
-                # Don't set integer I/O types initially
+                print("🎯 Using dynamic range quantization with REAL data (Keras 3 safe)")
             
             # Convert model
             with suppress_all_output(self.debug):
@@ -740,7 +759,7 @@ class TFLiteModelManager:
             raise
             
     def save_as_tflite_simple_keras3(self, model, filename, quantize=False):
-        """Simple reliable method for Keras 3 - with complete output suppression"""
+        """Simple reliable method for Keras 3 - with REAL representative data"""
         try:
             if self.debug:
                 print("🔧 Using simple Keras 3 conversion...")
@@ -754,13 +773,36 @@ class TFLiteModelManager:
                 if self.debug:
                     print("🎯 Dynamic range quantization only (Keras 3 safe)")
                 
-                # Optional: Add representative dataset for better quantization
-                def simple_representative_dataset():
-                    # Create simple representative data
-                    for _ in range(100):
-                        data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
-                        yield [data]
-                converter.representative_dataset = simple_representative_dataset
+                # Use REAL representative dataset instead of random data
+                def real_representative_dataset():
+                    from utils import get_data_splits, preprocess_images
+                    
+                    # Get real training data
+                    (x_train_raw, _), _, _ = get_data_splits()
+                    
+                    # Use a subset for calibration
+                    num_calibration_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                    calibration_data = x_train_raw[:num_calibration_samples]
+                    
+                    # Preprocess the same way as inference
+                    calibration_processed = preprocess_images(calibration_data, for_training=False)
+                    
+                    # Ensure proper format for quantization
+                    if calibration_processed.dtype != np.float32:
+                        calibration_processed = calibration_processed.astype(np.float32)
+                    if calibration_processed.max() > 1.0:
+                        calibration_processed = calibration_processed / 255.0
+                    
+                    if self.debug:
+                        print(f"🔧 Real calibration data: {len(calibration_processed)} samples")
+                        print(f"   Data type: {calibration_processed.dtype}")
+                        print(f"   Range: [{calibration_processed.min():.3f}, {calibration_processed.max():.3f}]")
+                        print(f"   Shape: {calibration_processed.shape}")
+                    
+                    for i in range(len(calibration_processed)):
+                        yield [calibration_processed[i:i+1]]
+                
+                converter.representative_dataset = real_representative_dataset
             
             # Convert with complete output suppression
             with suppress_all_output(self.debug):

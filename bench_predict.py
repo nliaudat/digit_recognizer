@@ -354,6 +354,7 @@ def is_valid_tflite_model(model_path):
         return True
     except Exception as e:
         print(f"❌ Invalid TFLite model {os.path.basename(model_path)}: {e}")
+        return False
 
 def load_test_dataset_with_labels(num_samples=100, use_all_datasets=False):
     """
