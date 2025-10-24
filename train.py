@@ -1272,6 +1272,10 @@ def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_N
         # FOR QAT: Always convert to float32
         if x_calibration.dtype != np.float32:
             x_calibration = x_calibration.astype(np.float32)
+            
+        # normalization consistency checking    
+        if x_calibration.max() > 1.0:
+            x_calibration = x_calibration / 255.0
         
         print(f"QAT Representative: {x_calibration.dtype}, "
               f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
@@ -1884,7 +1888,7 @@ def train_model(debug=False):
     
     # Save training configuration
     save_training_config(training_dir, final_quantized_size, final_float_size, tflite_manager,
-                        test_accuracy, tflite_accuracy, training_time, debug)
+                        test_accuracy, tflite_accuracy, training_time, debug, , model=model)
                         
     # Save final model checkpoint
     print("💾 Saving final model checkpoint...")
@@ -1990,7 +1994,10 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
             print("⚠️  Could not import hyperparameter summary function")
             
         f.write(f"\nMODEL SUMMARY:\n")    
-        f.write(model_summary(model))
+        if model is not None:
+            f.write(model_summary(model))
+        else:
+            f.write("Model summary not available\n")
             
         f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     
@@ -2451,7 +2458,7 @@ def main():
         print("\n⚠️  Operation interrupted by user")
         
     except Exception as e:
-        print(f"\n❌ Operation failed: {e}")
+        print(f"\n❌ MAIN - Operation failed: {e}")
         if args.debug:
             import traceback
             traceback.print_exc()
