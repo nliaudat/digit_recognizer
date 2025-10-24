@@ -40,7 +40,7 @@ class TFLiteDigitPredictor:
     def predict(self, image, debug=False):
         """Predict digit from image using TFLite"""
         # Preprocess image - use silent mode to avoid debug outputs
-        processed_image = predict_single_image_silent(image)
+        processed_image = predict_single_image(image)
         
         # Handle channel mismatch - if model expects 3 channels but we have 1
         expected_channels = self.input_details[0]['shape'][3]
@@ -97,51 +97,51 @@ class TFLiteDigitPredictor:
         except Exception as e:
             return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
 
-def predict_single_image_silent(image):
-    """
-    Silent version of predict_single_image that doesn't print debug outputs
-    """
-    # Copy the preprocessing logic from preprocess.py but without prints
-    target_size = (params.INPUT_WIDTH, params.INPUT_HEIGHT)
-    grayscale = params.USE_GRAYSCALE
+# def predict_single_image_silent(image):
+    # """
+    # Silent version of predict_single_image that doesn't print debug outputs
+    # """
+    # # Copy the preprocessing logic from preprocess.py but without prints
+    # target_size = (params.INPUT_WIDTH, params.INPUT_HEIGHT)
+    # grayscale = params.USE_GRAYSCALE
     
-    # Resize to target size
-    image = cv2.resize(image, target_size)
+    # # Resize to target size
+    # image = cv2.resize(image, target_size)
     
-    # Convert to grayscale if required
-    if grayscale and len(image.shape) == 3:
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    elif not grayscale and len(image.shape) == 2:
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+    # # Convert to grayscale if required
+    # if grayscale and len(image.shape) == 3:
+        # image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    # elif not grayscale and len(image.shape) == 2:
+        # image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
     
-    # Add channel dimension if missing
-    if len(image.shape) == 2:
-        image = np.expand_dims(image, axis=-1)
+    # # Add channel dimension if missing
+    # if len(image.shape) == 2:
+        # image = np.expand_dims(image, axis=-1)
     
-    # Apply the same preprocessing logic as preprocess_images but silently
-    if params.QUANTIZE_MODEL:
-        if params.ESP_DL_QUANTIZE:
-            # ESP-DL INT8 quantization: Use UINT8 [0, 255]
-            if image.dtype != np.uint8:
-                if image.max() <= 1.0:
-                    image = (image * 255).astype(np.uint8)
-                else:
-                    image = image.astype(np.uint8)
-        else:
-            # Standard TFLite UINT8 quantization: Use UINT8 [0, 255]
-            if image.dtype != np.uint8:
-                if image.max() <= 1.0:
-                    image = (image * 255).astype(np.uint8)
-                else:
-                    image = image.astype(np.uint8)
-    else:
-        # No quantization: Use float32 [0, 1]
-        if image.dtype != np.float32:
-            image = image.astype(np.float32)
-        if image.max() > 1.0:
-            image = image / 255.0
+    # # Apply the same preprocessing logic as preprocess_images but silently
+    # if params.QUANTIZE_MODEL:
+        # if params.ESP_DL_QUANTIZE:
+            # # ESP-DL INT8 quantization: Use UINT8 [0, 255]
+            # if image.dtype != np.uint8:
+                # if image.max() <= 1.0:
+                    # image = (image * 255).astype(np.uint8)
+                # else:
+                    # image = image.astype(np.uint8)
+        # else:
+            # # Standard TFLite UINT8 quantization: Use UINT8 [0, 255]
+            # if image.dtype != np.uint8:
+                # if image.max() <= 1.0:
+                    # image = (image * 255).astype(np.uint8)
+                # else:
+                    # image = image.astype(np.uint8)
+    # else:
+        # # No quantization: Use float32 [0, 1]
+        # if image.dtype != np.float32:
+            # image = image.astype(np.float32)
+        # if image.max() > 1.0:
+            # image = image / 255.0
     
-    return image
+    # return image
 
 def load_image_from_path(image_path, input_channels):
     """Load image from specified path based on model's input requirements"""
@@ -331,7 +331,10 @@ def get_all_models(quantized_only=False):
                     'parameters': parameters_count
                 })
                 
-            except Exception:
+            # except Exception:
+                # continue
+            except Exception as e:
+                print(f"⚠️  Error processing model {training_dir}/{model_file}: {e}")  
                 continue
     
     # Remove duplicates and sort by directory name
@@ -349,8 +352,8 @@ def is_valid_tflite_model(model_path):
         interpreter = tf.lite.Interpreter(model_path=model_path)
         interpreter.allocate_tensors()
         return True
-    except Exception:
-        return False
+    except Exception as e:
+        print(f"❌ Invalid TFLite model {os.path.basename(model_path)}: {e}")
 
 def load_test_dataset_with_labels(num_samples=100, use_all_datasets=False):
     """
