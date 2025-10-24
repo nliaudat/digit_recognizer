@@ -76,7 +76,7 @@ def parse_arguments():
                        help='Train all available model architectures sequentially')
     parser.add_argument('--advanced', action='store_true',
                        help='Enable advanced training features')
-    parser.add_argument('--num_trials', type=int, default=5,
+    parser.add_argument('--num_trials', type=int, default=100,
                        help='Number of tuning trials (default: 5)')
     return parser.parse_args()
     
@@ -1388,24 +1388,24 @@ def train_model(debug=False, best_hps=None):
     set_all_seeds(params.SHUFFLE_SEED)
     
     # Apply tuned hyperparameters if provided
-    if best_hps is not None:
-        print("🎯 APPLYING TUNED HYPERPARAMETERS:")
-        print("=" * 50)
+    # if best_hps is not None:
+        # print("🎯 APPLYING TUNED HYPERPARAMETERS:")
+        # print("=" * 50)
         
-        # Extract best hyperparameters
-        best_optimizer = best_hps.get('optimizer')
-        best_lr = best_hps.get('learning_rate')
-        best_batch_size = best_hps.get('batch_size')
+        # # Extract best hyperparameters
+        # best_optimizer = best_hps.get('optimizer')
+        # best_lr = best_hps.get('learning_rate')
+        # best_batch_size = best_hps.get('batch_size')
         
-        # Apply to parameters
-        params.OPTIMIZER_TYPE = best_optimizer
-        params.LEARNING_RATE = best_lr
-        params.BATCH_SIZE = best_batch_size
+        # # Apply to parameters
+        # params.OPTIMIZER_TYPE = best_optimizer
+        # params.LEARNING_RATE = best_lr
+        # params.BATCH_SIZE = best_batch_size
         
-        print(f"   Optimizer: {best_optimizer}")
-        print(f"   Learning Rate: {best_lr}")
-        print(f"   Batch Size: {best_batch_size}")
-        print("=" * 50)
+        # print(f"   Optimizer: {best_optimizer}")
+        # print(f"   Learning Rate: {best_lr}")
+        # print(f"   Batch Size: {best_batch_size}")
+        # print("=" * 50)
     
     # VALIDATE AND CORRECT QUANTIZATION PARAMETERS FIRST
     print("🎯 VALIDATING QUANTIZATION PARAMETERS...")
@@ -1499,89 +1499,6 @@ def train_model(debug=False, best_hps=None):
     print("\nLoading dataset from multiple sources...")
     (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
     
-    # # HYPERPARAMETER TUNING  (BEFORE NORMAL TRAINING)
-    # if use_tuner:
-        # print("\n🎯 STARTING HYPERPARAMETER TUNING...")
-        # print("=" * 50)
-        
-        # try:
-            # from tuner import run_architecture_tuning
-            
-            # # Preprocess data for tuning
-            # print("🔄 Preprocessing images for tuning...")
-            # x_train_tune = preprocess_images(x_train_raw, for_training=True)
-            # x_val_tune = preprocess_images(x_val_raw, for_training=True)
-            
-            # # Handle labels for tuning
-            # if params.MODEL_ARCHITECTURE == "original_haverland":
-                # y_train_tune = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
-                # y_val_tune = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES)
-            # else:
-                # y_train_tune = y_train_raw.copy()
-                # y_val_tune = y_val_raw.copy()
-            
-            # # Run tuning
-            # best_model, best_hps, history, tuner = run_architecture_tuning(
-                # x_train=x_train_tune,
-                # y_train=y_train_tune, 
-                # x_val=x_val_tune,
-                # y_val=y_val_tune,
-                # num_trials=num_trials,
-                # debug=debug
-            # )
-            
-            # if best_model and best_hps:
-                # # Update parameters with best values
-                # best_lr = best_hps.get('learning_rate')
-                # best_batch_size = best_hps.get('batch_size')
-                # best_optimizer = best_hps.get('optimizer')
-                
-                # params.LEARNING_RATE = best_lr
-                # params.BATCH_SIZE = best_batch_size
-                
-                # print(f"\n🎯 Optimized hyperparameters found:")
-                # print(f"   Learning Rate: {best_lr}")
-                # print(f"   Batch Size: {best_batch_size}")
-                # if best_optimizer:
-                    # print(f"   Optimizer: {best_optimizer}")
-                # print(f"   Architecture: {params.MODEL_ARCHITECTURE}")
-                
-                # if advanced:
-                    # # Use the tuned model directly
-                    # print("🏁 Using tuned model directly (advanced mode)")
-                    
-                    # # Save the tuned model
-                    # best_model.save(os.path.join(training_dir, "tuned_model.keras"))
-                    
-                    # # Also save tuning configuration
-                    # config_path = os.path.join(training_dir, "tuning_config.txt")
-                    # with open(config_path, 'w') as f:
-                        # f.write(f"Tuned Model Configuration\n")
-                        # f.write("=" * 40 + "\n")
-                        # f.write(f"Model: {params.MODEL_ARCHITECTURE}\n")
-                        # f.write(f"Learning Rate: {best_lr}\n")
-                        # f.write(f"Batch Size: {best_batch_size}\n")
-                        # if best_optimizer:
-                            # f.write(f"Optimizer: {best_optimizer}\n")
-                        # f.write(f"Final Val Accuracy: {history.history['val_accuracy'][-1]:.4f}\n")
-                    
-                    # print(f"💾 Tuned model saved to: {training_dir}")
-                    # return best_model, history, training_dir
-                # else:
-                    # # Continue with normal training using best hyperparameters
-                    # print("🔄 Continuing with normal training using optimized hyperparameters...")
-                    # # We'll continue with the normal training flow below
-            
-            # else:
-                # print("❌ Hyperparameter tuning failed, continuing with default parameters")
-                
-        # except ImportError as e:
-            # print(f"❌ Keras Tuner not available: {e}")
-            # print("💡 Install with: pip install keras-tuner")
-            # print("🔄 Falling back to normal training...")
-        # except Exception as e:
-            # print(f"❌ Hyperparameter tuning failed: {e}")
-            # print("🔄 Falling back to normal training...")
     
     print("🔄 Preprocessing images...")
     x_train = preprocess_images(x_train_raw, for_training=True)
@@ -2387,43 +2304,43 @@ def main():
                 y_train=y_train, 
                 x_val=x_val,
                 y_val=y_val,
-                num_trials=getattr(args, 'num_trials', 5),
+                num_trials=getattr(args, 'num_trials', params.TUNER_MAX_TRIALS),
                 debug=args.debug
             )
             
-            if tuning_results:
-                print(f"\n🎯 APPLYING TUNED HYPERPARAMETERS TO MAIN TRAINING:")
-                print("=" * 50)
+            # if tuning_results:
+                # print(f"\n🎯 APPLYING TUNED HYPERPARAMETERS TO MAIN TRAINING:")
+                # print("=" * 50)
                 
-                # Apply tuned parameters
-                params.OPTIMIZER_TYPE = tuning_results['optimizer']
-                params.LEARNING_RATE = tuning_results['learning_rate']
-                params.BATCH_SIZE = tuning_results['batch_size']
+                # # Apply tuned parameters
+                # params.OPTIMIZER_TYPE = tuning_results['optimizer']
+                # params.LEARNING_RATE = tuning_results['learning_rate']
+                # params.BATCH_SIZE = tuning_results['batch_size']
                 
-                print(f"   Optimizer: {tuning_results['optimizer']}")
-                print(f"   Learning Rate: {tuning_results['learning_rate']}")
-                print(f"   Batch Size: {tuning_results['batch_size']}")
-                print(f"   Tuned Val Accuracy: {tuning_results['val_accuracy']:.4f}")
-                print("=" * 50)
+                # print(f"   Optimizer: {tuning_results['optimizer']}")
+                # print(f"   Learning Rate: {tuning_results['learning_rate']}")
+                # print(f"   Batch Size: {tuning_results['batch_size']}")
+                # print(f"   Tuned Val Accuracy: {tuning_results['val_accuracy']:.4f}")
+                # print("=" * 50)
                 
-                # Now run the main training with tuned parameters
-                print("🚀 Starting main training with tuned hyperparameters...")
-                model, history, output_dir = train_model(debug=args.debug)
+                # # Now run the main training with tuned parameters
+                # print("🚀 Starting main training with tuned hyperparameters...")
+                # model, history, output_dir = train_model(debug=args.debug)
                 
-                if model is not None:
-                    print(f"\n✅ Training completed successfully!")
-                    print(f"📁 Output directory: {output_dir}")
+                # if model is not None:
+                    # print(f"\n✅ Training completed successfully!")
+                    # print(f"📁 Output directory: {output_dir}")
                     
-                    # Compare tuned vs final results
-                    if hasattr(history, 'history') and history.history:
-                        final_val_acc = history.history['val_accuracy'][-1] if 'val_accuracy' in history.history else 0
-                        improvement = final_val_acc - tuning_results['val_accuracy']
-                        print(f"📈 Tuning vs Final: {tuning_results['val_accuracy']:.4f} → {final_val_acc:.4f} (Δ{improvement:+.4f})")
-                else:
-                    print("❌ Main training failed after tuning")
-            else:
-                print("❌ Hyperparameter tuning failed, using default parameters")
-                model, history, output_dir = train_model(debug=args.debug)
+                    # # Compare tuned vs final results
+                    # if hasattr(history, 'history') and history.history:
+                        # final_val_acc = history.history['val_accuracy'][-1] if 'val_accuracy' in history.history else 0
+                        # improvement = final_val_acc - tuning_results['val_accuracy']
+                        # print(f"📈 Tuning vs Final: {tuning_results['val_accuracy']:.4f} → {final_val_acc:.4f} (Δ{improvement:+.4f})")
+                # else:
+                    # print("❌ Main training failed after tuning")
+            # else:
+                # print("❌ Hyperparameter tuning failed, using default parameters")
+                # model, history, output_dir = train_model(debug=args.debug)
                 
         elif args.test_all_models:
             # TEST ALL MODELS MODE
