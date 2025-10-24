@@ -327,7 +327,7 @@ TENSORBOARD_UPDATE_FREQ = 'epoch'
 TENSORBOARD_WRITE_GRAPHS = True
 
 # ==============================================================================
-# DATA AUGMENTATION HYPERPARAMETERS
+# DATA AUGMENTATION
 # ==============================================================================
 
 USE_DATA_AUGMENTATION = True
@@ -391,8 +391,8 @@ ENSEMBLE_MODEL_COUNT = 3
 
 USE_KERAS_TUNER = True
 TUNER_PROJECT_NAME = "digit_recognizer_tuning"
-TUNER_MAX_TRIALS = 50
-TUNER_EXECUTIONS_PER_TRIAL = 2
+TUNER_MAX_TRIALS = 100
+TUNER_EXECUTIONS_PER_TRIAL = 15
 TUNER_OBJECTIVE = "val_accuracy"
 TUNER_NUM_TRIAL = 10
 TUNER_EPOCHS = 15
@@ -403,7 +403,7 @@ TUNER_LEARNING_RATES = [1e-2, 5e-3, 1e-3, 5e-4, 1e-4]  # Wider range
 TUNER_BATCH_SIZES = [16, 32, 64, 128]  # More options
 
 # Early Stopping for Tuning
-TUNER_EARLY_STOPPING_PATIENCE = 5
+TUNER_EARLY_STOPPING_PATIENCE = 10
 TUNER_MIN_DELTA = 0.001
 
 # ==============================================================================
