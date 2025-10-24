@@ -257,9 +257,9 @@ def validate_data_type_consistency():
         infer_dtype, infer_min, infer_max = np.float32, 0.0, 1.0
         infer_desc = "Float32 [0, 1] (No quantization)"
     
-    print(f"📊 Expected Formats:")
-    print(f"   Training:  {train_desc}")
-    print(f"   Inference: {infer_desc}")
+    # print(f"📊 Expected Formats:")
+    # print(f"   Training:  {train_desc}")
+    # print(f"   Inference: {infer_desc}")
     
     # Test consistency with sample data
     test_images = np.random.randint(0, 255, (3, params.INPUT_HEIGHT, params.INPUT_WIDTH, params.INPUT_CHANNELS), dtype=np.uint8)

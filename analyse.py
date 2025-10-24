@@ -83,7 +83,7 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
             correct_predictions += 1
     
     accuracy = correct_predictions / total_samples
-    print(f"📊 TFLite Model Accuracy: {accuracy:.4f} ({correct_predictions}/{total_samples})")
+    print(f"TFLite Model Accuracy: {accuracy:.4f} ({correct_predictions}/{total_samples})")
     
     return accuracy
 
@@ -193,7 +193,7 @@ def debug_tflite_model(tflite_path, sample_input=None):
         input_details = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
         
-        print("📋 TFLite Model Details:")
+        print("TFLite Model Details:")
         print(f"   Input details: {input_details}")
         print(f"   Output details: {output_details}")
         

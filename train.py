@@ -1066,7 +1066,7 @@ class TrainingMonitor:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
         
-        print(f"📊 Training plots saved to: {plot_path}")
+        print(f"Training plots saved to: {plot_path}")
 
 class TFLiteCheckpoint(tf.keras.callbacks.Callback):
     def __init__(self, tflite_manager, representative_data, save_frequency=10):
@@ -1264,63 +1264,22 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     return callbacks
     
 def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    """Create representative dataset that preserves the correct data type"""
+    """Create representative dataset that preserves the correct data type for QAT"""
     def representative_dataset():
         # Use the sophisticated preprocess_images with for_training=False
         x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
         
+        # FOR QAT: Always convert to float32
+        if x_calibration.dtype != np.float32:
+            x_calibration = x_calibration.astype(np.float32)
+        
+        print(f"QAT Representative: {x_calibration.dtype}, "
+              f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
+        
         for i in range(len(x_calibration)):
-            # ✅ DON'T convert to float32 - preserve the data type from preprocess_images
-            yield [x_calibration[i:i+1]]  # Keep original dtype (UINT8 for ESP-DL, float32 for others)
+            yield [x_calibration[i:i+1]]  # Keep as float32 for QAT
     
     return representative_dataset
-    
-
-# def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    # """Create representative dataset that preserves the correct data type for QAT"""
-    # def representative_dataset():
-        # # Use the sophisticated preprocess_images with for_training=False
-        # x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
-        
-        # # FOR QAT: Always convert to float32
-        # if x_calibration.dtype != np.float32:
-            # x_calibration = x_calibration.astype(np.float32)
-        
-        # print(f"QAT Representative: {x_calibration.dtype}, "
-              # f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
-        
-        # for i in range(len(x_calibration)):
-            # yield [x_calibration[i:i+1]]  # Keep as float32 for QAT
-    
-    # return representative_dataset
-    
-    
-# def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    # """Create representative dataset with CORRECT data format"""
-    # def representative_dataset():
-        # # Use the same preprocessing as inference
-        # x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
-        
-        # # CRITICAL: Match TFLite expected input format
-        # if params.QUANTIZE_MODEL:
-            # # For quantization: UINT8 [0, 255]
-            # if x_calibration.dtype != np.uint8:
-                # if x_calibration.max() <= 1.0:
-                    # x_calibration = (x_calibration * 255).astype(np.uint8)
-                # else:
-                    # x_calibration = x_calibration.astype(np.uint8)
-        # else:
-            # # For float32: Float32 [0, 1]
-            # if x_calibration.dtype != np.float32:
-                # x_calibration = x_calibration.astype(np.float32)
-        
-        # print(f"Representative dataset: {x_calibration.dtype}, "
-              # f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
-        
-        # for i in range(len(x_calibration)):
-            # yield [x_calibration[i:i+1]]
-    
-    # return representative_dataset
     
 def setup_gpu():
     """Comprehensive GPU configuration"""
@@ -1513,7 +1472,7 @@ def train_model(debug=False):
         return None, None, None
     
     # LOAD AND PREPROCESS DATA
-    print("\n📊 Loading dataset from multiple sources...")
+    print("\nLoading dataset from multiple sources...")
     (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
     
     # # HYPERPARAMETER TUNING  (BEFORE NORMAL TRAINING)
@@ -2029,6 +1988,9 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
             f.write("\n\n" + "=" * 50 + "\n\n")
         except ImportError:
             print("⚠️  Could not import hyperparameter summary function")
+            
+        f.write(f"\nMODEL SUMMARY:\n")    
+        f.write(model_summary(model))
             
         f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     
