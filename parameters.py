@@ -204,7 +204,7 @@ ORIGINAL_HAVERLAND_DROPOUT_RATES = [0.25, 0.25, 0.25, 0.5]  # Fixed from noteboo
 # ==============================================================================
 
 # Optimizer Selection
-OPTIMIZER_TYPE = "rmsprop"  # Options: "rmsprop", "adam", "sgd", "adagrad", "adamw"
+OPTIMIZER_TYPE = "rmsprop"  # Options: "rmsprop", "adam", "sgd", "adagrad", "adamw", "nadam"
 
 # RMSprop Hyperparameters
 RMSPROP_RHO = 0.9
@@ -395,6 +395,16 @@ TUNER_MAX_TRIALS = 50
 TUNER_EXECUTIONS_PER_TRIAL = 2
 TUNER_OBJECTIVE = "val_accuracy"
 TUNER_NUM_TRIAL = 10
+TUNER_EPOCHS = 15
+
+# Search Space Configuration
+TUNER_OPTIMIZERS = ["adam", "rmsprop", "nadam", "sgd"]  # Limit to best performers ["rmsprop", "adam", "sgd", "adagrad", "adamw", "nadam"]
+TUNER_LEARNING_RATES = [1e-2, 5e-3, 1e-3, 5e-4, 1e-4]  # Wider range
+TUNER_BATCH_SIZES = [16, 32, 64, 128]  # More options
+
+# Early Stopping for Tuning
+TUNER_EARLY_STOPPING_PATIENCE = 5
+TUNER_MIN_DELTA = 0.001
 
 # ==============================================================================
 # VALIDATION FUNCTIONS
@@ -403,7 +413,7 @@ TUNER_NUM_TRIAL = 10
 def validate_hyperparameters():
     """Validate all hyperparameters for consistency"""
     # Optimizer validation
-    valid_optimizers = ["rmsprop", "adam", "sgd", "adagrad", "adamw"]
+    valid_optimizers = ["rmsprop", "adam", "sgd", "adagrad", "adamw", "nadam"]
     if OPTIMIZER_TYPE not in valid_optimizers:
         raise ValueError(f"❌ Invalid OPTIMIZER_TYPE: {OPTIMIZER_TYPE}. Must be one of {valid_optimizers}")
     
