@@ -1888,7 +1888,7 @@ def train_model(debug=False):
     
     # Save training configuration
     save_training_config(training_dir, final_quantized_size, final_float_size, tflite_manager,
-                        test_accuracy, tflite_accuracy, training_time, debug, , model=model)
+                        test_accuracy, tflite_accuracy, training_time, debug, model=model)
                         
     # Save final model checkpoint
     print("💾 Saving final model checkpoint...")
@@ -2060,12 +2060,13 @@ def test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, models_to_te
         print(f"\n🔍 Testing: {model_name}")
         print("-" * 40)
         
+        # Set current model - IMPORTANT: Update the actual parameter
         params.MODEL_ARCHITECTURE = model_name
         
         try:
             model = create_model()
             
-            if model_name == "original_haverland":
+            if params.MODEL_ARCHITECTURE == "original_haverland":  # Use current model name
                 loss_fn = 'categorical_crossentropy'
                 y_train_current = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)  
                 y_val_current = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES)      
@@ -2114,7 +2115,11 @@ def test_all_models(x_train_raw, y_train_raw, x_val_raw, y_val_raw, models_to_te
                 'params': 0,
                 'error': str(e)
             }
+        
+        # Clear session between models
+        tf.keras.backend.clear_session()
     
+    # Restore original model - IMPORTANT: Reset the parameter
     params.MODEL_ARCHITECTURE = original_model
     
     print("\n" + "="*60)
@@ -2143,46 +2148,55 @@ def train_specific_models(models_to_train, debug=False):
         print(f"\n🎯 Training: {model_name}")
         print("=" * 50)
         
-        # Set current model
+        # Set current model - IMPORTANT: Update the actual parameter
         params.MODEL_ARCHITECTURE = model_name
         
         try:
             # Train model with full configuration
             model, history, output_dir = train_model(debug=debug)
             
-            # Extract results
-            from analyse import evaluate_tflite_model
-            quantized_tflite_path = os.path.join(output_dir, params.TFLITE_FILENAME)
-            
-            # Load test data for evaluation
-            (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
-            x_test = preprocess_images(x_test_raw)
-            
-            if model_name == "original_haverland":
-                y_test_current = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES) 
+            if model is not None:  # Only process if training was successful
+                # Extract results
+                from analyse import evaluate_tflite_model
+                quantized_tflite_path = os.path.join(output_dir, params.TFLITE_FILENAME)
+                
+                # Load test data for evaluation
+                (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
+                x_test = preprocess_images(x_test_raw, for_training=False)
+                
+                # Handle labels based on current model type
+                if params.MODEL_ARCHITECTURE == "original_haverland":
+                    y_test_current = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES) 
+                else:
+                    y_test_current = y_test_raw 
+                
+                # Evaluate models
+                keras_test_accuracy = model.evaluate(x_test, y_test_current, verbose=0)[1]
+                
+                tflite_accuracy = 0.0
+                if os.path.exists(quantized_tflite_path) and params.QUANTIZE_MODEL:
+                    tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test_current)
+                
+                results[model_name] = {
+                    'keras_test_accuracy': keras_test_accuracy,
+                    'tflite_accuracy': tflite_accuracy,
+                    'output_dir': output_dir,
+                    'params': model.count_params(),
+                    'model': model
+                }
+                
+                print(f"✅ {model_name} completed:")
+                print(f"   Keras Test Accuracy: {keras_test_accuracy:.4f}")
+                print(f"   TFLite Accuracy: {tflite_accuracy:.4f}")
+                print(f"   Output: {output_dir}")
             else:
-                y_test_current = y_test_raw 
-            
-            # Evaluate models
-            keras_test_accuracy = model.evaluate(x_test, y_test_current, verbose=0)[1]
-            
-            tflite_accuracy = 0.0
-            if os.path.exists(quantized_tflite_path):
-                tflite_accuracy = evaluate_tflite_model(quantized_tflite_path, x_test, y_test_current)
-            
-            results[model_name] = {
-                'keras_test_accuracy': keras_test_accuracy,
-                'tflite_accuracy': tflite_accuracy,
-                'output_dir': output_dir,
-                'params': model.count_params(),
-                'model': model
-            }
-            
-            print(f"✅ {model_name} completed:")
-            print(f"   Keras Test Accuracy: {keras_test_accuracy:.4f}")
-            print(f"   TFLite Accuracy: {tflite_accuracy:.4f}")
-            print(f"   Output: {output_dir}")
-            
+                print(f"❌ {model_name} training failed (returned None)")
+                results[model_name] = {
+                    'keras_test_accuracy': 0.0,
+                    'tflite_accuracy': 0.0,
+                    'error': 'Training returned None'
+                }
+                
         except Exception as e:
             print(f"❌ {model_name} training failed: {e}")
             if debug:
@@ -2193,8 +2207,11 @@ def train_specific_models(models_to_train, debug=False):
                 'tflite_accuracy': 0.0,
                 'error': str(e)
             }
+        
+        # Clear session to free memory between models
+        tf.keras.backend.clear_session()
     
-    # Restore original model
+    # Restore original model - IMPORTANT: Reset the parameter
     params.MODEL_ARCHITECTURE = original_model
     
     # Print summary
