@@ -238,13 +238,13 @@ def find_model_path(model_name=None, quantized_only=False):
             # Only look for quantized models in the latest directory
             possible_paths = [
                 os.path.join(params.OUTPUT_DIR, latest_training, "final_quantized.tflite"),
-                os.path.join(params.OUTPUT_DIR, latest_training, "model_quantized.tflite"),
-                os.path.join(params.OUTPUT_DIR, latest_training, "quantized.tflite"),
+                # os.path.join(params.OUTPUT_DIR, latest_training, "model_quantized.tflite"),
+                # os.path.join(params.OUTPUT_DIR, latest_training, "quantized.tflite"),
             ]
         else:
             # Look for all models in the latest directory
             possible_paths = [
-                os.path.join(params.OUTPUT_DIR, latest_training, params.TFLITE_FILENAME),
+                # os.path.join(params.OUTPUT_DIR, latest_training, params.TFLITE_FILENAME),
                 os.path.join(params.OUTPUT_DIR, latest_training, "final_quantized.tflite"),
                 os.path.join(params.OUTPUT_DIR, latest_training, "final_float.tflite"),
             ]
@@ -289,11 +289,11 @@ def get_all_models(quantized_only=False):
         possible_model_files = [
             "final_quantized.tflite",
             "final_float.tflite", 
-            "model_quantized.tflite",
-            "model_float.tflite",
-            "quantized.tflite",
-            "float.tflite",
-            params.TFLITE_FILENAME  # Use the filename from parameters
+            # "model_quantized.tflite",
+            # "model_float.tflite",
+            # "quantized.tflite",
+            # "float.tflite",
+            # params.TFLITE_FILENAME  # Use the filename from parameters
         ]
         
         # Also look for any .tflite files in the directory
