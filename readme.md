@@ -18,6 +18,18 @@ Grayscale or RGB runs the same on test datasets, but RGB need more resources at 
 
 The graph above shows the relationship between model accuracy and model size across different neural network architectures. As demonstrated, the project explores how different model complexities affect recognition performance.
 
+| Model                          | Parameters | Size_KB | Accuracy | Inferences/sec |
+| ------------------------------ | ---------- | ------- | -------- | -------------- |
+| original_haverland_10cls_GRAY  | 234500     | 203.4   | 0.9918   | 6040           |
+| digit_recognizer_v4_10cls_GRAY | 102400     | 62.5    | 0.9906   | 4466           |
+| digit_recognizer_v1_10cls_GRAY | 135700     | 97.6    | 0.987    | 7489           |
+| mnist_quant_10cls_GRAY         | 98700      | 63.6    | 0.985    | 6588           |
+| digit_recognizer_v5_10cls_GRAY | 90400      | 37.4    | 0.9665   | 3708           |
+| digit_recognizer_v6_10cls_GRAY | 61500      | 36.5    | 0.9486   | 7244           |
+| esp_quant_ready_10cls_GRAY     | 69200      | 34.5    | 0.9329   | 7689           |
+| digit_recognizer_v3_10cls_GRAY | 26500      | 13.9    | 0.896    | 11018          |
+|                                |
+
 ## Features
 
 - Multiple neural network architectures
