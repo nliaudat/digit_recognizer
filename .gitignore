@@ -3,6 +3,9 @@
 !/datasets/Tenth-of-step-of-a-meter-digit
 /exported_models/*
 !exported_models/10cls_GRAY
+!exported_models/10cls_RGB
+!exported_models/100cls_GRAY
+!exported_models/100cls_RGB
 /models/__pycache__
 /utils/__pycache__
 /training/__pycache__
