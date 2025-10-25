@@ -1,10 +1,6 @@
 /__pycache__
 /datasets/*
 !/datasets/Tenth-of-step-of-a-meter-digit
-!datasets/augmentation.py
-!datasets/mnist.py
-!datasets/qmnist.py
-!datasets/haverland_flatten.py
 /exported_models/*
 /models/__pycache__
 /utils/__pycache__
