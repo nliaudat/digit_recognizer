@@ -52,7 +52,7 @@ The project demonstrates that :
  - RGB or grayscale has very same benchmark results, but the processing is not the same as in parameters needed. It also needs a lot of more cpu and memory to process
  
  ## RGB - Grayscale model comparison : 
- if the modeel use Conv2D (fast all), it flatten all channel, that's why the result are very the same between RGB and grayscale
+ if the model use Conv2D (fast all), it flatten all channel, that's why the result are very the same between RGB and grayscale
  
  ##### How Conv2D Actually Works with Channels:
 -   **Input**: `(height, width, channels)` - e.g., `(32, 20, 1)` for grayscale or `(32, 20, 3)` for RGB
