@@ -59,12 +59,12 @@ The project demonstrates that :
 
 ## Related Projects
 
-This work contributes to improved digit recognition research, including the Tenth-of-step-of-a-meter-digit project for enhanced meter digit analysis.
+This work contributes to improved digit recognition research, including the [Tenth-of-step-of-a-meter-digit](https://github.com/haverland/Tenth-of-step-of-a-meter-digit) project for enhanced meter digit analysis.
 
 ## Contributing
 Contributions are welcome! Please feel free to submit pull requests or open issues for suggestions.
 
 ## License
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the Apache-2.0 license
 
 
