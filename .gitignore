@@ -1,5 +1,6 @@
 /__pycache__
 /datasets/*
+!/datasets/Tenth-of-step-of-a-meter-digit
 !datasets/augmentation.py
 !datasets/mnist.py
 !datasets/qmnist.py
@@ -11,3 +12,4 @@
 /models/bad
 /models/.old
 6.jpg
+datasets/Tenth-of-step-of-a-meter-digit/commands.txt
