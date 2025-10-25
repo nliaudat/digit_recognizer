@@ -18,6 +18,8 @@ Grayscale or RGB runs the same on test datasets, but RGB need more resources at 
 
 The graph above shows the relationship between model accuracy and model size across different neural network architectures. As demonstrated, the project explores how different model complexities affect recognition performance.
 
+## Benchmark on 25000 real images
+
 | Model                          | Parameters | Size_KB | Accuracy | Inferences/sec |
 | ------------------------------ | ---------- | ------- | -------- | -------------- |
 | original_haverland_10cls_GRAY  | 234500     | 203.4   | 0.9918   | 6040           |
