@@ -1,0 +1,26 @@
+parameter,value
+timestamp,2025-10-25 11:11:42
+model_architecture,digit_recognizer_v4
+input_shape,(32, 20, 3)
+nb_classes,10
+data_sources,Tenth-of-step-of-a-meter-digit(1.0)
+batch_size,32
+epochs,200
+learning_rate,0.001
+use_early_stopping,True
+early_stopping_monitor,val_accuracy
+early_stopping_patience,30
+lr_scheduler_monitor,val_loss
+lr_scheduler_patience,3
+lr_scheduler_factor,0.5
+QUANTIZE_MODEL,True
+esp_dl_quantize,False
+quantize_num_samples,1000
+use_gpu,False
+keras_test_accuracy,0.9810
+tflite_test_accuracy,0.9817
+best_val_accuracy,0.9825
+quantized_model_size_kb,79.3
+float_model_size_kb,266.7
+training_time,0:14:33.231412
+optimizer,rmsprop
