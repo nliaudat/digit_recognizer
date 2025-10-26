@@ -2,17 +2,17 @@ Digit Recognition Training Configuration
 ==================================================
 
 FINAL RESULTS:
-  Keras Model Test Accuracy: 0.8835
-  TFLite Model Test Accuracy: 0.8840
-  Best Validation Accuracy: 0.8864
+  Keras Model Test Accuracy: 0.8499
+  TFLite Model Test Accuracy: 0.8499
+  Best Validation Accuracy: 0.8442
   Quantized Model Size: 13.9 KB
   Float Model Size: 27.9 KB
-  Training Time: 0:08:58.734193
+  Training Time: 0:08:30.162479
 
 MODEL OUTPUT:
   Quantized TFLite: 13.9 KB
   Float TFLite: 27.9 KB
-  Best accuracy: 0.8864
+  Best accuracy: 0.8442
 
 DATA SOURCES:
   1. Tenth-of-step-of-a-meter-digit (label_file) - weight: 1.0
@@ -98,4 +98,4 @@ QUANTIZATION:
 MODEL SUMMARY:
 Model summary not available
 
-GENERATED: 2025-10-24 20:08:57
+GENERATED: 2025-10-26 18:49:39

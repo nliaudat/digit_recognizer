@@ -1,5 +1,5 @@
 parameter,value
-timestamp,2025-10-24 20:20:20
+timestamp,2025-10-26 18:58:45
 model_architecture,digit_recognizer_v4
 input_shape,(32, 20, 1)
 nb_classes,10
@@ -17,10 +17,10 @@ QUANTIZE_MODEL,True
 esp_dl_quantize,False
 quantize_num_samples,1000
 use_gpu,False
-keras_test_accuracy,0.9771
-tflite_test_accuracy,0.9764
-best_val_accuracy,0.9831
+keras_test_accuracy,0.9830
+tflite_test_accuracy,0.9821
+best_val_accuracy,0.9845
 quantized_model_size_kb,62.5
 float_model_size_kb,204.4
-training_time,0:11:15.412949
+training_time,0:08:57.489818
 optimizer,rmsprop

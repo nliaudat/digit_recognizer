@@ -870,4 +870,4 @@ if __name__ == "__main__":
     main()
     
     
-# py bench_predict.py --test_all --quantized --test_images 15000
+# py bench_predict.py --test_all --quantized --test_images 27000
