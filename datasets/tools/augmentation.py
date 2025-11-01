@@ -348,14 +348,17 @@ class SingleShotAugmentor:
                 
                 print(f"   Loaded {len(images)} images from {os.path.basename(root)}")
         
-        # Convert to numpy arrays
-        all_images = np.array(all_images)
-        all_labels = np.array(all_labels)
+        # Don't convert to numpy array - keep as list to handle variable sizes
+        # The images will be resized during augmentation anyway
         
         print(f"✅ Dataset loaded:")
         print(f"   Total images: {len(all_images)}")
         print(f"   Classes: {np.unique(all_labels)}")
-        print(f"   Image shape: {all_images[0].shape}")
+        
+        # Check image sizes for debugging
+        if len(all_images) > 0:
+            shapes = [img.shape for img in all_images[:5]]  # Show first 5 shapes
+            print(f"   Sample image shapes: {shapes}")
         
         return all_images, all_labels, all_paths
     
