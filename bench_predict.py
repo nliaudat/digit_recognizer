@@ -833,10 +833,10 @@ def main():
     """Main function with command line arguments"""
     parser = argparse.ArgumentParser(description='Digit Recognition Benchmarking')
     parser.add_argument('--model', type=str, help='Model name to use for prediction')
-    parser.add_argument('--quantized', action='store_true', help='Use only quantized models')
-    parser.add_argument('--test_all', action='store_true', help='Test all available models and print accuracy summary')
-    parser.add_argument('--test_images', type=int, default=1000, help='Number of test images per model (default: 100)')
-    parser.add_argument('--all_datasets', action='store_true', help='Use all available images from dataset (overrides --test_images, only for --test_all)')
+    parser.add_argument('--quantized', action='store_true', default=True, help='Use only quantized models')
+    parser.add_argument('--test_all', action='store_true', default=True, help='Test all available models and print accuracy summary')
+    parser.add_argument('--test_images', type=int, default=25000, help='Number of test images per model (default: 25000)')
+    parser.add_argument('--all_datasets', action='store_true', default=True, help='Use all available images from dataset (overrides --test_images, only for --test_all)')
     parser.add_argument('--debug', action='store_true', help='Debug model output interpretation')
     parser.add_argument('--list', action='store_true', help='List all available models')
     
@@ -870,4 +870,4 @@ if __name__ == "__main__":
     main()
     
     
-# py bench_predict.py --test_all --quantized --test_images 27000
+# py bench_predict.py --test_all --quantized --test_images 25000
