@@ -3,6 +3,7 @@
 !/datasets/Tenth-of-step-of-a-meter-digit
 !/datasets/real_integra
 !/datasets/real_integra_bad_predictions
+!/datasets/static_augmentation
 !/datasets/tools
 /exported_models/*
 !exported_models/10cls_GRAY
@@ -20,3 +21,5 @@ datasets/Tenth-of-step-of-a-meter-digit/commands.txt
 .DS_Store
 /datasets/tools/aug_real_integra
 /datasets/tools/aug_real_integra_bad_predictions
+/datasets/static_augmentation
+/venv_digreco
