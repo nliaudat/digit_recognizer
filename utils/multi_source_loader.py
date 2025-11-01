@@ -41,7 +41,9 @@ class MultiSourceDataLoader:
             elif source_type == 'folder_structure':
                 images, labels = self.load_folder_structure(source_path)
             elif source_type == 'label_file':
-                images, labels = self.load_label_file_dataset(source_path)
+                # Get optional labels file name, default to 'labels.txt'
+                labels_file = source_config.get('labels', 'labels.txt')
+                images, labels = self.load_label_file_dataset(source_path, labels_file)
             else:
                 log_print(f"Unknown source type: {source_type}, skipping...", level=1)
                 continue
@@ -139,10 +141,10 @@ class MultiSourceDataLoader:
         
         return np.array(images), np.array(labels)
     
-    def load_label_file_dataset(self, dataset_path):
+    def load_label_file_dataset(self, dataset_path, labels_file='labels.txt'):
         """Load dataset with label file"""
         try:
-            label_file_path = os.path.join(dataset_path, 'labels.txt')
+            label_file_path = os.path.join(dataset_path, labels_file)
             images_dir = os.path.join(dataset_path, 'images')
             
             if not os.path.exists(dataset_path):
@@ -163,6 +165,7 @@ class MultiSourceDataLoader:
             valid_files = 0
             
             print(f"📁 Loading dataset from: {dataset_path}")
+            print(f"📄 Using label file: {labels_file}")
             
             with open(label_file_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()

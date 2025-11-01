@@ -17,7 +17,7 @@ AVAILABLE_MODELS = [
     # "esp_optimized_cnn",
     # "esp_ultra_light", 
     # "esp_high_capacity",
-    "esp_quantization_ready",
+    # "esp_quantization_ready",
     # "esp_haverland_compatible",
     # "esp_quantization_ready_v2",
     # "esp_quantization_ready_v2_aggressive",
@@ -27,11 +27,12 @@ AVAILABLE_MODELS = [
     # "simple_cnn_v2",
     # "minimal_cnn",
     # "mobilenet_style",
-    "digit_recognizer_v2",
+    # "digit_recognizer_v2",
     "digit_recognizer_v3",
     "digit_recognizer_v4",
     "digit_recognizer_v5",
-    "digit_recognizer_v6",
+    # "digit_recognizer_v6",
+    # "digit_recognizer_v7",
 ]
 
 MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODELS
@@ -63,9 +64,24 @@ USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 DATA_SOURCES = [ 
     {
         'name': 'Tenth-of-step-of-a-meter-digit',
-        'type': 'label_file', # load labels.txt (tab separated) and images folder in path
+        'type': 'label_file', 
+        'labels': 'labels_10_shuffle.txt',  # Optional: specify label file name (default: 'labels.txt' - tab separated)
         'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
         'weight': 1.0,
+    },
+    {
+        'name': 'real_integra_bad_predictions',
+        'type': 'label_file', 
+        'labels': 'labels_10_shuffle.txt',  
+        'path': 'datasets/real_integra_bad_predictions', 
+        'weight': 5.0,
+    },
+    {
+        'name': 'real_integra',
+        'type': 'label_file', 
+        'labels': 'labels_10_shuffle.txt',  
+        'path': 'datasets/real_integra', 
+        'weight': 0.25,
     },
     # {
         # 'name': 'meterdigits_100',
@@ -151,8 +167,8 @@ ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
                          
 # Quantization Aware Training
-USE_QAT = True  # Enable Quantization Aware Training
-QAT_QUANTIZE_ALL = True  # Quantize all layers
+USE_QAT = False  # Enable Quantization Aware Training
+QAT_QUANTIZE_ALL = False  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
 
 # Data pipeline configuration
@@ -205,6 +221,7 @@ ORIGINAL_HAVERLAND_DROPOUT_RATES = [0.25, 0.25, 0.25, 0.5]  # Fixed from noteboo
 
 # Optimizer Selection
 OPTIMIZER_TYPE = "rmsprop"  # Options: "rmsprop", "adam", "sgd", "adagrad", "adamw", "nadam"
+# OPTIMIZER_TYPE = "nadam"  # for digit_recognizer_v4 100cls RGB
 
 # RMSprop Hyperparameters
 RMSPROP_RHO = 0.9
@@ -230,6 +247,7 @@ ADAMW_WEIGHT_DECAY = 0.01
 ADAMW_BETA_1 = 0.9
 ADAMW_BETA_2 = 0.999
 ADAMW_EPSILON = 1e-07
+
 
 # ==============================================================================
 # LOSS FUNCTION HYPERPARAMETERS
