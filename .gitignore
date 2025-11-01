@@ -18,3 +18,5 @@
 datasets/Tenth-of-step-of-a-meter-digit/commands.txt
 0.jpg
 .DS_Store
+/datasets/tools/aug_real_integra
+/datasets/tools/aug_real_integra_bad_predictions
