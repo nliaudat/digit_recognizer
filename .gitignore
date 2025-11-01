@@ -1,6 +1,8 @@
 /__pycache__
 /datasets/*
 !/datasets/Tenth-of-step-of-a-meter-digit
+!/datasets/real_integra
+!/datasets/real_integra_bad_predictions
 !/datasets/tools
 /exported_models/*
 !exported_models/10cls_GRAY
