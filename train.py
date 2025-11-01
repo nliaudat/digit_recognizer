@@ -1446,6 +1446,30 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     print(f"  ESP-DL Quantization: {params.ESP_DL_QUANTIZE}")
     print(f"  Debug mode: {'Enabled' if debug else 'Disabled'}")
     
+def save_model_summary_to_file(model, output_dir):
+    """Save model summary to a text file directly"""
+    try:
+        summary_path = os.path.join(output_dir, "model_summary.txt")
+        
+        # Redirect stdout to capture the summary
+        original_stdout = sys.stdout
+        with open(summary_path, 'w') as f:
+            sys.stdout = f
+            model.summary(print_fn=lambda x: print(x))
+            sys.stdout = original_stdout
+        
+        print(f"✅ Model summary saved to: {summary_path}")
+        
+        # Also print summary to console in debug mode
+        if getattr(params, 'VERBOSE', 2) >= 2:
+            print("\n📋 MODEL SUMMARY:")
+            model.summary()
+            
+        return True
+    except Exception as e:
+        print(f"⚠️  Could not save model summary: {e}")
+        return False
+    
 
 def train_model(debug=False, best_hps=None):
     """Main training function with comprehensive handling of all 9 quantization cases"""
@@ -1573,11 +1597,11 @@ def train_model(debug=False, best_hps=None):
     # print(f"After preprocessing - dtype: {x_train_test.dtype}, range: [{x_train_test.min():.3f}, {x_train_test.max():.3f}]")
 
     # Check if tf.data pipeline modifies it
-    if params.USE_TF_DATA_PIPELINE:
-        from utils.data_pipeline import create_tf_dataset_from_arrays
-        test_dataset = create_tf_dataset_from_arrays(x_train_test, y_train_raw[:10], training=True)
-        for batch_x, batch_y in test_dataset.take(1):
-            print(f"After tf.data - dtype: {batch_x.dtype}, range: [{batch_x.numpy().min():.3f}, {batch_x.numpy().max():.3f}]")
+    # if params.USE_TF_DATA_PIPELINE:
+        # from utils.data_pipeline import create_tf_dataset_from_arrays
+        # test_dataset = create_tf_dataset_from_arrays(x_train_test, y_train_raw[:10], training=True)
+        # for batch_x, batch_y in test_dataset.take(1):
+            # print(f"After tf.data - dtype: {batch_x.dtype}, range: [{batch_x.numpy().min():.3f}, {batch_x.numpy().max():.3f}]")
     
     print("🔄 Preprocessing images...")
     # Process each split ONLY ONCE
@@ -1731,6 +1755,7 @@ def train_model(debug=False, best_hps=None):
     # Print comprehensive training summary
     print_training_summary(model, x_train, x_val, x_test, debug)
     model_summary(model)
+    save_model_summary_to_file(model, training_dir)
     
     # from utils.preprocess import debug_preprocessing_flow
     # Debug the preprocessing flow
@@ -2030,11 +2055,23 @@ def save_training_config(training_dir, quantized_size, float_size, tflite_manage
             print("⚠️  Could not import hyperparameter summary function")
             
         f.write(f"\nMODEL SUMMARY:\n")    
-        model_summary_text = model_summary(model)
-        if model_summary_text is not None:
-            f.write(model_summary_text)
+        # Try to read from the saved model summary file
+        summary_file_path = os.path.join(training_dir, "model_summary.txt")
+        if os.path.exists(summary_file_path):
+            try:
+                with open(summary_file_path, 'r') as summary_file:
+                    model_summary_content = summary_file.read()
+                f.write(model_summary_content)
+                f.write("\n")  # Add a newline after the summary
+            except Exception as e:
+                f.write(f"Could not read model summary file: {e}\n")
         else:
-            f.write("Model summary not available\n")
+            # Fallback to the model_summary function
+            model_summary_text = model_summary(model)
+            if model_summary_text is not None:
+                f.write(model_summary_text)
+            else:
+                f.write("Model summary not available\n")
             
         f.write(f"\nGENERATED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     
