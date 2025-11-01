@@ -2,23 +2,23 @@ Digit Recognition Training Configuration
 ==================================================
 
 FINAL RESULTS:
-  Keras Model Test Accuracy: 0.9180
-  TFLite Model Test Accuracy: 0.9128
-  Best Validation Accuracy: 0.9227
-  Quantized Model Size: 34.5 KB
-  Float Model Size: 98.6 KB
-  Training Time: 0:14:17.901130
+  Keras Model Test Accuracy: 0.9690
+  TFLite Model Test Accuracy: 0.9697
+  Best Validation Accuracy: 0.9702
+  Quantized Model Size: 63.6 KB
+  Float Model Size: 223.6 KB
+  Training Time: 0:09:15.891938
 
 MODEL OUTPUT:
-  Quantized TFLite: 34.5 KB
-  Float TFLite: 98.6 KB
-  Best accuracy: 0.9227
+  Quantized TFLite: 63.6 KB
+  Float TFLite: 223.6 KB
+  Best accuracy: 0.9702
 
 DATA SOURCES:
   1. Tenth-of-step-of-a-meter-digit (label_file) - weight: 1.0
 
 MODEL ARCHITECTURE:
-  Model: esp_quantization_ready
+  Model: mnist_quantization
   Input shape: [(32, 20, 1)]
   Classes: 10
 
@@ -46,7 +46,7 @@ HYPERPARAMETER CONFIGURATION SUMMARY
 ==================================================
 
 MODEL:
-  architecture: esp_quantization_ready
+  architecture: mnist_quantization
   input_shape: (32, 20, 1)
   num_classes: 10
 
@@ -98,4 +98,4 @@ QUANTIZATION:
 MODEL SUMMARY:
 Model summary not available
 
-GENERATED: 2025-10-24 19:24:14
+GENERATED: 2025-10-26 18:22:21

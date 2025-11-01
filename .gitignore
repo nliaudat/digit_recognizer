@@ -1,6 +1,7 @@
 /__pycache__
 /datasets/*
 !/datasets/Tenth-of-step-of-a-meter-digit
+!/datasets/tools
 /exported_models/*
 !exported_models/10cls_GRAY
 !exported_models/10cls_RGB

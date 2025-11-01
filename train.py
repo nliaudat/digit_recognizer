@@ -214,38 +214,48 @@ def suppress_all_output(debug=False):
             except (AttributeError, OSError):
                 pass
 
-def apply_qat(model):
-    """Apply Quantization Aware Training using modern TF API"""
-    if not QAT_AVAILABLE:
-        print("❌ QAT not available - install tensorflow-model-optimization")
-        return model
+# def apply_qat(model):
+    # """Apply Quantization Aware Training using modern TF API"""
+    # if not QAT_AVAILABLE:
+        # print("❌ QAT not available - install tensorflow-model-optimization")
+        # return model
     
-    try:
-        print("🎯 Applying Quantization Aware Training...")
-        qat_model = tfmot.quantization.keras.quantize_model(model)
-        print("✅ QAT applied successfully")
-        return qat_model
-    except Exception as e:
-        print(f"❌ QAT failed: {e}")
-        return model
+    # try:
+        # print("🎯 Applying Quantization Aware Training...")
+        # qat_model = tfmot.quantization.keras.quantize_model(model)
+        # print("✅ QAT applied successfully")
+        # return qat_model
+    # except Exception as e:
+        # print(f"❌ QAT failed: {e}")
+        # return model
 
 def create_qat_model():
-    """Create a model with Quantization Aware Training from scratch"""
+    """Create a model with Quantization Aware Training using the correct API pattern"""
     if not QAT_AVAILABLE:
+        print(f"❌ QAT not available")
         return create_model()
     
     try:
         print("🎯 Building model with Quantization Aware Training...")
         model = create_model()
+        
+        print(f"🔍 Model type: {type(model)}")
+        print(f"🔍 Model class: {model.__class__.__name__}")
+        
+        # Use the annotate/apply pattern directly
+        print("🔄 Using quantize_annotate_model + quantize_apply...")
+        
+        # Method 1: Direct annotate/apply
+        # annotated_model = tfmot.quantization.keras.quantize_annotate_model(model)
+        # qat_model = tfmot.quantization.keras.quantize_apply(annotated_model)
         qat_model = tfmot.quantization.keras.quantize_model(model)
-        # qat_model = tfmot.quantization.keras.quantize_model(
-        # model,
-        # quantize_config=tfmot.quantization.keras.QuantizeConfig()
-    # )
+        
         print("✅ QAT model created successfully")
         return qat_model
+        
     except Exception as e:
         print(f"❌ QAT model creation failed: {e}")
+        print("🔄 Using standard model without QAT")
         return create_model()
 
 class TFLiteModelManager:
@@ -369,10 +379,28 @@ class TFLiteModelManager:
         return checkpoint_path
         
     def _is_qat_model(self, model):
-        """Check if model is a QAT model"""
+        """Check if model is a QAT model with better detection"""
+        # Check for quantization layers
         for layer in model.layers:
-            if hasattr(layer, 'quantize_config') or 'quant' in layer.name.lower():
+            layer_name = layer.name.lower()
+            layer_class = layer.__class__.__name__.lower()
+            
+            # Check for quantization indicators
+            if (hasattr(layer, 'quantize_config') or 
+                'quant' in layer_name or 
+                'qat' in layer_name or
+                'quantize' in layer_class):
                 return True
+        
+        # Check model name and attributes
+        model_name = model.name.lower() if hasattr(model, 'name') else ''
+        if 'qat' in model_name or 'quant' in model_name:
+            return True
+        
+        # Check if model was created within quantize_scope
+        if hasattr(model, '_quantize_scope'):
+            return True
+            
         return False
 
 
@@ -386,35 +414,43 @@ class TFLiteModelManager:
             converter = tf.lite.TFLiteConverter.from_keras_model(model)
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
 
-            # QAT models need representative dataset
+            # QAT models need representative dataset with EXACTLY the same preprocessing as training
             if representative_data is None:
-                # Create representative dataset from training data
-                # def qat_representative_dataset():
-                    # # Use a small subset of actual data
-                    # sample_size = min(100, params.QUANTIZE_NUM_SAMPLES)
-                    # for i in range(sample_size):
-                        # # Create dummy data in the correct format
-                        # data = np.random.rand(1, *params.INPUT_SHAPE).astype(np.float32)
-                        # yield [data]
                 def qat_representative_dataset():
                     from utils import get_data_splits, preprocess_images
+                    
+                    # Get raw training data
                     (x_train_raw, y_train_raw), _, _ = get_data_splits()
-                    calibration_data = x_train_raw[:params.QUANTIZE_NUM_SAMPLES]
+                    
+                    # Use a subset for calibration - ensure we have enough samples
+                    num_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                    calibration_data = x_train_raw[:num_samples]
+                    
+                    # CRITICAL: Use the SAME preprocessing as during QAT training
                     calibration_processed = preprocess_images(calibration_data, for_training=False)
+                    
+                    # Ensure proper data type and range for QAT
                     if calibration_processed.dtype != np.float32:
-                        if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                            print(f"🔄 Converting calibration data from {calibration_processed.dtype} to float32")
                         calibration_processed = calibration_processed.astype(np.float32)
-                        if calibration_processed.max() > 1.0:
-                            calibration_processed = calibration_processed / 255.0
+                    
+                    # For QAT, data should be in the same range as during training
+                    # If your QAT training used [0, 1] range, ensure calibration data is also [0, 1]
+                    if calibration_processed.max() > 1.0:
+                        calibration_processed = calibration_processed / 255.0
+                    
                     if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                         print(f"🔧 QAT Calibration: {len(calibration_processed)} samples, "
                               f"dtype: {calibration_processed.dtype}, "
                               f"range: [{calibration_processed.min():.3f}, {calibration_processed.max():.3f}]")
+                    
+                    # Verify data matches QAT training expectations
                     if calibration_processed.dtype != np.float32:
                         raise ValueError(f"QAT calibration data must be float32, got {calibration_processed.dtype}")
+                    
+                    # Yield data in the correct format
                     for i in range(len(calibration_processed)):
                         yield [calibration_processed[i:i+1]]
+                
                 converter.representative_dataset = qat_representative_dataset
             else:
                 converter.representative_dataset = representative_data
@@ -424,12 +460,20 @@ class TFLiteModelManager:
                 converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                 converter.inference_input_type = tf.int8
                 converter.inference_output_type = tf.int8
+                if self.debug:
+                    print("🎯 ESP-DL INT8 quantization for QAT")
             else:
                 converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                 converter.inference_input_type = tf.uint8
                 converter.inference_output_type = tf.uint8
+                if self.debug:
+                    print("🎯 Standard UINT8 quantization for QAT")
 
-            # Convert
+            # Additional QAT-specific settings
+            converter.experimental_new_quantizer = True  # Use new quantizer for better QAT support
+            converter._experimental_disable_per_channel = False  # Enable per-channel quantization
+            
+            # Convert with output suppression
             with suppress_all_output(self.debug):
                 tflite_model = converter.convert()
                 
@@ -437,17 +481,17 @@ class TFLiteModelManager:
             
         except Exception as e:
             log_print(f"❌ QAT conversion failed: {e}", level=1)
-            # Fallback to non-quantized conversion
-            # return self.save_as_tflite_direct(model, filename, quantize=False)
-            # Fallback: try without full integer quantization
-            return self._convert_qat_model_fallback(model, filename)
+            # Enhanced fallback with better debugging
+            return self._convert_qat_model_fallback_enhanced(model, filename)
             
     def _convert_qat_model_fallback_enhanced(self, model, filename):
-        """Enhanced fallback conversion for QAT model with better debugging"""
+        """Enhanced fallback conversion for QAT model with comprehensive debugging"""
         try:
             if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                 log_print("🔄 Trying enhanced QAT fallback conversion...", level=2)
                 log_print("🔍 Diagnosing QAT conversion issue...", level=2)
+            
+            # Test model with sample input
             test_input = tf.random.normal([1] + list(params.INPUT_SHAPE), dtype=tf.float32)
             try:
                 test_output = model(test_input)
@@ -456,17 +500,26 @@ class TFLiteModelManager:
             except Exception as e:
                 if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                     log_print(f"❌ Model input test failed: {e}", level=1)
+            
+            # Strategy 1: Dynamic range quantization only (most reliable)
             if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
-                log_print("🔧 Strategy 1: Dynamic range quantization...", level=2)
+                log_print("🔧 Strategy 1: Dynamic range quantization only...", level=2)
+            
             converter = tf.lite.TFLiteConverter.from_keras_model(model)
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
+            
+            # Don't use representative dataset in fallback
+            # This often causes issues with QAT models
+            
             if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                 tflite_model = converter.convert()
             else:
                 with self._completely_suppress_output():
                     tflite_model = converter.convert()
+            
             if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                 log_print("✅ Dynamic range quantization successful", level=2)
+            
             return self._save_tflite_file(tflite_model, filename, True)
                 
         except Exception as e:
@@ -1264,21 +1317,33 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     return callbacks
     
 def create_qat_representative_dataset(x_train_raw, num_samples=params.QUANTIZE_NUM_SAMPLES):
-    """Create representative dataset that preserves the correct data type for QAT"""
+    """Create representative dataset that exactly matches QAT training conditions"""
     def representative_dataset():
+        from utils import get_data_splits, preprocess_images
+        
         # Use the sophisticated preprocess_images with for_training=False
+        # BUT ensure it matches what was used during QAT training
         x_calibration = preprocess_images(x_train_raw[:num_samples], for_training=False)
         
-        # FOR QAT: Always convert to float32
+        # CRITICAL: FOR QAT, data must match training conditions exactly
+        # If QAT training used specific normalization, replicate it here
+        
+        # Convert to float32 (required for calibration)
         if x_calibration.dtype != np.float32:
             x_calibration = x_calibration.astype(np.float32)
             
-        # normalization consistency checking    
+        # Ensure normalization consistency with QAT training
+        # If your QAT model was trained with [0, 1] data, ensure calibration data is [0, 1]
         if x_calibration.max() > 1.0:
             x_calibration = x_calibration / 255.0
         
         print(f"QAT Representative: {x_calibration.dtype}, "
-              f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}]")
+              f"range: [{x_calibration.min():.3f}, {x_calibration.max():.3f}], "
+              f"samples: {len(x_calibration)}")
+        
+        # Verify we have valid data
+        if np.any(np.isnan(x_calibration)) or np.any(np.isinf(x_calibration)):
+            raise ValueError("QAT calibration data contains NaN or Inf values")
         
         for i in range(len(x_calibration)):
             yield [x_calibration[i:i+1]]  # Keep as float32 for QAT

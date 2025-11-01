@@ -1,6 +1,6 @@
 parameter,value
-timestamp,2025-10-24 19:24:14
-model_architecture,esp_quantization_ready
+timestamp,2025-10-26 18:22:21
+model_architecture,mnist_quantization
 input_shape,(32, 20, 1)
 nb_classes,10
 data_sources,Tenth-of-step-of-a-meter-digit(1.0)
@@ -17,10 +17,10 @@ QUANTIZE_MODEL,True
 esp_dl_quantize,False
 quantize_num_samples,1000
 use_gpu,False
-keras_test_accuracy,0.9180
-tflite_test_accuracy,0.9128
-best_val_accuracy,0.9227
-quantized_model_size_kb,34.5
-float_model_size_kb,98.6
-training_time,0:14:17.901130
+keras_test_accuracy,0.9690
+tflite_test_accuracy,0.9697
+best_val_accuracy,0.9702
+quantized_model_size_kb,63.6
+float_model_size_kb,223.6
+training_time,0:09:15.891938
 optimizer,rmsprop

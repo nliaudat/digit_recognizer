@@ -1,0 +1,7 @@
+Model,Directory,Type,Parameters,Size_KB,Accuracy,Inference_Time_ms,Inferences_per_second,Tested_Images
+final_quantized.tflite,original_haverland_10cls_GRAY,quantized,234500,203.4,0.9928,0.15,6508.0,25000
+final_quantized.tflite,digit_recognizer_v4_10cls_GRAY,quantized,102400,62.5,0.9919,0.23,4391.0,25000
+final_quantized.tflite,mnist_quantization_10cls_GRAY,quantized,98700,63.6,0.9848,0.15,6696.0,25000
+final_quantized.tflite,digit_recognizer_v1_10cls_GRAY,quantized,135700,97.6,0.984,0.13,7463.0,25000
+final_quantized.tflite,digit_recognizer_v5_10cls_GRAY,quantized,90400,37.4,0.9712,0.27,3706.0,25000
+final_quantized.tflite,digit_recognizer_v3_10cls_GRAY,quantized,26500,13.9,0.8566,0.09,11257.0,25000
