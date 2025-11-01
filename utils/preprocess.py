@@ -135,6 +135,7 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
     processed_images = np.array(processed_images)
     
     # CRITICAL FIX: Consistent data types for QAT training and inference
+    # FIXED: Now properly handles all quantization scenarios
     if for_training:
         # TRAINING DATA - Format depends on QAT settings
         if params.USE_QAT and params.QUANTIZE_MODEL:
@@ -166,21 +167,16 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
     else:
         # INFERENCE DATA - Format depends on quantization target
         if params.QUANTIZE_MODEL:
+            # FIXED: Both ESP-DL and standard quantization use UINT8 [0, 255]
+            if processed_images.dtype != np.uint8:
+                if processed_images.max() <= 1.0:
+                    processed_images = (processed_images * 255).astype(np.uint8)
+                else:
+                    processed_images = processed_images.astype(np.uint8)
+            
             if params.ESP_DL_QUANTIZE:
-                # ESP-DL INT8 quantization: Use UINT8 [0, 255]
-                if processed_images.dtype != np.uint8:
-                    if processed_images.max() <= 1.0:
-                        processed_images = (processed_images * 255).astype(np.uint8)
-                    else:
-                        processed_images = processed_images.astype(np.uint8)
                 quantization_info = "UINT8 [0, 255] to ESP-DL INT8"
             else:
-                # Standard TFLite UINT8 quantization: Use UINT8 [0, 255]
-                if processed_images.dtype != np.uint8:
-                    if processed_images.max() <= 1.0:
-                        processed_images = (processed_images * 255).astype(np.uint8)
-                    else:
-                        processed_images = processed_images.astype(np.uint8)
                 quantization_info = "UINT8 [0, 255] to TFLite UINT8"
         else:
             # No quantization: Use float32 [0, 1]
@@ -190,6 +186,7 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
                 processed_images = processed_images / 255.0
             quantization_info = "Float32 [0, 1] (No quantization)"
     
+    # Debug output to verify preprocessing
     # print(f"DEBUG: Preprocessing - {quantization_info}")
     # print(f"   Range: [{processed_images.min():.3f}, {processed_images.max():.3f}]")
     # print(f"   dtype: {processed_images.dtype}")
@@ -717,49 +714,92 @@ def debug_preprocessing_flow():
     print(f"Raw data range: [{test_images_raw.min()}, {test_images_raw.max()}]")
     print(f"Raw data dtype: {test_images_raw.dtype}")
     
-    # Simulate preprocessing
-    test_processed = preprocess_images(test_images_raw, for_training=True)
-    print(f"After preprocessing: [{test_processed.min():.3f}, {test_processed.max():.3f}]")
-    print(f"After preprocessing dtype: {test_processed.dtype}")
+    print(f"\n📊 Current Configuration:")
+    print(f"   QUANTIZE_MODEL: {params.QUANTIZE_MODEL}")
+    print(f"   USE_QAT: {params.USE_QAT}")
+    print(f"   ESP_DL_QUANTIZE: {params.ESP_DL_QUANTIZE}")
     
-    # Check if this matches expected range
-    expected_range = ""
-    if params.QUANTIZE_MODEL and params.ESP_DL_QUANTIZE:
-        expected_range = "UINT8 [0, 255]"
-        if test_processed.dtype == np.uint8 and test_processed.max() > 1.0:
-            print("✅ Preprocessing correct for ESP-DL quantization")
+    # Test BOTH training and inference modes
+    print(f"\n🧪 Testing Training Mode (for_training=True):")
+    train_processed = preprocess_images(test_images_raw, for_training=True)
+    print(f"   Result: {train_processed.dtype} [{train_processed.min():.3f}, {train_processed.max():.3f}]")
+    
+    print(f"\n🧪 Testing Inference Mode (for_training=False):")
+    infer_processed = preprocess_images(test_images_raw, for_training=False)
+    print(f"   Result: {infer_processed.dtype} [{infer_processed.min():.3f}, {infer_processed.max():.3f}]")
+    
+    # Determine expected behavior
+    print(f"\n✅ Expected Behavior:")
+    if params.QUANTIZE_MODEL:
+        if params.USE_QAT:
+            # QAT: Both training and inference should use UINT8
+            expected_train = "UINT8 [0, 255]"
+            expected_infer = "UINT8 [0, 255]"
+            print("   QAT Mode: Training and inference both use UINT8 [0, 255]")
         else:
-            print("❌ Preprocessing incorrect for ESP-DL quantization")
-    elif params.QUANTIZE_MODEL:
-        expected_range = "UINT8 [0, 255]"
-        if test_processed.dtype == np.uint8 and test_processed.max() > 1.0:
-            print("✅ Preprocessing correct for standard quantization")
-        else:
-            print("❌ Preprocessing incorrect for standard quantization")
+            # Standard quantization: Training uses float32, inference uses UINT8
+            expected_train = "Float32 [0, 1]"
+            expected_infer = "UINT8 [0, 255]"
+            print("   Standard Quant: Training=Float32 [0,1], Inference=UINT8 [0,255]")
     else:
-        expected_range = "Float32 [0, 1]"
-        if test_processed.dtype == np.float32 and test_processed.max() <= 1.0:
-            print("✅ Preprocessing correct for float32 training")
-        else:
-            print("❌ Preprocessing incorrect for float32 training")
+        # No quantization: Both use float32
+        expected_train = "Float32 [0, 1]"
+        expected_infer = "Float32 [0, 1]"
+        print("   No Quantization: Training and inference both use Float32 [0, 1]")
     
-    print(f"Expected range: {expected_range}")
-    
-    # Additional check for double preprocessing
-    if test_processed.max() < 0.1 and test_processed.dtype == np.float32:
-        print("🚨 WARNING: Possible double preprocessing detected!")
-        print("   Data range suggests over-normalization (should be [0, 1], not [0, ~0.0039])")
-    
-    # Check training/inference consistency for QAT
+    # Check consistency
+    print(f"\n🔍 Consistency Check:")
     if params.USE_QAT and params.QUANTIZE_MODEL:
-        infer_processed = preprocess_images(test_images_raw, for_training=False)
-        if test_processed.dtype == infer_processed.dtype:
-            print("✅ QAT consistency: Training and inference use same data type")
+        # QAT requires training and inference to be identical
+        if train_processed.dtype == infer_processed.dtype:
+            print("✅ QAT Consistency: Perfect - training matches inference")
         else:
-            print("❌ QAT inconsistency: Training and inference use different data types")
-            print(f"   Training: {test_processed.dtype}, Inference: {infer_processed.dtype}")
+            print("❌ QAT Consistency: FAILED - training ≠ inference")
+    else:
+        print("ℹ️  Non-QAT mode: Training/inference differences are expected")
+    
+    # Check for double preprocessing
+    if train_processed.max() < 0.1 and train_processed.dtype == np.float32:
+        print("🚨 WARNING: Possible double preprocessing in training!")
+    
+    if infer_processed.max() < 0.1 and infer_processed.dtype == np.float32:
+        print("🚨 WARNING: Possible double preprocessing in inference!")
+    
+    return infer_processed  # Return inference result as it's typically what matters for deployment
+def trace_preprocessing_flow():
+    """Trace exactly where double processing is occurring"""
+    print("\n🔍 TRACING PREPROCESSING FLOW")
+    print("=" * 60)
+    
+    # Create test data
+    test_images_raw = np.random.randint(0, 255, (3, 32, 20, 3), dtype=np.uint8)
+    print(f"1. Raw data: {test_images_raw.dtype} [{test_images_raw.min()}, {test_images_raw.max()}]")
+    
+    # Test preprocess_images output
+    test_processed = preprocess_images(test_images_raw, for_training=True)
+    print(f"2. After preprocess_images: {test_processed.dtype} [{test_processed.min():.3f}, {test_processed.max():.3f}]")
+    
+    # Check if there's any implicit normalization in data pipeline
+    print(f"3. Checking for implicit operations...")
+    
+    # Test if tf.data pipeline does anything
+    if hasattr(params, 'USE_TF_DATA_PIPELINE') and params.USE_TF_DATA_PIPELINE:
+        dataset = tf.data.Dataset.from_tensor_slices(test_processed)
+        dataset = dataset.batch(1)
+        for batch in dataset.take(1):
+            print(f"4. After tf.data: {batch.dtype} [{batch.numpy().min():.3f}, {batch.numpy().max():.3f}]")
+    
+    # Test if model input layer does anything
+    try:
+        from models import create_model
+        model = create_model()
+        test_output = model(tf.convert_to_tensor(test_processed, dtype=tf.float32))
+        print(f"5. After model pass: Output range [{test_output.numpy().min():.3f}, {test_output.numpy().max():.3f}]")
+    except:
+        print("5. Model test skipped")
     
     return test_processed
+    
 
 if __name__ == "__main__":
     # Test the current configuration

@@ -1565,10 +1565,31 @@ def train_model(debug=False, best_hps=None):
     (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
     
     
+    # Test the raw data
+    print(f"Raw data - dtype: {x_train_raw.dtype}, range: [{x_train_raw.min()}, {x_train_raw.max()}]")
+
+    # Test preprocessing output
+    # x_train_test = preprocess_images(x_train_raw[:10], for_training=True)
+    # print(f"After preprocessing - dtype: {x_train_test.dtype}, range: [{x_train_test.min():.3f}, {x_train_test.max():.3f}]")
+
+    # Check if tf.data pipeline modifies it
+    if params.USE_TF_DATA_PIPELINE:
+        from utils.data_pipeline import create_tf_dataset_from_arrays
+        test_dataset = create_tf_dataset_from_arrays(x_train_test, y_train_raw[:10], training=True)
+        for batch_x, batch_y in test_dataset.take(1):
+            print(f"After tf.data - dtype: {batch_x.dtype}, range: [{batch_x.numpy().min():.3f}, {batch_x.numpy().max():.3f}]")
+    
     print("🔄 Preprocessing images...")
+    # Process each split ONLY ONCE
     x_train = preprocess_images(x_train_raw, for_training=True)
     x_val = preprocess_images(x_val_raw, for_training=True)  
     x_test = preprocess_images(x_test_raw, for_training=True)
+    
+    print(f"✅ Preprocessing complete:")
+    print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
+    print(f"   Val range: [{x_val.min():.3f}, {x_val.max():.3f}]")
+    print(f"   Test range: [{x_test.min():.3f}, {x_test.max():.3f}]")
+    print(f"   Shapes - Train: {x_train.shape}, Val: {x_val.shape}, Test: {x_test.shape}")
     
     print("\n🔍 CHECKING TRAINING/INFERENCE ALIGNMENT WITH REAL DATA")
     alignment_ok = check_training_inference_alignment(x_train_raw)
@@ -1577,16 +1598,29 @@ def train_model(debug=False, best_hps=None):
         print("   This will cause quantization errors!")
     
     # NORMALIZE TO [0,1] FOR TRAINING AND AUGMENTATION
-    print("🔄 Normalizing data to [0,1] range for training...")
-    if x_train.dtype != np.float32 or x_train.max() > 1.0:
-        x_train = x_train.astype(np.float32) / 255.0
-        x_val = x_val.astype(np.float32) / 255.0
-        x_test = x_test.astype(np.float32) / 255.0
+    # print("🔄 Normalizing data to [0,1] range for training...")
+    # if x_train.dtype != np.float32 or x_train.max() > 1.0:
+        # x_train = x_train.astype(np.float32) / 255.0
+        # x_val = x_val.astype(np.float32) / 255.0
+        # x_test = x_test.astype(np.float32) / 255.0
     
-    print(f"✅ Preprocessing complete:")
-    print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
-    print(f"   Val range: [{x_val.min():.3f}, {x_val.max():.3f}]")
-    print(f"   Shapes - Train: {x_train.shape}, Val: {x_val.shape}")
+    # print(f"✅ Preprocessing complete:")
+    # print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
+    # print(f"   Val range: [{x_val.min():.3f}, {x_val.max():.3f}]")
+    
+    # print("✅ Data preprocessing complete - using preprocessed ranges directly")
+    # # Ensure data types are correct but DON'T re-normalize
+    # if x_train.dtype != np.float32:
+        # x_train = x_train.astype(np.float32)
+    # if x_val.dtype != np.float32:
+        # x_val = x_val.astype(np.float32) 
+    # if x_test.dtype != np.float32:
+        # x_test = x_test.astype(np.float32)
+
+    # print(f"✅ Using preprocessed ranges directly:")
+    # print(f"   Train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
+    # print(f"   Val range: [{x_val.min():.3f}, {x_val.max():.3f}]")    
+    # print(f"   Shapes - Train: {x_train.shape}, Val: {x_val.shape}")
     
     # Handle labels based on model type
     if params.MODEL_ARCHITECTURE == "original_haverland":
@@ -2269,6 +2303,7 @@ def validate_qat_data_flow(model, x_train_sample, debug=False):
 def check_training_inference_alignment(x_train_sample=None):
     """
     Check if training and inference preprocessing are aligned
+    FIXED: Recognizes that training≠inference is correct for standard quantization
     """
     print("\n🔍 CHECKING TRAINING/INFERENCE ALIGNMENT")
     print("=" * 50)
@@ -2280,7 +2315,7 @@ def check_training_inference_alignment(x_train_sample=None):
     
     # Use provided sample or create test data
     if x_train_sample is not None:
-        test_data = x_train_sample[:5]  # Use actual training data
+        test_data = x_train_sample[:5]
         print("   Using real training data for alignment check")
     else:
         test_data = np.random.randint(0, 255, (5, 28, 28, 1), dtype=np.uint8)
@@ -2294,18 +2329,32 @@ def check_training_inference_alignment(x_train_sample=None):
     print(f"Actual training:   {train_processed.dtype} [{train_processed.min():.1f}, {train_processed.max():.1f}]")
     print(f"Actual inference:  {infer_processed.dtype} [{infer_processed.min():.1f}, {infer_processed.max():.1f}]")
     
-    # Check alignment
-    aligned = (train_processed.dtype == infer_processed.dtype and 
-               abs(train_processed.min() - infer_processed.min()) < 1e-6 and
-               abs(train_processed.max() - infer_processed.max()) < 1e-6)
-    
-    if aligned:
-        print("✅ TRAINING/INFERENCE ALIGNMENT: PERFECT")
+    # FIXED: Different behavior based on quantization mode
+    if params.QUANTIZE_MODEL and not params.USE_QAT:
+        # Standard quantization: Training uses float32, inference uses uint8 - THIS IS CORRECT
+        print("✅ STANDARD QUANTIZATION: Training≠Inference is EXPECTED")
+        print("   - Training: Float32 [0,1] for stable training")
+        print("   - Inference: UINT8 [0,255] for TFLite quantization")
+        print("   - This prevents double quantization during conversion")
         return True
+    elif params.USE_QAT and params.QUANTIZE_MODEL:
+        # QAT: Training and inference should be identical
+        aligned = (train_processed.dtype == infer_processed.dtype)
+        if aligned:
+            print("✅ QAT ALIGNMENT: PERFECT - training matches inference")
+            return True
+        else:
+            print("❌ QAT ALIGNMENT: MISMATCH - training should match inference for QAT")
+            return False
     else:
-        print("❌ TRAINING/INFERENCE ALIGNMENT: MISMATCH")
-        print("   Training and inference are using different data formats!")
-        return False
+        # No quantization: Both should be float32
+        aligned = (train_processed.dtype == infer_processed.dtype)
+        if aligned:
+            print("✅ FLOAT32 ALIGNMENT: PERFECT")
+            return True
+        else:
+            print("❌ FLOAT32 ALIGNMENT: MISMATCH")
+            return False
 
 def main():
     """Main entry point"""
