@@ -1,0 +1,88 @@
+{
+  "image_parameters": {
+    "input_width": 20,
+    "input_height": 32,
+    "input_channels": 3,
+    "use_grayscale": false
+  },
+  "dataset_paths": {
+    "input_dataset_dir": "../Tenth-of-step-of-a-meter-digit/images",
+    "augmented_data_dir": null
+  },
+  "augmentation_settings": {
+    "use_data_augmentation": true,
+    "augmentation_multiplier": 1,
+    "augmentation_threads": 4,
+    "augmentation_batch_size": 32,
+    "save_augmented_images": true,
+    "augment_on_the_fly": false
+  },
+  "augmentations": {
+    "rotation": {
+      "enabled": true,
+      "probability": 0.3,
+      "rotation_range": 5
+    },
+    "zoom": {
+      "enabled": true,
+      "probability": 0.3,
+      "zoom_range": 0.1
+    },
+    "shift": {
+      "enabled": true,
+      "probability": 0.4,
+      "width_shift_range": 0.05,
+      "height_shift_range": 0.05
+    },
+    "shear": {
+      "enabled": true,
+      "probability": 0.3,
+      "shear_range": 0.1
+    },
+    "brightness": {
+      "enabled": true,
+      "probability": 0.3,
+      "brightness_range": [0.9, 1.1]
+    },
+    "contrast": {
+      "enabled": true,
+      "probability": 0.3,
+      "contrast_range": [0.9, 1.1]
+    },
+    "color_jitter": {
+      "enabled": true,
+      "probability": 0.9,
+      "color_jitter_range": 0.2
+    },
+    "gaussian_noise": {
+      "enabled": true,
+      "probability": 0.5,
+      "gaussian_noise_std": 0.05
+    },
+    "random_erasing": {
+      "enabled": false,
+      "probability": 0.2,
+      "erasing_max_area": 0.1,
+      "erasing_aspect_ratio": [0.3, 3.3]
+    },
+    "random_crop": {
+      "enabled": true,
+      "probability": 0.2,
+      "crop_percent": 0.9
+    },
+    "perspective": {
+      "enabled": true,
+      "probability": 0.3,
+      "perspective_scale": 0.1
+    },
+    "flashlight": {
+      "enabled": true,
+      "probability": 0.3,
+      "flashlight_intensity": 0.8,
+      "flashlight_radius_range": [0.1, 0.3],
+      "flashlight_progressive": true,
+      "flashlight_affected_area": 0.25,
+      "flashlight_probability": 0.3
+    }
+  }
+}

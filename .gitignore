@@ -1,6 +1,8 @@
 /__pycache__
 /datasets/*
 !/datasets/Tenth-of-step-of-a-meter-digit
+!/datasets/real_integra
+!/datasets/real_integra_bad_predictions
 !/datasets/tools
 /exported_models/*
 !exported_models/10cls_GRAY
@@ -16,3 +18,5 @@
 datasets/Tenth-of-step-of-a-meter-digit/commands.txt
 0.jpg
 .DS_Store
+/datasets/tools/aug_real_integra
+/datasets/tools/aug_real_integra_bad_predictions

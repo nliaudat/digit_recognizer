@@ -23,14 +23,14 @@ AVAILABLE_MODELS = [
     # "esp_quantization_ready_v2_aggressive",
     # "esp_quantization_ready_v3",
     "mnist_quantization",
-    "digit_recognizer_v1",
+    # "digit_recognizer_v1",
     # "simple_cnn_v2",
     # "minimal_cnn",
     # "mobilenet_style",
     # "digit_recognizer_v2",
     "digit_recognizer_v3",
     "digit_recognizer_v4",
-    "digit_recognizer_v5",
+    # "digit_recognizer_v5",
     # "digit_recognizer_v6",
     # "digit_recognizer_v7",
 ]
@@ -45,7 +45,7 @@ MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODE
 # Image Parameters
 INPUT_WIDTH = 20
 INPUT_HEIGHT = 32
-INPUT_CHANNELS = 1  # 1 for grayscale, 3 for RGB
+INPUT_CHANNELS = 3  # 1 for grayscale, 3 for RGB
 INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
 USE_GRAYSCALE = (INPUT_CHANNELS == 1) 
 
@@ -67,21 +67,28 @@ DATA_SOURCES = [
         'type': 'label_file', 
         'labels': 'labels_10_shuffle.txt',  # Optional: specify label file name (default: 'labels.txt' - tab separated)
         'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
-        'weight': 1.0,
+        'weight': 1.0, # undersample if weight < 1.0
     },
     {
         'name': 'real_integra_bad_predictions',
         'type': 'label_file', 
         'labels': 'labels_10_shuffle.txt',  
         'path': 'datasets/real_integra_bad_predictions', 
-        'weight': 5.0,
+        'weight': 1.0,
     },
     {
         'name': 'real_integra',
         'type': 'label_file', 
         'labels': 'labels_10_shuffle.txt',  
         'path': 'datasets/real_integra', 
-        'weight': 0.25,
+        'weight': 0.7,
+    },
+    {
+        'name': 'static_augmentation',
+        'type': 'label_file', 
+        'labels': 'labels_10_shuffle.txt',  
+        'path': 'datasets/static_augmentation', 
+        'weight': 0.6,
     },
     # {
         # 'name': 'meterdigits_100',
@@ -168,7 +175,7 @@ ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
                          
 # Quantization Aware Training
 USE_QAT = False  # Enable Quantization Aware Training
-QAT_QUANTIZE_ALL = False  # Quantize all layers
+QAT_QUANTIZE_ALL = True  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
 
 # Data pipeline configuration
