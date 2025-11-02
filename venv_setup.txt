@@ -1,0 +1,17 @@
+py -m venv venv_digreco
+
+venv_digreco\Scripts\activate
+
+pip install -r requirements.txt
+
+
+
+### freeze
+
+pip freeze > requirements.txt
+
+## desactivate : 
+deactivate
+
+
+

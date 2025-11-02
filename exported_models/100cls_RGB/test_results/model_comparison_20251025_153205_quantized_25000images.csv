@@ -1,5 +1,0 @@
-Model,Directory,Type,Parameters,Size_KB,Accuracy,Inference_Time_ms,Inferences_per_second,Tested_Images
-final_quantized.tflite,digit_recognizer_v4_100cls_RGB,quantized,138200,88.1,0.8801,0.23,4436.0,25000
-final_quantized.tflite,original_haverland_100cls_RGB,quantized,263600,228.9,0.8592,0.17,5824.0,25000
-final_quantized.tflite,digit_recognizer_v1_100cls_RGB,quantized,144900,106.2,0.8566,0.14,6985.0,25000
-final_quantized.tflite,mnist_quantization_100cls_RGB,quantized,108000,72.3,0.8331,0.16,6177.0,25000
