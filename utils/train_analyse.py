@@ -1,27 +1,54 @@
+# utils/train_analyse.py
 import tensorflow as tf
 import numpy as np
 import os
 import matplotlib.pyplot as plt
-from datetime import datetime
-import argparse
-import sys
-from tqdm.auto import tqdm
-import logging
-import json
 import seaborn as sns
 from sklearn.metrics import confusion_matrix, classification_report
 import pandas as pd
-from contextlib import contextmanager
+from tqdm.auto import tqdm
+import time
 
-# Import shared modules
-from models import create_model, compile_model, model_summary
-from utils import get_data_splits, preprocess_images
 import parameters as params
+
+
+def get_analysis_samples(x_data, y_data):
+    """Get the number of samples to use for analysis based on params.ANALYSE_SAMPLES"""
+    if hasattr(params, 'ANALYSE_SAMPLES') and params.ANALYSE_SAMPLES is not None:
+        n_samples = min(params.ANALYSE_SAMPLES, len(x_data))
+        print(f"📊 Using {n_samples} samples for analysis (ANALYSE_SAMPLES={params.ANALYSE_SAMPLES})")
+        return x_data[:n_samples], y_data[:n_samples]
+    else:
+        print(f"📊 Using all {len(x_data)} samples for analysis")
+        return x_data, y_data
+
+
+def evaluate_keras_model(keras_model, x_test, y_test):
+    """Evaluate Keras model accuracy"""
+    print("🧪 Evaluating Keras model...")
+    
+    # Use configured number of samples
+    x_test_analysis, y_test_analysis = get_analysis_samples(x_test, y_test)
+    
+    # Handle different label formats
+    if len(y_test_analysis.shape) > 1 and y_test_analysis.shape[1] > 1:
+        # Categorical labels
+        loss, accuracy = keras_model.evaluate(x_test_analysis, y_test_analysis, verbose=0)
+    else:
+        # Sparse labels
+        loss, accuracy = keras_model.evaluate(x_test_analysis, y_test_analysis, verbose=0)
+    
+    print(f"Keras Model Accuracy: {accuracy:.4f} (on {len(x_test_analysis)} samples)")
+    return accuracy
 
 
 def evaluate_tflite_model(tflite_path, x_test, y_test):
     """Evaluate TFLite model accuracy"""
     print("🧪 Evaluating TFLite model...")
+    
+    # Use configured number of samples
+    x_test_analysis, y_test_analysis = get_analysis_samples(x_test, y_test)
+    total_samples = len(x_test_analysis)
     
     # Load TFLite model
     interpreter = tf.lite.Interpreter(model_path=tflite_path)
@@ -35,12 +62,11 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
     input_dtype = input_details[0]['dtype']
     
     correct_predictions = 0
-    total_samples = len(x_test)
     
     # Use tqdm for progress tracking
     for i in tqdm(range(total_samples), desc="Evaluating TFLite", leave=False):
         # Prepare input
-        input_data = x_test[i:i+1]
+        input_data = x_test_analysis[i:i+1]
         
         # Convert input based on model requirements
         if input_dtype == np.int8:
@@ -74,10 +100,10 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
         predicted_class = np.argmax(output_data)
         
         # Get true class (handle both categorical and sparse)
-        if len(y_test.shape) > 1 and y_test.shape[1] > 1:
-            true_class = np.argmax(y_test[i])
+        if len(y_test_analysis.shape) > 1 and y_test_analysis.shape[1] > 1:
+            true_class = np.argmax(y_test_analysis[i])
         else:
-            true_class = y_test[i]
+            true_class = y_test_analysis[i]
         
         if predicted_class == true_class:
             correct_predictions += 1
@@ -87,188 +113,193 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
     
     return accuracy
 
-def analyze_quantization_impact(keras_model, x_test, y_test, tflite_path):
-    """Analyze the impact of quantization on model performance"""
-    print("\n🔍 Analyzing quantization impact...")
+
+def get_keras_model_size(keras_model):
+    """Get Keras model size in KB"""
+    # Save model temporarily to get size
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix='.keras', delete=False) as tmp:
+        keras_model.save(tmp.name)
+        size_kb = os.path.getsize(tmp.name) / 1024
+        os.unlink(tmp.name)
+    return size_kb
+
+
+def get_tflite_model_size(tflite_path):
+    """Get TFLite model size in KB"""
+    return os.path.getsize(tflite_path) / 1024
+
+
+def measure_keras_inference_time(model, x_test):
+    """Measure Keras model inference time using Python time (works with determinism)"""
+    # Use configured number of samples for timing
+    x_test_analysis, _ = get_analysis_samples(x_test, np.zeros(len(x_test)))
     
-    # Get Keras model predictions
-    keras_predictions = keras_model.predict(x_test, verbose=0)
-    keras_pred_classes = np.argmax(keras_predictions, axis=1)
+    # Warm-up
+    _ = model.predict(x_test_analysis[:1], verbose=0)
     
-    # Get true classes
-    if len(y_test.shape) > 1 and y_test.shape[1] > 1:
-        true_classes = np.argmax(y_test, axis=1)
-    else:
-        true_classes = y_test
+    # Actual timing
+    start_time = time.perf_counter()
+    _ = model.predict(x_test_analysis, verbose=0)
+    end_time = time.perf_counter()
     
-    # Get TFLite model predictions
+    avg_time = (end_time - start_time) / len(x_test_analysis)
+    print(f"⏱️  Keras inference time: {avg_time*1000:.2f} ms per sample (on {len(x_test_analysis)} samples)")
+    return avg_time
+
+
+def measure_tflite_inference_time(tflite_path, x_test):
+    """Measure TFLite model inference time using Python time"""
+    # Use configured number of samples for timing
+    x_test_analysis, _ = get_analysis_samples(x_test, np.zeros(len(x_test)))
+    total_samples = len(x_test_analysis)
+    
     interpreter = tf.lite.Interpreter(model_path=tflite_path)
     interpreter.allocate_tensors()
     
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
     
-    tflite_predictions = []
+    # Warm-up
+    interpreter.set_tensor(input_details[0]['index'], x_test_analysis[:1].astype(np.float32))
+    interpreter.invoke()
     
-    for i in range(len(x_test)):
-        input_data = x_test[i:i+1]
-        
-        # Handle quantization
-        input_dtype = input_details[0]['dtype']
-        if input_dtype in [np.int8, np.uint8]:
-            input_scale, input_zero_point = input_details[0]['quantization']
-            input_data = input_data / input_scale + input_zero_point
-            input_data = input_data.astype(input_dtype)
-        else:
-            input_data = input_data.astype(np.float32)
-        
-        interpreter.set_tensor(input_details[0]['index'], input_data)
+    # Actual timing
+    start_time = time.perf_counter()
+    for i in range(total_samples):
+        interpreter.set_tensor(input_details[0]['index'], x_test_analysis[i:i+1].astype(np.float32))
         interpreter.invoke()
-        
-        output_data = interpreter.get_tensor(output_details[0]['index'])
-        
-        # Dequantize if needed
-        if output_details[0]['dtype'] in [np.int8, np.uint8]:
-            output_scale, output_zero_point = output_details[0]['quantization']
-            output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
-        
-        tflite_predictions.append(output_data[0])
+    end_time = time.perf_counter()
     
-    tflite_predictions = np.array(tflite_predictions)
-    tflite_pred_classes = np.argmax(tflite_predictions, axis=1)
-    
-    # Calculate metrics
-    keras_accuracy = np.mean(keras_pred_classes == true_classes)
-    tflite_accuracy = np.mean(tflite_pred_classes == true_classes)
-    
-    # Calculate prediction agreement
-    agreement = np.mean(keras_pred_classes == tflite_pred_classes)
-    
-    # Calculate confidence differences
-    keras_confidences = np.max(keras_predictions, axis=1)
-    tflite_confidences = np.max(tflite_predictions, axis=1)
-    confidence_diff = np.mean(np.abs(keras_confidences - tflite_confidences))
-    
-    print(f"📊 Quantization Analysis:")
-    print(f"   Keras Model Accuracy: {keras_accuracy:.4f}")
-    print(f"   TFLite Model Accuracy: {tflite_accuracy:.4f}")
-    print(f"   Accuracy Drop: {keras_accuracy - tflite_accuracy:.4f}")
-    print(f"   Prediction Agreement: {agreement:.4f}")
-    print(f"   Avg Confidence Difference: {confidence_diff:.4f}")
-    
-    # Find disagreements
-    disagreements = keras_pred_classes != tflite_pred_classes
-    if np.any(disagreements):
-        disagreement_indices = np.where(disagreements)[0]
-        print(f"   Disagreements: {len(disagreement_indices)} samples")
-        
-        # Analyze first few disagreements
-        print(f"   Sample disagreements:")
-        for i in disagreement_indices[:5]:
-            keras_conf = keras_confidences[i]
-            tflite_conf = tflite_confidences[i]
-            true_class = true_classes[i]
-            keras_class = keras_pred_classes[i]
-            tflite_class = tflite_pred_classes[i]
-            
-            print(f"     Sample {i}: True={true_class}, Keras={keras_class}({keras_conf:.3f}), "
-                  f"TFLite={tflite_class}({tflite_conf:.3f})")
-    
-    return {
-        'keras_accuracy': keras_accuracy,
-        'tflite_accuracy': tflite_accuracy,
-        'accuracy_drop': keras_accuracy - tflite_accuracy,
-        'agreement': agreement,
-        'confidence_diff': confidence_diff
-    }
+    avg_time = (end_time - start_time) / total_samples
+    print(f"⏱️  TFLite inference time: {avg_time*1000:.2f} ms per sample (on {total_samples} samples)")
+    return avg_time
 
-def debug_tflite_model(tflite_path, sample_input=None):
-    """Debug TFLite model details and test with sample input"""
-    print("\n🔧 Debugging TFLite model...")
+
+def analyze_quantization_impact(keras_model, x_test, y_test, tflite_path, debug=False):
+    """
+    Analyze the impact of quantization on model performance and size
+    FIXED: Handles determinism errors in performance testing
+    """
+    print("\n🔍 ANALYZING QUANTIZATION IMPACT")
+    print("=" * 50)
     
     try:
-        interpreter = tf.lite.Interpreter(model_path=tflite_path)
-        interpreter.allocate_tensors()
+        # Use configured number of samples
+        x_test_analysis, y_test_analysis = get_analysis_samples(x_test, y_test)
         
-        input_details = interpreter.get_input_details()
-        output_details = interpreter.get_output_details()
+        # Accuracy comparison
+        keras_accuracy = evaluate_keras_model(keras_model, x_test_analysis, y_test_analysis)
+        tflite_accuracy = evaluate_tflite_model(tflite_path, x_test_analysis, y_test_analysis)
         
-        print("TFLite Model Details:")
-        print(f"   Input details: {input_details}")
-        print(f"   Output details: {output_details}")
+        print(f"📊 ACCURACY COMPARISON:")
+        print(f"   Keras Model:    {keras_accuracy:.4f}")
+        print(f"   TFLite Model:   {tflite_accuracy:.4f}")
+        print(f"   Accuracy Drop:  {keras_accuracy - tflite_accuracy:+.4f}")
         
-        # Test with sample input if provided
-        if sample_input is not None:
-            print("\n🧪 Testing with sample input...")
+        # Size comparison
+        keras_size = get_keras_model_size(keras_model)
+        tflite_size = get_tflite_model_size(tflite_path)
+        
+        print(f"\n📏 SIZE COMPARISON:")
+        print(f"   Keras Model:    {keras_size:.1f} KB")
+        print(f"   TFLite Model:   {tflite_size:.1f} KB")
+        print(f"   Size Reduction: {((keras_size - tflite_size) / keras_size * 100):.1f}%")
+        
+        # Performance comparison (with determinism handling)
+        print(f"\n⚡ PERFORMANCE COMPARISON:")
+        
+        # Check if determinism is enabled
+        determinism_enabled = os.environ.get('TF_DETERMINISTIC_OPS') == '1'
+        
+        if determinism_enabled:
+            print("   ⚠️  Determinism enabled - skipping timing measurements")
+            print("   💡 Disable TF_DETERMINISTIC_OPS for performance timing")
+            keras_time = 0.0
+            tflite_time = 0.0
+        else:
+            try:
+                keras_time = measure_keras_inference_time(keras_model, x_test_analysis)
+                tflite_time = measure_tflite_inference_time(tflite_path, x_test_analysis)
+                
+                print(f"   Keras Inference:  {keras_time*1000:.2f} ms per sample")
+                print(f"   TFLite Inference: {tflite_time*1000:.2f} ms per sample")
+                if tflite_time > 0:
+                    print(f"   Speedup:          {keras_time/tflite_time:.2f}x")
+            except Exception as timing_error:
+                print(f"   ⚠️  Performance timing failed: {timing_error}")
+                keras_time = 0.0
+                tflite_time = 0.0
+        
+        # Quantization quality assessment
+        print(f"\n🎯 QUANTIZATION QUALITY:")
+        accuracy_drop = keras_accuracy - tflite_accuracy
+        
+        if accuracy_drop < 0.01:
+            print(f"   ✅ EXCELLENT - Minimal accuracy drop ({accuracy_drop:.4f})")
+        elif accuracy_drop < 0.03:
+            print(f"   ✅ GOOD - Acceptable accuracy drop ({accuracy_drop:.4f})")
+        elif accuracy_drop < 0.05:
+            print(f"   ⚠️  FAIR - Moderate accuracy drop ({accuracy_drop:.4f})")
+        else:
+            print(f"   ❌ POOR - Significant accuracy drop ({accuracy_drop:.4f})")
             
-            input_data = sample_input
-            input_dtype = input_details[0]['dtype']
-            
-            # Handle quantization
-            if input_dtype in [np.int8, np.uint8]:
-                input_scale, input_zero_point = input_details[0]['quantization']
-                input_data = input_data / input_scale + input_zero_point
-                input_data = input_data.astype(input_dtype)
-                print(f"   Input quantization: scale={input_scale}, zero_point={input_zero_point}")
-            else:
-                input_data = input_data.astype(np.float32)
-            
-            print(f"   Input shape: {input_data.shape}, dtype: {input_data.dtype}")
-            print(f"   Input range: [{input_data.min():.3f}, {input_data.max():.3f}]")
-            
-            interpreter.set_tensor(input_details[0]['index'], input_data)
-            interpreter.invoke()
-            
-            output_data = interpreter.get_tensor(output_details[0]['index'])
-            
-            # Handle output quantization
-            if output_details[0]['dtype'] in [np.int8, np.uint8]:
-                output_scale, output_zero_point = output_details[0]['quantization']
-                output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
-                print(f"   Output quantization: scale={output_scale}, zero_point={output_zero_point}")
-            
-            print(f"   Output shape: {output_data.shape}")
-            print(f"   Output: {output_data.flatten()}")
-            print(f"   Predicted class: {np.argmax(output_data)}")
-            
-            return output_data
+        return {
+            'keras_accuracy': keras_accuracy,
+            'tflite_accuracy': tflite_accuracy,
+            'accuracy_drop': accuracy_drop,
+            'keras_size': keras_size,
+            'tflite_size': tflite_size,
+            'size_reduction': (keras_size - tflite_size) / keras_size * 100,
+            'keras_inference_time': keras_time,
+            'tflite_inference_time': tflite_time,
+            'inference_speedup': keras_time / tflite_time if tflite_time > 0 else 0,
+            'analysis_samples': len(x_test_analysis)
+        }
         
     except Exception as e:
-        print(f"❌ TFLite debug failed: {e}")
-    
-    return None
+        print(f"❌ Quantization impact analysis failed: {e}")
+        if debug:
+            import traceback
+            traceback.print_exc()
+        return None
+
 
 def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
     """Run comprehensive training diagnostics"""
     print("\n🔍 Running training diagnostics...")
     
+    # Use configured number of samples for diagnostics
+    x_train_analysis, y_train_analysis = get_analysis_samples(x_train, y_train)
+    x_val_analysis, y_val_analysis = get_analysis_samples(x_val, y_val)
+    
     # Check data shapes and types
     print("📊 Data Diagnostics:")
-    print(f"   x_train shape: {x_train.shape}, dtype: {x_train.dtype}")
-    print(f"   y_train shape: {y_train.shape}, dtype: {y_train.dtype}")
-    print(f"   x_val shape: {x_val.shape}, dtype: {x_val.dtype}")
-    print(f"   y_val shape: {y_val.shape}, dtype: {y_val.dtype}")
+    print(f"   x_train shape: {x_train_analysis.shape}, dtype: {x_train_analysis.dtype}")
+    print(f"   y_train shape: {y_train_analysis.shape}, dtype: {y_train_analysis.dtype}")
+    print(f"   x_val shape: {x_val_analysis.shape}, dtype: {x_val_analysis.dtype}")
+    print(f"   y_val shape: {y_val_analysis.shape}, dtype: {y_val_analysis.dtype}")
     
     # Check data ranges
-    print(f"   x_train range: [{x_train.min():.3f}, {x_train.max():.3f}]")
-    print(f"   x_val range: [{x_val.min():.3f}, {x_val.max():.3f}]")
+    print(f"   x_train range: [{x_train_analysis.min():.3f}, {x_train_analysis.max():.3f}]")
+    print(f"   x_val range: [{x_val_analysis.min():.3f}, {x_val_analysis.max():.3f}]")
     
     # Check for NaN or Inf values
-    train_nans = np.isnan(x_train).sum()
-    val_nans = np.isnan(x_val).sum()
-    train_infs = np.isinf(x_train).sum()
-    val_infs = np.isinf(x_val).sum()
+    train_nans = np.isnan(x_train_analysis).sum()
+    val_nans = np.isnan(x_val_analysis).sum()
+    train_infs = np.isinf(x_train_analysis).sum()
+    val_infs = np.isinf(x_val_analysis).sum()
     
     print(f"   NaN values - Train: {train_nans}, Val: {val_nans}")
     print(f"   Inf values - Train: {train_infs}, Val: {val_infs}")
     
     # Check class distribution
-    if len(y_train.shape) > 1:
-        train_classes = np.argmax(y_train, axis=1)
-        val_classes = np.argmax(y_val, axis=1)
+    if len(y_train_analysis.shape) > 1:
+        train_classes = np.argmax(y_train_analysis, axis=1)
+        val_classes = np.argmax(y_val_analysis, axis=1)
     else:
-        train_classes = y_train
-        val_classes = y_val
+        train_classes = y_train_analysis
+        val_classes = y_val_analysis
     
     train_class_counts = np.bincount(train_classes)
     val_class_counts = np.bincount(val_classes)
@@ -284,24 +315,28 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
     
     # Test forward pass
     try:
-        test_output = model.predict(x_train[:1], verbose=0)
+        test_output = model.predict(x_train_analysis[:1], verbose=0)
         print(f"   Forward pass test: ✓ (output shape: {test_output.shape})")
     except Exception as e:
         print(f"   Forward pass test: ✗ ({e})")
     
     # Check model output range
     if debug:
-        sample_outputs = model.predict(x_train[:10], verbose=0)
+        sample_outputs = model.predict(x_train_analysis[:10], verbose=0)
         print(f"   Output range: [{sample_outputs.min():.3f}, {sample_outputs.max():.3f}]")
         print(f"   Output sum check: {np.sum(sample_outputs, axis=1)}")
+
 
 def verify_model_predictions(model, x_sample, y_sample):
     """Verify model predictions match expected format"""
     print("\n✅ Verifying model predictions...")
     
-    predictions = model.predict(x_sample, verbose=0)
+    # Use configured number of samples
+    x_sample_analysis, y_sample_analysis = get_analysis_samples(x_sample, y_sample)
     
-    print(f"   Input samples: {len(x_sample)}")
+    predictions = model.predict(x_sample_analysis, verbose=0)
+    
+    print(f"   Input samples: {len(x_sample_analysis)}")
     print(f"   Predictions shape: {predictions.shape}")
     
     # Check if predictions are probabilities
@@ -311,15 +346,16 @@ def verify_model_predictions(model, x_sample, y_sample):
     # Check accuracy on sample
     pred_classes = np.argmax(predictions, axis=1)
     
-    if len(y_sample.shape) > 1:
-        true_classes = np.argmax(y_sample, axis=1)
+    if len(y_sample_analysis.shape) > 1:
+        true_classes = np.argmax(y_sample_analysis, axis=1)
     else:
-        true_classes = y_sample
+        true_classes = y_sample_analysis
     
     sample_accuracy = np.mean(pred_classes == true_classes)
     print(f"   Sample accuracy: {sample_accuracy:.3f}")
     
     return sample_accuracy
+
 
 def debug_model_architecture(model, sample_data=None):
     """Debug model architecture with better error handling"""
@@ -343,22 +379,26 @@ def debug_model_architecture(model, sample_data=None):
             inputs=model.input, 
             outputs=[layer.output for layer in model.layers]
         )
-        # Rest of your debugging code...
+        print("✅ Model architecture debug completed")
     except Exception as e:
         print(f"❌ Debugging failed: {e}")
+
 
 def analyze_confusion_matrix(model, x_test, y_test, save_path=None):
     """Generate and analyze confusion matrix"""
     print("\n📈 Generating confusion matrix...")
     
+    # Use configured number of samples
+    x_test_analysis, y_test_analysis = get_analysis_samples(x_test, y_test)
+    
     # Get predictions
-    predictions = model.predict(x_test, verbose=0)
+    predictions = model.predict(x_test_analysis, verbose=0)
     pred_classes = np.argmax(predictions, axis=1)
     
-    if len(y_test.shape) > 1:
-        true_classes = np.argmax(y_test, axis=1)
+    if len(y_test_analysis.shape) > 1:
+        true_classes = np.argmax(y_test_analysis, axis=1)
     else:
-        true_classes = y_test
+        true_classes = y_test_analysis
     
     # Create confusion matrix
     cm = confusion_matrix(true_classes, pred_classes)
@@ -377,7 +417,7 @@ def analyze_confusion_matrix(model, x_test, y_test, save_path=None):
                    dpi=300, bbox_inches='tight')
         print(f"💾 Confusion matrix saved to: {os.path.join(save_path, 'confusion_matrix.png')}")
     
-    plt.show()
+    # plt.show()
     
     # Generate classification report
     report = classification_report(true_classes, pred_classes, 
@@ -386,6 +426,7 @@ def analyze_confusion_matrix(model, x_test, y_test, save_path=None):
     print(report)
     
     return cm, report
+
 
 def analyze_training_history(training_log_path, save_path=None):
     """Analyze training history from CSV log"""
@@ -449,7 +490,7 @@ def analyze_training_history(training_log_path, save_path=None):
                    dpi=300, bbox_inches='tight')
         print(f"💾 Detailed training analysis saved to: {os.path.join(save_path, 'detailed_training_analysis.png')}")
     
-    plt.show()
+    # plt.show()
     
     # Print key statistics
     if 'val_accuracy' in history_df.columns:
@@ -464,6 +505,7 @@ def analyze_training_history(training_log_path, save_path=None):
     
     return history_df
 
+
 def model_size_analysis(model_dir):
     """Analyze model sizes and performance trade-offs"""
     print("\n📦 Model size analysis...")
@@ -474,7 +516,7 @@ def model_size_analysis(model_dir):
     
     # Find all model files
     for file in os.listdir(model_dir):
-        if file.endswith('.tflite') or file.endswith('.h5'):
+        if file.endswith('.tflite') or file.endswith('.keras'):
             file_path = os.path.join(model_dir, file)
             size_kb = os.path.getsize(file_path) / 1024
             
@@ -512,83 +554,8 @@ def model_size_analysis(model_dir):
             plt.ylabel('Accuracy')
             plt.title('Model Size vs Accuracy Trade-off')
             plt.grid(True, alpha=0.3)
-            plt.show()
+            # plt.show()
         
         return analysis_df
     
     return None
-
-def comprehensive_model_analysis(model_path, x_test, y_test, output_dir):
-    """Run comprehensive analysis on a trained model"""
-    print("🔍 Running comprehensive model analysis...")
-    
-    # Load model
-    if model_path.endswith('.tflite'):
-        model = tf.keras.models.load_model(model_path)
-    else:
-        # For TFLite models, we need to use the interpreter
-        model = None
-    
-    # Run various analyses
-    if model:
-        # Confusion matrix
-        analyze_confusion_matrix(model, x_test, y_test, output_dir)
-        
-        # Training history analysis if available
-        training_log_path = os.path.join(output_dir, 'training_log.csv')
-        if os.path.exists(training_log_path):
-            analyze_training_history(training_log_path, output_dir)
-    
-    # Model size analysis
-    model_size_analysis(output_dir)
-    
-    print("✅ Comprehensive analysis completed!")
-
-def main():
-    """Main analysis function - can be used for post-training analysis"""
-    parser = argparse.ArgumentParser(description='Model Analysis')
-    parser.add_argument('--model_dir', type=str, required=True,
-                       help='Directory containing trained models and logs')
-    parser.add_argument('--analyze_all', action='store_true',
-                       help='Run comprehensive analysis')
-    parser.add_argument('--confusion_matrix', action='store_true',
-                       help='Generate confusion matrix')
-    parser.add_argument('--training_analysis', action='store_true',
-                       help='Analyze training history')
-    
-    args = parser.parse_args()
-    
-    if not os.path.exists(args.model_dir):
-        print(f"❌ Model directory not found: {args.model_dir}")
-        return
-    
-    # Load test data
-    print("📊 Loading test data...")
-    _, _, (x_test, y_test) = get_data_splits()
-    x_test = preprocess_images(x_test)
-    
-    # Convert labels if needed
-    if len(y_test.shape) == 1:
-        y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
-    
-    # Run requested analyses
-    if args.analyze_all or args.confusion_matrix:
-        # Find the best model
-        model_files = [f for f in os.listdir(args.model_dir) if f.endswith('.tflite')]
-        if model_files:
-            best_model_path = os.path.join(args.model_dir, model_files[0])
-            model = tf.keras.models.load_model(best_model_path)
-            analyze_confusion_matrix(model, x_test, y_test, args.model_dir)
-    
-    if args.analyze_all or args.training_analysis:
-        training_log_path = os.path.join(args.model_dir, 'training_log.csv')
-        analyze_training_history(training_log_path, args.model_dir)
-    
-    if args.analyze_all:
-        comprehensive_model_analysis(args.model_dir, x_test, y_test, args.model_dir)
-
-if __name__ == "__main__":
-    main()
-    
-    
-# py analyse.py --model_dir exported_models/digit_recognizer_v4_10cls_QAT_QUANT_GRAY
