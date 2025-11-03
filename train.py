@@ -427,23 +427,20 @@ class TFLiteModelManager:
                     calibration_data = x_train_raw[:num_samples]
                     
                     # CRITICAL: Use the SAME preprocessing as during QAT training
-                    calibration_processed = preprocess_images(calibration_data, for_training=False)
+                    # QAT training uses UINT8 [0, 255] if params.USE_QAT is True (see preprocess.py)
+                    # However, the TFLiteConverter's representative_dataset generator must yield float32 data
+                    # in the range [0, 1] for the converter to perform the final quantization step correctly.
+                    calibration_processed = preprocess_images(calibration_data, for_training=True) # Use training preproc to get UINT8 [0, 255]
                     
-                    # Ensure proper data type and range for QAT
-                    if calibration_processed.dtype != np.float32:
-                        calibration_processed = calibration_processed.astype(np.float32)
-                    
-                    # For QAT, data should be in the same range as during training
-                    # If your QAT training used [0, 1] range, ensure calibration data is also [0, 1]
-                    if calibration_processed.max() > 1.0:
-                        calibration_processed = calibration_processed / 255.0
+                    # Convert to float32 [0, 1] for the TFLite converter
+                    calibration_processed = calibration_processed.astype(np.float32) / 255.0
                     
                     if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                         print(f"🔧 QAT Calibration: {len(calibration_processed)} samples, "
                               f"dtype: {calibration_processed.dtype}, "
                               f"range: [{calibration_processed.min():.3f}, {calibration_processed.max():.3f}]")
                     
-                    # Verify data matches QAT training expectations
+                    # Verify data matches TFLite converter expectations
                     if calibration_processed.dtype != np.float32:
                         raise ValueError(f"QAT calibration data must be float32, got {calibration_processed.dtype}")
                     
@@ -564,11 +561,14 @@ class TFLiteModelManager:
                         # Preprocess properly
                         calibration_processed = preprocess_images(calibration_data, for_training=False)
                         
-                        # Ensure proper format
-                        if calibration_processed.dtype != np.float32:
-                            calibration_processed = calibration_processed.astype(np.float32)
-                        if calibration_processed.max() > 1.0:
-                            calibration_processed = calibration_processed / 255.0
+                    # The representative dataset generator must yield float32 data in the range [0, 1]
+                    # The preprocess_images(..., for_training=False) for non-quantized models returns float32 [0, 1]
+                    # The preprocess_images(..., for_training=False) for quantized models returns uint8 [0, 255]
+                    # We need to ensure it's float32 [0, 1] for the converter.
+                    if calibration_processed.dtype != np.float32:
+                        calibration_processed = calibration_processed.astype(np.float32) / 255.0
+                    elif calibration_processed.max() > 1.0:
+                        calibration_processed = calibration_processed / 255.0
                         
                         if self.debug:
                             print(f"🔧 Direct conversion - Real calibration: {calibration_processed.dtype}")
@@ -646,11 +646,8 @@ class TFLiteModelManager:
                     calibration_data = x_train_raw[:params.QUANTIZE_NUM_SAMPLES]
                     calibration_processed = preprocess_images(calibration_data, for_training=False)
                     
-                    # Ensure proper format for quantization
-                    if calibration_processed.dtype != np.float32:
-                        calibration_processed = calibration_processed.astype(np.float32)
-                    if calibration_processed.max() > 1.0:
-                        calibration_processed = calibration_processed / 255.0
+
+
                     
                     if self.debug:
                         print(f"🔧 Calibration data: {calibration_processed.dtype}, "
@@ -726,15 +723,22 @@ class TFLiteModelManager:
                             (x_train_raw, _), _, _ = get_data_splits()
                             calib_data = x_train_raw[:min(100, params.QUANTIZE_NUM_SAMPLES)]
                             
-                            # Use inference preprocessing
+                            # Use training preprocessing for QAT models (for_training=True)
+                            # Use inference preprocessing for non-QAT models (for_training=False)
+                            # Since this is a fallback for all models, we should use the logic from _convert_standard_quantized
+                            # which uses for_training=False, but the QAT logic is more complex.
+                            # Given the complexity, let's stick to the standard post-training quantization approach:
+                            # Use inference preprocess                            # Use inference preprocessing
                             calib_processed = preprocess_images(calib_data, for_training=False)
                             
-                            # Ensure float32 for calibration
+                            # The representative dataset generator must yield float32 data in the range [0, 1]
+                            # The preprocess_images(..., for_training=False) for non-quantized models returns float32 [0, 1]
+                            # The preprocess_images(..., for_training=False) for quantized models returns uint8 [0, 255]
+                            # We need to ensure it's float32 [0, 1] for the converter.
                             if calib_processed.dtype != np.float32:
-                                calib_processed = calib_processed.astype(np.float32)
-                            if calib_processed.max() > 1.0:
-                                calib_processed = calib_processed / 255.0
-                                
+                                calib_processed = calib_processed.astype(np.float32) / 255.0
+                            elif calib_processed.max() > 1.0:
+                                calib_processed = calib_processed / 255.0                               
                             print(f"🔧 SavedModel Calibration: {calib_processed.dtype}, "
                                   f"range: [{calib_processed.min():.3f}, {calib_processed.max():.3f}]")
                             
@@ -785,10 +789,13 @@ class TFLiteModelManager:
                         calib_data = x_train_raw[:min(100, params.QUANTIZE_NUM_SAMPLES)]
                         calib_processed = preprocess_images(calib_data, for_training=False)
                         
-                        # Ensure float32
+                        # The representative dataset generator must yield float32 data in the range [0, 1]
+                        # The preprocess_images(..., for_training=False) for non-quantized models returns float32 [0, 1]
+                        # The preprocess_images(..., for_training=False) for quantized models returns uint8 [0, 255]
+                        # We need to ensure it's float32 [0, 1] for the converter.
                         if calib_processed.dtype != np.float32:
-                            calib_processed = calib_processed.astype(np.float32)
-                        if calib_processed.max() > 1.0:
+                            calib_processed = calib_processed.astype(np.float32) / 255.0
+                        elif calib_processed.max() > 1.0:
                             calib_processed = calib_processed / 255.0
                         
                         print(f"🔧 Keras3 Calibration: {calib_processed.dtype}, "
@@ -838,13 +845,16 @@ class TFLiteModelManager:
                     calibration_data = x_train_raw[:num_calibration_samples]
                     
                     # Preprocess the same way as inference
+                    # For dynamic range quantization, the input to the converter should be float32 [0, 1]
                     calibration_processed = preprocess_images(calibration_data, for_training=False)
                     
-                    # Ensure proper format for quantization
+                    # Ensure float32 [0, 1] for dynamic range quantization
                     if calibration_processed.dtype != np.float32:
                         calibration_processed = calibration_processed.astype(np.float32)
-                    if calibration_processed.max() > 1.0:
-                        calibration_processed = calibration_processed / 255.0
+
+                    
+
+
                     
                     if self.debug:
                         print(f"🔧 Real calibration data: {len(calibration_processed)} samples")

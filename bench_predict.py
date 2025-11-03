@@ -97,52 +97,6 @@ class TFLiteDigitPredictor:
         except Exception as e:
             return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
 
-# def predict_single_image_silent(image):
-    # """
-    # Silent version of predict_single_image that doesn't print debug outputs
-    # """
-    # # Copy the preprocessing logic from preprocess.py but without prints
-    # target_size = (params.INPUT_WIDTH, params.INPUT_HEIGHT)
-    # grayscale = params.USE_GRAYSCALE
-    
-    # # Resize to target size
-    # image = cv2.resize(image, target_size)
-    
-    # # Convert to grayscale if required
-    # if grayscale and len(image.shape) == 3:
-        # image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    # elif not grayscale and len(image.shape) == 2:
-        # image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-    
-    # # Add channel dimension if missing
-    # if len(image.shape) == 2:
-        # image = np.expand_dims(image, axis=-1)
-    
-    # # Apply the same preprocessing logic as preprocess_images but silently
-    # if params.QUANTIZE_MODEL:
-        # if params.ESP_DL_QUANTIZE:
-            # # ESP-DL INT8 quantization: Use UINT8 [0, 255]
-            # if image.dtype != np.uint8:
-                # if image.max() <= 1.0:
-                    # image = (image * 255).astype(np.uint8)
-                # else:
-                    # image = image.astype(np.uint8)
-        # else:
-            # # Standard TFLite UINT8 quantization: Use UINT8 [0, 255]
-            # if image.dtype != np.uint8:
-                # if image.max() <= 1.0:
-                    # image = (image * 255).astype(np.uint8)
-                # else:
-                    # image = image.astype(np.uint8)
-    # else:
-        # # No quantization: Use float32 [0, 1]
-        # if image.dtype != np.float32:
-            # image = image.astype(np.float32)
-        # if image.max() > 1.0:
-            # image = image / 255.0
-    
-    # return image
-
 def load_image_from_path(image_path, input_channels):
     """Load image from specified path based on model's input requirements"""
     if not os.path.exists(image_path):
@@ -331,8 +285,6 @@ def get_all_models(quantized_only=False):
                     'parameters': parameters_count
                 })
                 
-            # except Exception:
-                # continue
             except Exception as e:
                 print(f"⚠️  Error processing model {training_dir}/{model_file}: {e}")  
                 continue
@@ -356,10 +308,14 @@ def is_valid_tflite_model(model_path):
         print(f"❌ Invalid TFLite model {os.path.basename(model_path)}: {e}")
         return False
 
-def load_test_dataset_with_labels(num_samples=100, use_all_datasets=False):
+def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     """
     Load test dataset with proper labels using multi_source_loader
     Returns: list of (image_array, true_label) tuples
+    
+    Args:
+        num_samples: Number of samples to use. 0 means use all available images
+        use_all_datasets: If True, use all available datasets
     """
     print("📊 Loading test dataset with labels...")
     
@@ -374,16 +330,19 @@ def load_test_dataset_with_labels(num_samples=100, use_all_datasets=False):
     # Combine images and labels
     test_data = list(zip(images, labels))
     
-    # Shuffle and limit samples
+    # Shuffle the data
     np.random.shuffle(test_data)
     
-    if not use_all_datasets and len(test_data) > num_samples:
+    # Limit samples only if num_samples > 0
+    if num_samples > 0 and len(test_data) > num_samples:
         test_data = test_data[:num_samples]
+        print(f"  Using {len(test_data)} test samples (limited by --test_images)")
+    else:
+        print(f"  Using ALL {len(test_data)} available test samples")
     
-    print(f"  Using {len(test_data)} test samples")
     return test_data
 
-def test_model_on_dataset(model_path, num_test_images=100, debug=False, use_all_datasets=False):
+def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_datasets=True):
     """Test a model on random images from dataset and return accuracy and performance metrics"""
     predictor = TFLiteDigitPredictor(model_path)
     correct_predictions = 0
@@ -457,7 +416,7 @@ def test_model_on_dataset(model_path, num_test_images=100, debug=False, use_all_
     
     return accuracy, total_tested, avg_inference_time, inferences_per_second
 
-def generate_comparison_graphs(results, quantized_only=False, use_all_datasets=False):
+def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=True):
     """Generate separate comparison graphs for the benchmark results"""
     # Create graphs directory
     graphs_dir = os.path.join(params.OUTPUT_DIR, "test_results", "graphs")
@@ -641,7 +600,7 @@ def generate_comparison_graphs(results, quantized_only=False, use_all_datasets=F
     
     return graph_paths
 
-def test_all_models(quantized_only=False, num_test_images=100, debug=False, use_all_datasets=False):
+def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all_datasets=True):
     """Test all available models and print summary table"""
     models = get_all_models(quantized_only=quantized_only)
     
@@ -650,7 +609,7 @@ def test_all_models(quantized_only=False, num_test_images=100, debug=False, use_
         return
     
     # Determine test configuration
-    if use_all_datasets:
+    if use_all_datasets or num_test_images == 0:
         print(f"\nTesting {len(models)} models on ALL available images from all datasets...")
     else:
         print(f"\nTesting {len(models)} models on {num_test_images} images...")
@@ -714,10 +673,11 @@ def test_all_models(quantized_only=False, num_test_images=100, debug=False, use_
     # Print summary table
     print(f"\n{'='*80}")
     print(f"SUMMARY RESULTS")
-    if use_all_datasets:
+    if use_all_datasets or num_test_images == 0:
         print(f"DATASETS: ALL available images")
     else:
         print(f"DATASETS: {num_test_images} sampled images")
+    print(f"MODELS: {'Quantized only' if quantized_only else 'All models'}")
     print(f"{'='*80}")
     
     # Simplified console output
@@ -765,7 +725,7 @@ def test_all_models(quantized_only=False, num_test_images=100, debug=False, use_
     
     return results
 
-def save_results_to_csv(results, quantized_only=False, use_all_images=False, test_images_count=100):
+def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_images_count=0):
     """Save FULL results to CSV file with all information"""
     # Create results directory if it doesn't exist
     results_dir = os.path.join(params.OUTPUT_DIR, "test_results")
@@ -815,7 +775,7 @@ def save_results_to_csv(results, quantized_only=False, use_all_images=False, tes
     print(f"💾 Full results saved to: {csv_path}")
     return csv_path
 
-def list_available_models(quantized_only=False):
+def list_available_models(quantized_only=True):
     """List all available models in training directories"""
     models = get_all_models(quantized_only=quantized_only)
     
@@ -833,10 +793,13 @@ def main():
     """Main function with command line arguments"""
     parser = argparse.ArgumentParser(description='Digit Recognition Benchmarking')
     parser.add_argument('--model', type=str, help='Model name to use for prediction')
-    parser.add_argument('--quantized', action='store_true', default=True, help='Use only quantized models')
-    parser.add_argument('--test_all', action='store_true', default=True, help='Test all available models and print accuracy summary')
-    parser.add_argument('--test_images', type=int, default=25000, help='Number of test images per model (default: 25000)')
-    parser.add_argument('--all_datasets', action='store_true', default=True, help='Use all available images from dataset (overrides --test_images, only for --test_all)')
+    parser.add_argument('--quantized', action='store_true', default=True, help='Use only quantized models (default: True)')
+    parser.add_argument('--no-quantized', action='store_false', dest='quantized', help='Include non-quantized models')
+    parser.add_argument('--test_all', action='store_true', default=True, help='Test all available models and print accuracy summary (default: True)')
+    parser.add_argument('--no-test_all', action='store_false', dest='test_all', help='Do not run automatic benchmark')
+    parser.add_argument('--test_images', type=int, default=0, help='Number of test images per model. 0 means use all images (default: 0)')
+    parser.add_argument('--all_datasets', action='store_true', default=True, help='Use all available images from dataset (default: True)')
+    parser.add_argument('--no-all_datasets', action='store_false', dest='all_datasets', help='Limit to --test_images number of samples')
     parser.add_argument('--debug', action='store_true', help='Debug model output interpretation')
     parser.add_argument('--list', action='store_true', help='List all available models')
     
@@ -864,10 +827,9 @@ def main():
         print("Debug mode requires --test_all for benchmarking. Use --test_all --debug")
         return
     
-    print("Use --test_all to run benchmarks or --list to see available models.")
+    print("Use --list to see available models or run with default benchmark settings.")
 
 if __name__ == "__main__":
     main()
     
-    
-# py bench_predict.py --test_all --quantized --test_images 25000
+# py bench_predict.py
