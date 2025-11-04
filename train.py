@@ -126,8 +126,8 @@ from utils.train_analyse import (
     measure_tflite_inference_time,
     analyze_quantization_impact,
     training_diagnostics,
-    verify_model_predictions,
     debug_model_architecture,
+    verify_model_predictions,
     analyze_confusion_matrix,
     analyze_training_history,
     model_size_analysis
@@ -641,7 +641,11 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     save_model_summary_to_file(model, training_dir)
     
     # Create representative dataset
-    representative_data = create_qat_representative_dataset(x_train_raw)
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        # QAT models already carry quantisation information – no calibration needed.
+        representative_data = None
+    else:
+        representative_data = create_qat_representative_dataset(x_train_raw)
     
     # Create callbacks
     callbacks = create_callbacks(
@@ -706,7 +710,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         'accuracy_drop': 0.0,
         'size_reduction': 0.0
     }
-    
+
     if os.path.exists(quantized_tflite_path) and params.QUANTIZE_MODEL:
         try:
             print("🔍 Running quantization analysis...")
@@ -718,30 +722,35 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             if analysis_result is not None:
                 quantization_results.update(analysis_result)
                 tflite_accuracy = quantization_results.get('tflite_accuracy', 0.0)
-                
-                # Generate detailed report
-                analyzer = QuantizationAnalyzer(debug=debug)
-                analyzer.analysis_results = quantization_results
-                analyzer.generate_quantization_report(training_dir)
             else:
                 print("⚠️  Quantization analysis returned no results, using fallback values")
-                # Fallback: basic size measurements
-                quantization_results['tflite_size'] = get_tflite_model_size(quantized_tflite_path)
-                quantization_results['keras_size'] = get_keras_model_size(model)
-                if quantization_results['keras_size'] > 0:
-                    quantization_results['size_reduction'] = (
-                        (quantization_results['keras_size'] - quantization_results['tflite_size']) / 
-                        quantization_results['keras_size'] * 100
-                    )
-                
+                # Fallback: basic size measurements with better error handling
+                try:
+                    quantization_results['tflite_size'] = get_tflite_model_size(quantized_tflite_path)
+                    quantization_results['keras_size'] = get_keras_model_size(model)
+                    if quantization_results['keras_size'] > 0:
+                        quantization_results['size_reduction'] = (
+                            (quantization_results['keras_size'] - quantization_results['tflite_size']) / 
+                            quantization_results['keras_size'] * 100
+                        )
+                except Exception as size_error:
+                    print(f"⚠️  Fallback size measurement failed: {size_error}")
+                    
         except Exception as e:
             print(f"❌ Quantization analysis failed: {e}")
             if debug:
                 import traceback
                 traceback.print_exc()
-            # Fallback measurements
-            quantization_results['tflite_size'] = get_tflite_model_size(quantized_tflite_path)
-            quantization_results['keras_size'] = get_keras_model_size(model)
+            # Fallback measurements with error handling
+            try:
+                quantization_results['tflite_size'] = get_tflite_model_size(quantized_tflite_path)
+            except:
+                quantization_results['tflite_size'] = 0
+                
+            try:
+                quantization_results['keras_size'] = get_keras_model_size(model)
+            except:
+                quantization_results['keras_size'] = 0
     
     # Run comprehensive analysis if requested
     if full_analysis:

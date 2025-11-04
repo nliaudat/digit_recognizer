@@ -8,6 +8,8 @@ from sklearn.metrics import confusion_matrix, classification_report
 import pandas as pd
 from tqdm.auto import tqdm
 import time
+import tempfile
+import shutil
 
 import parameters as params
 
@@ -115,19 +117,39 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
 
 
 def get_keras_model_size(keras_model):
-    """Get Keras model size in KB"""
-    # Save model temporarily to get size
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix='.keras', delete=False) as tmp:
-        keras_model.save(tmp.name)
-        size_kb = os.path.getsize(tmp.name) / 1024
-        os.unlink(tmp.name)
-    return size_kb
+    """Get Keras model size in KB with proper Windows file handling"""
+    # Create a temporary directory instead of using NamedTemporaryFile
+    temp_dir = tempfile.mkdtemp()
+    temp_model_path = os.path.join(temp_dir, "temp_model.keras")
+    
+    try:
+        # Save model to temporary directory
+        keras_model.save(temp_model_path)
+        size_kb = os.path.getsize(temp_model_path) / 1024
+        
+        # Clean up - remove the entire directory
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        
+        return size_kb
+        
+    except Exception as e:
+        # Ensure cleanup even if there's an error
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except:
+            pass
+        
+        print(f"⚠️  Failed to get Keras model size: {e}")
+        return 0.0
 
 
 def get_tflite_model_size(tflite_path):
     """Get TFLite model size in KB"""
-    return os.path.getsize(tflite_path) / 1024
+    try:
+        return os.path.getsize(tflite_path) / 1024
+    except Exception as e:
+        print(f"⚠️  Failed to get TFLite model size: {e}")
+        return 0.0
 
 
 def measure_keras_inference_time(model, x_test):
@@ -179,7 +201,7 @@ def measure_tflite_inference_time(tflite_path, x_test):
 def analyze_quantization_impact(keras_model, x_test, y_test, tflite_path, debug=False):
     """
     Analyze the impact of quantization on model performance and size
-    FIXED: Handles determinism errors in performance testing
+    FIXED: Handles Windows file permission issues
     """
     print("\n🔍 ANALYZING QUANTIZATION IMPACT")
     print("=" * 50)
@@ -197,14 +219,27 @@ def analyze_quantization_impact(keras_model, x_test, y_test, tflite_path, debug=
         print(f"   TFLite Model:   {tflite_accuracy:.4f}")
         print(f"   Accuracy Drop:  {keras_accuracy - tflite_accuracy:+.4f}")
         
-        # Size comparison
-        keras_size = get_keras_model_size(keras_model)
-        tflite_size = get_tflite_model_size(tflite_path)
+        # Size comparison with better error handling
+        keras_size = 0.0
+        tflite_size = 0.0
+        
+        try:
+            keras_size = get_keras_model_size(keras_model)
+            tflite_size = get_tflite_model_size(tflite_path)
+        except Exception as size_error:
+            print(f"⚠️  Size measurement failed: {size_error}")
+            # Continue with analysis using fallback values
         
         print(f"\n📏 SIZE COMPARISON:")
         print(f"   Keras Model:    {keras_size:.1f} KB")
         print(f"   TFLite Model:   {tflite_size:.1f} KB")
-        print(f"   Size Reduction: {((keras_size - tflite_size) / keras_size * 100):.1f}%")
+        
+        if keras_size > 0:
+            size_reduction = ((keras_size - tflite_size) / keras_size * 100)
+            print(f"   Size Reduction: {size_reduction:.1f}%")
+        else:
+            size_reduction = 0.0
+            print(f"   Size Reduction: N/A (could not measure Keras model size)")
         
         # Performance comparison (with determinism handling)
         print(f"\n⚡ PERFORMANCE COMPARISON:")
@@ -250,7 +285,7 @@ def analyze_quantization_impact(keras_model, x_test, y_test, tflite_path, debug=
             'accuracy_drop': accuracy_drop,
             'keras_size': keras_size,
             'tflite_size': tflite_size,
-            'size_reduction': (keras_size - tflite_size) / keras_size * 100,
+            'size_reduction': size_reduction,
             'keras_inference_time': keras_time,
             'tflite_inference_time': tflite_time,
             'inference_speedup': keras_time / tflite_time if tflite_time > 0 else 0,
@@ -301,8 +336,8 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
         train_classes = y_train_analysis
         val_classes = y_val_analysis
     
-    train_class_counts = np.bincount(train_classes)
-    val_class_counts = np.bincount(val_classes)
+    train_class_counts = np.bincount(train_classes, minlength=params.NB_CLASSES)
+    val_class_counts = np.bincount(val_classes, minlength=params.NB_CLASSES)
     
     print(f"   Train class distribution: {dict(zip(range(len(train_class_counts)), train_class_counts))}")
     print(f"   Val class distribution: {dict(zip(range(len(val_class_counts)), val_class_counts))}")

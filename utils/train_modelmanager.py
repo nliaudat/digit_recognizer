@@ -53,6 +53,7 @@ class TFLiteModelManager:
         self.output_dir = output_dir
         self.best_accuracy = 0.0
         self.debug = debug
+        self._already_quantised = False
 
     # -----------------------------------------------------------------
     #  Sanity‑check before conversion
@@ -226,17 +227,34 @@ class TFLiteModelManager:
         """
         Convert ``model`` to TFLite and write ``filename`` into ``self.output_dir``.
         """
-        # 1️⃣ Ensure the model graph exists (required for Keras 3)
+        
+        if quantize and self.debug:
+            print("🔧 Quantization Debug Info:")
+            print(f"   - Model built: {model.built}")
+            print(f"   - Input shape: {model.input_shape}")
+            print(f"   - Output shape: {model.output_shape}")
+            print(f"   - Is QAT model: {_is_qat_model(model)}")
+            print(f"   - ESP_DL_QUANTIZE: {params.ESP_DL_QUANTIZE}")
+        
+        # Only prevent double quantization, not all conversions
+        if quantize:
+            if self._already_quantised:
+                if self.debug:
+                    print("Warning: attempted second quantisation – operation ignored")
+                return None, 0
+            self._already_quantised = True
+            
+        # 1 Ensure the model graph exists (required for Keras 3)
         if not model.built:
             dummy = tf.zeros([1] + list(params.INPUT_SHAPE), dtype=tf.float32)
             _ = model(dummy)
 
-        # 2️⃣ Build the appropriate converter
+        # 2 Build the appropriate converter
         converter = self._make_converter(
             model, quantize=quantize, representative_data=representative_data
         )
 
-        # 3️⃣ Perform the conversion (silently unless debug=True)
+        # 3 Perform the conversion (silently unless debug=True)
         try:
             with suppress_all_output(self.debug):
                 tflite_blob = converter.convert()
@@ -247,7 +265,7 @@ class TFLiteModelManager:
                 traceback.print_exc()
             return None, 0
 
-        # 4️⃣ Write the file (and optionally verify it)
+        # 4 Write the file (and optionally verify it)
         return self._save_tflite_file(tflite_blob, filename, quantize)
 
     # -----------------------------------------------------------------
