@@ -1,15 +1,15 @@
 # utils/train_qat_helper.py
 """
-Utility functions that deal specifically with Quantization‑Aware Training (QAT).
+Utility functions that deal specifically with Quantization Aware Training (QAT).
 
-These helpers are grouped together so that QAT‑related logic lives in a single
+These helpers are grouped together so that QAT related logic lives in a single
 module, making the codebase easier to navigate and maintain.
 
 Functions provided:
 * `create_qat_model` – builds a model wrapped for QAT (uses tfmot if available).
 * `create_qat_representative_dataset` – calibration data generator that matches
   the preprocessing used during QAT training.
-* `validate_qat_data_flow` – quick sanity‑check that a QAT model can process a
+* `validate_qat_data_flow` – quick sanity check that a QAT model can process a
   sample batch without errors.
 * `is_qat_model` – thin wrapper that forwards to the implementation in
   `utils.preprocess` (kept for backward compatibility).
@@ -29,7 +29,7 @@ import tensorflow as tf
 # --------------------------------------------------------------------------- #
 import parameters as params
 from utils import preprocess_images
-# from utils.preprocess import is_qat_model as _is_qat_model  # core detection logic
+from utils.preprocess import preprocess_for_training
 
 
 # --------------------------------------------------------------------------- #
@@ -37,12 +37,12 @@ from utils import preprocess_images
 # --------------------------------------------------------------------------- #
 def create_qat_model() -> tf.keras.Model:
     """
-    Wrap a freshly‑created model with Quantization‑Aware Training (QAT).
+    Wrap a freshly created model with Quantization Aware Training (QAT).
 
     Returns
     -------
     tf.keras.Model
-        Either a QAT‑enabled model (if `tensorflow_model_optimization` is
+        Either a QAT enabled model (if `tensorflow_model_optimization` is
         available) or a plain model (fallback).
     """
     try:
@@ -57,8 +57,8 @@ def create_qat_model() -> tf.keras.Model:
     from models import create_model
     base_model = create_model()
 
-    # Apply QAT transformation – the high‑level helper automatically annotates
-    # and wraps the model for quantization‑aware training.
+    # Apply QAT transformation – the high level helper automatically annotates
+    # and wraps the model for quantization aware training.
     qat_model = tfmot.quantization.keras.quantize_model(base_model)
 
     print("✅ QAT model created successfully")
@@ -74,54 +74,221 @@ def create_qat_representative_dataset(
 ) -> Callable[[], Tuple[np.ndarray, ...]]:
     """
     Build a calibration generator that reproduces the exact preprocessing used
-    during QAT training.
-
-    Parameters
-    ----------
-    x_train_raw : np.ndarray
-        The *raw* training images (before any preprocessing).
-    num_samples : int, optional
-        Number of samples to include in the calibration set (default taken from
-        ``params.QUANTIZE_NUM_SAMPLES``).
-
-    Returns
-    -------
-    Callable[[], Tuple[np.ndarray, ...]]
-        A generator function yielding one‑sample batches suitable for the
-        ``representative_dataset`` argument of ``tf.lite.TFLiteConverter``.
+    during QAT training (float32 in [0, 1]).
     """
     def representative_dataset():
-        # -----------------------------------------------------------------
-        #  1️⃣  Select a slice of the raw data
-        # -----------------------------------------------------------------
-        raw_slice = x_train_raw[:num_samples]
+        # Use the SAME preprocessing that was used during QAT training
+        # (the function now returns **float32** in the correct range)
+        processed = preprocess_for_training(x_train_raw[:num_samples])
 
-        # -----------------------------------------------------------------
-        #  2️⃣  Apply the SAME preprocessing that was used during QAT training
-        #      (the original code used ``for_training=False`` – keep that)
-        # -----------------------------------------------------------------
-        processed = preprocess_images(raw_slice, for_training=False)
-
-        # -----------------------------------------------------------------
-        #  3️⃣  Ensure the data is ``float32`` in the range [0, 1]
-        # -----------------------------------------------------------------
+        # Defensive checks – the converter expects float32
         if processed.dtype != np.float32:
             processed = processed.astype(np.float32)
         if processed.max() > 1.0:
             processed = processed / 255.0
 
-        # -----------------------------------------------------------------
-        #  4️⃣  Yield one‑sample batches (required by the TFLite API)
-        # -----------------------------------------------------------------
+        # Yield one sample batches as required by the TFLite API
         for i in range(len(processed)):
-            # Each yielded element must be a list/tuple containing a single batch
-            yield [processed[i : i + 1]]
+            yield [processed[i:i + 1]]
 
     return representative_dataset
 
+# QAT-specific helper functions
+def check_qat_compatibility(qat_available):
+    """
+    Check if current settings are compatible with QAT
+    Returns: (is_compatible, warnings, errors, info)
+    Enhanced with data type consistency checks
+    """
+    warnings = []
+    errors = []
+    info = []
+    
+    # Critical errors that prevent QAT from working
+    if params.USE_QAT and not qat_available:
+        errors.append("QAT requires tensorflow-model-optimization package. Install with: pip install tensorflow-model-optimization")
+    
+    # Check data type consistency for QAT
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        from utils.preprocess import get_qat_training_format
+        train_dtype, _, _, _ = get_qat_training_format()
+        if params.QUANTIZE_MODEL:
+            infer_dtype = np.uint8
+        else:
+            infer_dtype = np.float32
+            
+        if train_dtype != infer_dtype:
+            warnings.append(f"QAT data type mismatch: training={train_dtype}, inference={infer_dtype}")
+            warnings.append("This may cause quantization errors during deployment")
+    
+    # Warnings (things that might affect performance but won't break QAT)
+    if params.USE_QAT and not params.QUANTIZE_MODEL:
+        warnings.append("QAT is enabled but QUANTIZE_MODEL is False - quantization won't be applied to final model")
+    
+    if params.USE_QAT and params.USE_DATA_AUGMENTATION:
+        warnings.append("Data augmentation with QAT: Ensure augmentations don't significantly change data distribution")
+    
+    # Info messages for best practices
+    if params.USE_QAT and qat_available:
+        info.append("✅ QAT compatible - model will be trained with quantization awareness")
+        if params.QUANTIZE_MODEL:
+            info.append("✅ Post-training quantization will be applied after QAT")
+            # Check data type consistency
+            train_dtype, _, _, train_desc = get_qat_training_format()
+            info.append(f"✅ Training format: {train_desc}")
+        else:
+            info.append("⚠️  Post-training quantization disabled - QAT benefits may not be realized")
+    
+    return len(errors) == 0, warnings, errors, info
+    
+def debug_preprocessing_flow():
+    """Debug function to trace preprocessing flow and detect double processing"""
+    print("\n🔍 DEBUG: Tracing Preprocessing Flow")
+    print("=" * 50)
+    
+    # Create test data
+    test_images_raw = np.random.randint(0, 255, (2, 28, 28, 1), dtype=np.uint8)
+    print(f"Raw data range: [{test_images_raw.min()}, {test_images_raw.max()}]")
+    print(f"Raw data dtype: {test_images_raw.dtype}")
+    
+    print(f"\n📊 Current Configuration:")
+    print(f"   QUANTIZE_MODEL: {params.QUANTIZE_MODEL}")
+    print(f"   USE_QAT: {params.USE_QAT}")
+    print(f"   ESP_DL_QUANTIZE: {params.ESP_DL_QUANTIZE}")
+    
+    # Test BOTH training and inference modes
+    print(f"\n🧪 Testing Training Mode (for_training=True):")
+    train_processed = preprocess_images(test_images_raw, for_training=True)
+    print(f"   Result: {train_processed.dtype} [{train_processed.min():.3f}, {train_processed.max():.3f}]")
+    
+    print(f"\n🧪 Testing Inference Mode (for_training=False):")
+    infer_processed = preprocess_images(test_images_raw, for_training=False)
+    print(f"   Result: {infer_processed.dtype} [{infer_processed.min():.3f}, {infer_processed.max():.3f}]")
+    
+    # Determine expected behavior
+    print(f"\n✅ Expected Behavior:")
+    if params.QUANTIZE_MODEL:
+        if params.USE_QAT:
+            # QAT: Both training and inference should use UINT8
+            expected_train = "UINT8 [0, 255]"
+            expected_infer = "UINT8 [0, 255]"
+            print("   QAT Mode: Training and inference both use UINT8 [0, 255]")
+        else:
+            # Standard quantization: Training uses float32, inference uses UINT8
+            expected_train = "Float32 [0, 1]"
+            expected_infer = "UINT8 [0, 255]"
+            print("   Standard Quant: Training=Float32 [0,1], Inference=UINT8 [0,255]")
+    else:
+        # No quantization: Both use float32
+        expected_train = "Float32 [0, 1]"
+        expected_infer = "Float32 [0, 1]"
+        print("   No Quantization: Training and inference both use Float32 [0, 1]")
+    
+    # Check consistency
+    print(f"\n🔍 Consistency Check:")
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        # QAT requires training and inference to be identical
+        if train_processed.dtype == infer_processed.dtype:
+            print("✅ QAT Consistency: Perfect - training matches inference")
+        else:
+            print("❌ QAT Consistency: FAILED - training ≠ inference")
+    else:
+        print("ℹ️  Non-QAT mode: Training/inference differences are expected")
+    
+    # Check for double preprocessing
+    if train_processed.max() < 0.1 and train_processed.dtype == np.float32:
+        print("🚨 WARNING: Possible double preprocessing in training!")
+    
+    if infer_processed.max() < 0.1 and infer_processed.dtype == np.float32:
+        print("🚨 WARNING: Possible double preprocessing in inference!")
+    
+    return infer_processed  # Return inference result as it's typically what matters for deployment
 
+def diagnose_quantization_settings():
+    """Diagnose current quantization settings and suggest fixes"""
+    print("\n🔍 QUANTIZATION SETTINGS DIAGNOSIS")
+    print("=" * 50)
+    
+    issues = []
+    suggestions = []
+    
+    # Check individual parameters
+    print(f"QUANTIZE_MODEL: {params.QUANTIZE_MODEL}")
+    print(f"USE_QAT: {params.USE_QAT}")
+    print(f"ESP_DL_QUANTIZE: {params.ESP_DL_QUANTIZE}")
+    
+    # Check combinations
+    if params.ESP_DL_QUANTIZE and not params.QUANTIZE_MODEL:
+        issues.append("ESP_DL_QUANTIZE requires QUANTIZE_MODEL")
+        suggestions.append("Set QUANTIZE_MODEL = True")
+    
+    if params.USE_QAT and not params.QUANTIZE_MODEL:
+        issues.append("USE_QAT requires QUANTIZE_MODEL")
+        suggestions.append("Set QUANTIZE_MODEL = True")
+    
+    # Enhanced configuration analysis with data type info
+    if params.USE_QAT and params.ESP_DL_QUANTIZE:
+        print("✅ QAT + ESP-DL: Training for INT8 quantization with UINT8 [0,255]")
+    
+    elif params.USE_QAT and not params.ESP_DL_QUANTIZE:
+        print("✅ QAT only: Training for UINT8 quantization with UINT8 [0,255]")
+    
+    elif not params.USE_QAT and params.ESP_DL_QUANTIZE:
+        print("✅ ESP-DL only: Standard training + INT8 post-quantization")
+        print("   Training: Float32 [0,1], Inference: UINT8 [0,255]")
+    
+    elif not params.USE_QAT and params.QUANTIZE_MODEL and not params.ESP_DL_QUANTIZE:
+        print("✅ Standard quantization: Training + UINT8 post-quantization")
+        print("   Training: Float32 [0,1], Inference: UINT8 [0,255]")
+    
+    else:
+        print("✅ Float32: No quantization")
+        print("   Training: Float32 [0,1], Inference: Float32 [0,1]")
+    
+    # Print issues and suggestions
+    if issues:
+        print("\n❌ ISSUES FOUND:")
+        for issue in issues:
+            print(f"   - {issue}")
+        print("\n💡 SUGGESTIONS:")
+        for suggestion in suggestions:
+            print(f"   - {suggestion}")
+    else:
+        print("\n✅ No parameter conflicts detected")
+    
+    return len(issues) == 0    
+
+
+def validate_quantization_combination():
+    """Validate quantization parameters with CORRECTED data type handling"""
+    valid = True
+    message = ""
+    
+    if not params.QUANTIZE_MODEL:
+        if params.ESP_DL_QUANTIZE:
+            valid = False
+            message = "❌ INVALID: ESP_DL_QUANTIZE=True requires QUANTIZE_MODEL=True"
+        elif params.USE_QAT:
+            message = "⚠️  QAT training but no quantization applied (QUANTIZE_MODEL=False)"
+        else:
+            message = "✅ Float32 training & inference [0, 1]"
+    else:
+        if params.USE_QAT:
+            if params.ESP_DL_QUANTIZE:
+                message = "✅ QAT + INT8 quantization for ESP-DL [0, 255]"
+            else:
+                message = "✅ QAT + UINT8 quantization [0, 255]"
+        else:
+            if params.ESP_DL_QUANTIZE:
+                message = "✅ Standard training + INT8 post-quantization (ESP-DL) [0, 255]"
+            else:
+                message = "✅ Standard training + UINT8 post-quantization [0, 255]"
+    
+    return valid, message
+    
+    
 # --------------------------------------------------------------------------- #
-#  QAT data‑flow validation (optional sanity check)
+#  QAT dataflow validation (optional sanity check)
 # --------------------------------------------------------------------------- #
 def validate_qat_data_flow(
     model: tf.keras.Model,
@@ -129,13 +296,13 @@ def validate_qat_data_flow(
     debug: bool = False,
 ) -> Tuple[bool, str]:
     """
-    Perform a quick forward‑pass on a tiny batch to ensure a QAT‑wrapped model
+    Perform a quick forward pass on a tiny batch to ensure a QAT wrapped model
     accepts the data without raising errors.
 
     Parameters
     ----------
     model : tf.keras.Model
-        The model to test (should be QAT‑enabled).
+        The model to test (should be QAT enabled).
     x_train_sample : np.ndarray
         A small slice of the training data (raw, before preprocessing).
     debug : bool, optional
@@ -187,7 +354,7 @@ def validate_qat_data_flow(
 # --------------------------------------------------------------------------- #
 def _is_qat_model(model: tf.keras.Model) -> bool:
     """
-    Heuristic detection of a QAT‑wrapped model.
+    Heuristic detection of a QAT wrapped model.
     
     Parameters
     ----------

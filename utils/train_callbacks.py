@@ -49,9 +49,12 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
             monitor='val_accuracy',
             save_best_only=True,
             mode='max',
-            verbose=1 if debug else 0
+            verbose=1 if debug else 0,
+            save_weights_only=False,
+            save_freq='epoch'   # replaces deprecated ``period`` argument
         )
     )
+
     
     # Learning rate scheduler
     callbacks.append(

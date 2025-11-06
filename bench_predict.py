@@ -4,7 +4,7 @@ import numpy as np
 import cv2
 import os
 import argparse
-from utils.preprocess import predict_single_image
+from utils.preprocess import preprocess_for_inference
 import parameters as params
 from tabulate import tabulate
 import glob
@@ -40,7 +40,7 @@ class TFLiteDigitPredictor:
     def predict(self, image, debug=False):
         """Predict digit from image using TFLite"""
         # Preprocess image - use silent mode to avoid debug outputs
-        processed_image = predict_single_image(image)
+        processed_image = preprocess_for_inference(image)
         
         # Handle channel mismatch - if model expects 3 channels but we have 1
         expected_channels = self.input_details[0]['shape'][3]
@@ -54,14 +54,23 @@ class TFLiteDigitPredictor:
             input_data = processed_image
         
         # Handle quantization if needed
+        # if self.input_details[0]['dtype'] == np.uint8:
+            # input_data = input_data.astype(np.uint8)
+        # elif self.input_details[0]['dtype'] == np.int8:
+            # input_scale, input_zero_point = self.input_details[0]['quantization']
+            # if input_data.dtype == np.float32:
+                # input_data = (input_data / input_scale + input_zero_point).astype(np.int8)
+            # else:
+                # input_data = input_data.astype(np.int8)
+        # else:
+            # input_data = input_data.astype(np.float32)
+            
+        # The image is already in the exact dtype the model expects,
+        # so we only need to cast to the NumPy type that the interpreter  understands.
         if self.input_details[0]['dtype'] == np.uint8:
             input_data = input_data.astype(np.uint8)
         elif self.input_details[0]['dtype'] == np.int8:
-            input_scale, input_zero_point = self.input_details[0]['quantization']
-            if input_data.dtype == np.float32:
-                input_data = (input_data / input_scale + input_zero_point).astype(np.int8)
-            else:
-                input_data = input_data.astype(np.int8)
+            input_data = input_data.astype(np.int8)
         else:
             input_data = input_data.astype(np.float32)
         

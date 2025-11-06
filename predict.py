@@ -4,7 +4,7 @@ import numpy as np
 import cv2
 import os
 import argparse
-from utils.preprocess import predict_single_image
+from utils.preprocess import preprocess_for_inference
 from pathlib import Path
 import parameters as params
 
@@ -42,16 +42,33 @@ class TFLiteDigitPredictor:
         expected_dtype = self.input_details[0]['dtype']
         print(f"Model expects - shape: {expected_shape}, dtype: {expected_dtype}")
         
-        # Verify preprocessing matches training
-        if processed_image.max() > 1.0:
-            print("⚠️  WARNING: Image not normalized to [0,1] range!")
-        if processed_image.dtype != np.float32:
-            print("⚠️  WARNING: Image not in float32 format!")
+        # # Verify preprocessing matches training
+        # if processed_image.max() > 1.0:
+            # print("⚠️  WARNING: Image not normalized to [0,1] range!")
+        # if processed_image.dtype != np.float32:
+            # print("⚠️  WARNING: Image not in float32 format!")
+            
+        # -----------------------------------------------------------------
+        #  Sanity check – the image must already be in the dtype the model
+        #  expects (uint8 for quantised models, float32 otherwise).
+        # -----------------------------------------------------------------
+        if params.QUANTIZE_MODEL:
+            if processed_image.dtype != np.uint8:
+                raise ValueError(
+                    "Pre processed image dtype mismatch: "
+                    f"expected uint8, got {processed_image.dtype}"
+                )
+        else:
+            if processed_image.dtype != np.float32:
+                raise ValueError(
+                    "Pre processed image dtype mismatch: "
+                    f"expected float32, got {processed_image.dtype}"
+                )
 
     def predict(self, image, debug=False):
         """Predict digit from image using TFLite"""
         # Preprocess image
-        processed_image = predict_single_image(image)
+        processed_image = preprocess_for_inference(image)
         
         if debug:
             self.debug_preprocessing(image, processed_image)

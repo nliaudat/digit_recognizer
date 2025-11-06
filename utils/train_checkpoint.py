@@ -38,7 +38,7 @@ class TFLiteCheckpoint(tf.keras.callbacks.Callback):
         val_acc = logs.get("val_accuracy", 0.0)
 
         # -------------------------------------------------------------
-        #  Save the best‑ever TFLite model
+        #  Save the best ever TFLite model
         # -------------------------------------------------------------
         if val_acc > getattr(self.tflite_manager, "best_accuracy", 0.0):
             try:
