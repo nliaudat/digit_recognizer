@@ -1,6 +1,6 @@
 # utils/train_progressbar.py
 """
-A lightweight tqdm‑based progress bar for Keras training.
+A lightweight tqdm based progress bar for Keras training.
 Shows epoch number, loss/accuracy, validation loss/accuracy and an ETA.
 """
 

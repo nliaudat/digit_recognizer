@@ -230,10 +230,16 @@ class FineTuneManager:
         (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
         
         # Apply preprocessing
-        x_train = preprocess_images(x_train)
-        x_val = preprocess_images(x_val)
-        x_test = preprocess_images(x_test)
+        # x_train = preprocess_images(x_train)
+        # x_val = preprocess_images(x_val)
+        # x_test = preprocess_images(x_test)
         
+        # Fine-tuning never needs QAT -tyle uint8 data; we always train on
+        # float32 [0,1] regardless of the global quantisation flags.
+        x_train = preprocess_for_training(x_train)
+        x_val   = preprocess_for_training(x_val)
+        x_test  = preprocess_for_training(x_test)       
+            
         # DEBUG: Check label shapes and types
         print(f"🔍 Label shapes - y_train: {y_train.shape}, y_val: {y_val.shape}, y_test: {y_test.shape}")
         

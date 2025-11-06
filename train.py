@@ -10,18 +10,18 @@ Features
 * Automatic validation / correction of the three quantisation flags.
 * Unified loss selection (categorical vs sparse).
 * Proper PTQ representative data (float32 [0, 1]).
-* QAT‑aware representative data that uses the *training* preprocessing.
+* QAT aware representative data that uses the *training* preprocessing.
 * QAT models skip the representative dataset (they already embed scales).
 * Explicit model.build() before any training / conversion.
-* Detailed callbacks (early‑stop, LR‑scheduler, CSV logger, TFLite checkpoint,
+* Detailed callbacks (early stop, LR scheduler, CSV logger, TFLite checkpoint,
   tqdm progress bar, optional augmentation safety monitor).
-* Comprehensive final reporting (TXT + CSV + model‑summary file).
-* Optional hyper‑parameter tuning (via `tuner.py`).
+* Comprehensive final reporting (TXT + CSV + model summary file).
+* Optional hyper parameter tuning (via `tuner.py`).
 * Integrated training analysis and automatic cleanup.
 """
 
 # --------------------------------------------------------------------------- #
-#  Standard‑library imports
+#  Standard library imports
 # --------------------------------------------------------------------------- #
 import argparse
 import os
@@ -36,7 +36,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 # --------------------------------------------------------------------------- #
-#  Third‑party imports
+#  Third party imports
 # --------------------------------------------------------------------------- #
 import numpy as np
 import tensorflow as tf
@@ -47,14 +47,12 @@ from tqdm.auto import tqdm
 #  Project imports (core utilities)
 # --------------------------------------------------------------------------- #
 from models import create_model, compile_model, model_summary
-from utils import get_data_splits, preprocess_images, get_calibration_data, suppress_all_output
+from utils import get_data_splits,  preprocess_for_training, preprocess_for_inference, get_calibration_data, suppress_all_output
 from utils.preprocess import (
-    validate_quantization_combination,
+    # validate_quantization_combination,
     validate_preprocessing_consistency,
-    check_qat_compatibility,
-    debug_preprocessing_flow,
-    diagnose_quantization_settings,
     get_qat_training_format,
+    get_preprocessing_info,
 )
 from utils.data_pipeline import create_tf_dataset_from_arrays
 from utils.logging import log_print
@@ -102,7 +100,11 @@ from utils.train_qat_helper     import (
     create_qat_model,
     create_qat_representative_dataset,
     validate_qat_data_flow,
-    _is_qat_model
+    _is_qat_model,
+    check_qat_compatibility,
+    debug_preprocessing_flow,
+    diagnose_quantization_settings,
+    validate_quantization_combination,
 )
 from utils.train_callbacks import create_callbacks
 from utils.train_helpers import (
@@ -133,6 +135,8 @@ from utils.train_analyse import (
     model_size_analysis
 )
 
+
+from utils.quantization_analysis import QuantizationAnalyzer
 
 # --------------------------------------------------------------------------- #
 #  Suppress TF logs unless --debug is requested
@@ -205,7 +209,7 @@ def parse_arguments():
     parser.add_argument(
         "--test_all_models",
         action="store_true",
-        help="Run a quick sanity‑check on every architecture",
+        help="Run a quick sanity check on every architecture",
     )
     parser.add_argument(
         "--train",
@@ -216,7 +220,7 @@ def parse_arguments():
     parser.add_argument(
         "--use_tuner",
         action="store_true",
-        help="Run hyper‑parameter tuning before training",
+        help="Run hyper parameter tuning before training",
     )
     parser.add_argument(
         "--train_all",
@@ -287,7 +291,7 @@ def setup_gpu():
             print(f"   🚀 Using {len(gpus)} GPUs with MirroredStrategy")
             return tf.distribute.MirroredStrategy()
         else:
-            print("   ✅ Single‑GPU configuration OK")
+            print("   ✅ Single GPU configuration OK")
             return None
     except Exception as exc:  # pragma: no cover
         print(f"⚠️  GPU configuration failed: {exc}")
@@ -342,7 +346,7 @@ def run_comprehensive_analysis(model, history, training_dir, x_test, y_test, deb
 
 
 # --------------------------------------------------------------------------- #
-#  Helper: quick sanity‑check of every architecture (used by --test_all_models)
+#  Helper: quick sanity check of every architecture (used by --test_all_models)
 # --------------------------------------------------------------------------- #
 def test_all_models(debug: bool = False):
     """Instantiate each architecture, train a few epochs and report accuracy."""
@@ -430,7 +434,7 @@ def train_specific_models(models_to_train, debug: bool = False, no_cleanup: bool
     params.MODEL_ARCHITECTURE = original
 
     # -----------------------------------------------------------------
-    #  Summary of the specific‑model run
+    #  Summary of the specific model run
     # -----------------------------------------------------------------
     print("\n" + "=" * 60)
     print("🏁 TRAINING SUMMARY")
@@ -449,12 +453,12 @@ def main():
     args = parse_arguments()
 
     # -----------------------------------------------------------------
-    #  Hyper‑parameter tuning mode
+    #  Hyper parameter tuning mode
     # -----------------------------------------------------------------
     if args.use_tuner:
         from tuner import run_architecture_tuning
 
-        print("🚀 Running hyper‑parameter tuning …")
+        print("🚀 Running hyper parameter tuning …")
         # Load a *small* subset for faster tuning
         (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), _ = get_data_splits()
         x_train = preprocess_images(x_train_raw, for_training=True)
@@ -476,9 +480,9 @@ def main():
             debug=args.debug,
         )
         if tuning_res:
-            # Apply the best hyper‑parameters for the subsequent training run
+            # Apply the best hyper parameters for the subsequent training run
             best = tuning_res
-            print("\n🎯 Best hyper‑parameters discovered:")
+            print("\n🎯 Best hyper parameters discovered:")
             print(f"   Optimizer   : {best['optimizer']}")
             print(f"   Learning LR : {best['learning_rate']}")
             print(f"   Batch size  : {best['batch_size']}")
@@ -494,7 +498,7 @@ def main():
         return
 
     # -----------------------------------------------------------------
-    #  Test all architectures (quick sanity‑check)
+    #  Test all architectures (quick sanity check)
     # -----------------------------------------------------------------
     if args.test_all_models:
         test_all_models(debug=args.debug)
@@ -581,9 +585,12 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
     
     print("🔄 Preprocessing images...")
-    x_train = preprocess_images(x_train_raw, for_training=True)
-    x_val = preprocess_images(x_val_raw, for_training=True)  
-    x_test = preprocess_images(x_test_raw, for_training=True)
+    # x_train = preprocess_images(x_train_raw, for_training=True)
+    # x_val = preprocess_images(x_val_raw, for_training=True)  
+    # x_test = preprocess_images(x_test_raw, for_training=True)
+    x_train = preprocess_for_training(x_train_raw)
+    x_val   = preprocess_for_training(x_val_raw)
+    x_test  = preprocess_for_training(x_test_raw)
     
     # Handle labels based on model type
     if params.MODEL_ARCHITECTURE == "original_haverland":
@@ -596,31 +603,47 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         y_test_final = y_test_raw.copy()
     
     # Create model with QAT if enabled
+    # use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
+    
+    # print(f"\n🔧 Creating model...")
+    # print(f"   Using QAT: {use_qat}")
+    
+    # if use_qat:
+        # print("🎯 Creating model with Quantization Aware Training...")
+        # if strategy:
+            # with strategy.scope():
+                # model = create_qat_model()
+                # model = compile_model(model)
+        # else:
+            # model = create_qat_model()
+            # model = compile_model(model)
+    # else:
+        # print("🔧 Creating standard model...")
+        # if strategy:
+            # with strategy.scope():
+                # model = create_model()
+                # model = compile_model(model)
+        # else:
+            # model = create_model()
+            # model = compile_model(model)
+            
     use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
-    
-    print(f"\n🔧 Creating model...")
-    print(f"   Using QAT: {use_qat}")
-    
+
     if use_qat:
-        print("🎯 Creating model with Quantization Aware Training...")
-        if strategy:
-            with strategy.scope():
-                model = create_qat_model()
-                model = compile_model(model)
-        else:
-            model = create_qat_model()
-            model = compile_model(model)
+        print("Creating model with Quantization Aware Training...")
+        model = create_qat_model()
     else:
-        print("🔧 Creating standard model...")
-        if strategy:
-            with strategy.scope():
-                model = create_model()
-                model = compile_model(model)
-        else:
-            model = create_model()
-            model = compile_model(model)
+        model = create_model()
+
+    # Compile – loss depends on the architecture
+    if params.MODEL_ARCHITECTURE == "original_haverland":
+        loss = "categorical_crossentropy"
+    else:
+        loss = "sparse_categorical_crossentropy"
+
+    model = compile_model(model) 
     
-    # Build model with explicit input shape
+    # Build model with explicit input shape (required for TF2.x eager mode)
     print("🔧 Building model with explicit input shape...")
     model.build(input_shape=(None,) + params.INPUT_SHAPE)
     
@@ -640,9 +663,21 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     print_training_summary(model, x_train, x_val, x_test, debug)
     save_model_summary_to_file(model, training_dir)
     
-    # Create representative dataset
+    # # Create representative dataset
+    # if params.USE_QAT and params.QUANTIZE_MODEL:
+        # # QAT models already carry quantisation information – no calibration needed.
+        # representative_data = None
+    # else:
+        # representative_data = create_qat_representative_dataset(x_train_raw)
+        
+    # -----------------------------------------------------------------
+    #  Representative dataset for PTQ
+    # -----------------------------------------------------------------
+    # If we are doing QAT we **do not** need a calibration set – the model
+    # already contains fake quant nodes.  For pure PTQ we must supply
+    # float32 data; the helper below now uses the *training* preprocessing
+    # (float32) to avoid the previous uint8 → float conversion.
     if params.USE_QAT and params.QUANTIZE_MODEL:
-        # QAT models already carry quantisation information – no calibration needed.
         representative_data = None
     else:
         representative_data = create_qat_representative_dataset(x_train_raw)
@@ -722,6 +757,11 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             if analysis_result is not None:
                 quantization_results.update(analysis_result)
                 tflite_accuracy = quantization_results.get('tflite_accuracy', 0.0)
+                
+                # Generate detailed report
+                analyzer = QuantizationAnalyzer(debug=debug)
+                analyzer.analysis_results = quantization_results
+                analyzer.generate_quantization_report(training_dir)
             else:
                 print("⚠️  Quantization analysis returned no results, using fallback values")
                 # Fallback: basic size measurements with better error handling

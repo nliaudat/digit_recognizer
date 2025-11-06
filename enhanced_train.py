@@ -250,10 +250,12 @@ def run_enhanced_esp_training(debug=False):
     (x_train, y_train), (x_val, y_val), (x_test, y_test) = get_data_splits()
     
     # Apply ESP-optimized preprocessing
-    data_processor = ESPDataProcessor()
+    
+    # ESP optimised preprocessing keeps the data in the correct dtype
+    # (float32 for PTQ, int8/uint8 only after conversion).
     x_train, y_train = data_processor.esp_optimized_preprocessing(x_train, y_train, is_training=True)
-    x_val, y_val = data_processor.esp_optimized_preprocessing(x_val, y_val, is_training=False)
-    x_test, y_test = data_processor.esp_optimized_preprocessing(x_test, y_test, is_training=False)
+    x_val,   y_val   = data_processor.esp_optimized_preprocessing(x_val,   y_val,   is_training=False)
+    x_test,  y_test  = data_processor.esp_optimized_preprocessing(x_test,  y_test,  is_training=False)
     
     # Handle label format based on model requirements
     if params.MODEL_ARCHITECTURE == "original_haverland":

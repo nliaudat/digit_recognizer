@@ -67,7 +67,7 @@ class QuantizationAnalyzer:
         try:
             loss, accuracy = model.evaluate(x_test, y_test, verbose=0)
             if self.debug:
-                print(f"✅ Keras model accuracy: {accuracy:.4f}")
+                print(f"Keras model accuracy: {accuracy:.4f}")
             return accuracy
         except Exception as e:
             print(f"X Keras model evaluation failed: {e}")
@@ -109,7 +109,7 @@ class QuantizationAnalyzer:
             accuracy = correct_predictions / total_samples
             
             if self.debug:
-                print(f"✅ TFLite model accuracy: {accuracy:.4f}")
+                print(f"TFLite model accuracy: {accuracy:.4f}")
             
             return accuracy
             
@@ -242,9 +242,9 @@ class QuantizationAnalyzer:
         size_reduction = results.get('size_reduction_percent', 0)
         
         if accuracy_drop < 0.02 and size_reduction > 50:
-            print(f"\n✅ QUANTIZATION: EXCELLENT SUCCESS!")
+            print(f"\n QUANTIZATION: EXCELLENT SUCCESS!")
         elif accuracy_drop < 0.05 and size_reduction > 30:
-            print(f"\n✅ QUANTIZATION: GOOD SUCCESS!")
+            print(f"\n QUANTIZATION: GOOD SUCCESS!")
         elif accuracy_drop < 0.1:
             print(f"\n!  QUANTIZATION: ACCEPTABLE")
         else:
@@ -295,9 +295,9 @@ class QuantizationAnalyzer:
             elif accuracy_drop > 0.05:
                 f.write("  !  Quantization acceptable but consider QAT for better results\n")
             else:
-                f.write("  ✅ Quantization successful - good balance of size and accuracy\n")
+                f.write("   Quantization successful - good balance of size and accuracy\n")
         
-        print(f"✅ Quantization analysis report saved: {report_path}")
+        print(f" Quantization analysis report saved: {report_path}")
 
 # Convenience function for easy usage
 def analyze_quantization_impact(keras_model, tflite_model_path: str, 

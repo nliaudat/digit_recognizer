@@ -29,7 +29,7 @@ class TrainingMonitor:
         self.train_acc.append(logs.get("accuracy", 0.0))
         self.val_acc.append(logs.get("val_accuracy", 0.0))
 
-        # Learning‑rate extraction with robust error handling
+        # Learning rate extraction with robust error handling
         lr = 0.0
         try:
             if self.model and hasattr(self.model, 'optimizer') and self.model.optimizer:
@@ -63,7 +63,7 @@ class TrainingMonitor:
         self.model = model
 
     # -----------------------------------------------------------------
-    #  Save a three‑panel plot (loss, accuracy, LR)
+    #  Save a three panel plot (loss, accuracy, LR)
     # -----------------------------------------------------------------
     def save_training_plots(self):
         if not params.SAVE_TRAINING_PLOTS:

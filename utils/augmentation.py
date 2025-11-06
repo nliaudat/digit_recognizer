@@ -4,6 +4,39 @@ import numpy as np
 import parameters as params
 from utils.data_pipeline import create_tf_dataset_from_arrays
 
+# # -------------------------------------------------------------
+# #  NEW helper that augments a *batched* tensor image by image
+# # -------------------------------------------------------------
+# def _apply_augmentation_to_batch(batch_images, batch_labels, pipeline):
+    # """
+    # `batch_images`  : Tensor of shape (B, H, W, C)
+    # `batch_labels`  : Tensor of shape (B, …)
+
+    # Returns a new batch where every image has been passed through
+    # `pipeline` (which expects a single image, i.e. rank 3).
+    # """
+    # # tf.map_fn runs the lambda on each element of the first dimension (the batch)
+    # augmented_images = tf.map_fn(
+        # lambda img: pipeline(img, training=True),   # keep training=True for randomness
+        # batch_images,
+        # fn_output_signature=batch_images.dtype
+    # )
+    # return augmented_images, batch_labels
+    
+# -------------------------------------------------------------
+#  NEW: simple per image augmentation wrapper
+# -------------------------------------------------------------
+def _augment_one_image(image, label, pipeline):
+    """
+    Apply the augmentation pipeline to a *single* image.
+    The pipeline expects a rank 3 tensor (H, W, C) and returns the
+    same rank 3 tensor.  The label is passed through unchanged.
+    """
+    # `pipeline` is a `tf.keras.Sequential` that expects a single image.
+    # We keep `training=True` so that random transforms are active.
+    aug_img = pipeline(image, training=True)
+    return aug_img, label
+
 def create_augmentation_pipeline():
     """
     Create a comprehensive data augmentation pipeline with data type preservation and value clamping
@@ -366,62 +399,56 @@ def create_augmentation_safety_monitor(validation_data, debug=False):
         patience_epochs=5
     )
 
-def setup_augmentation_for_training(x_train, y_train_final, x_val, y_val_final, debug=False):
+def setup_augmentation_for_training(x_train, y_train_final,
+                                    x_val, y_val_final, debug=False):
     """
-    Setup data augmentation for training with proper dataset creation
-    
-    Returns:
-        train_dataset: Training dataset with augmentation
-        val_dataset: Validation dataset without augmentation
-        augmentation_pipeline: The augmentation pipeline for testing
+    Build a tf.data pipeline that **applies augmentation before batching**.
+    This avoids the rank mismatch error that occurs when treating a
+    single image as a batch.
     """
     print("🔄 Setting up data augmentation pipeline...")
-    
-    # Create augmentation pipeline
+
+    # 1️⃣  Create the augmentation pipeline (unchanged)
     augmentation_pipeline, num_layers = create_augmentation_pipeline()
-    
     print(f"✅ Augmentation pipeline created with {num_layers} layers")
     print_augmentation_summary()
-    
-    # Test the augmentation pipeline
-    if debug:
-        sample_data = tf.convert_to_tensor(x_train[:1], dtype=tf.float32)
-        test_augmentation_pipeline(augmentation_pipeline, sample_data, debug=True)
-    
-    # Create datasets
+
+    # 2️⃣  Build the base (unbatched) datasets
     if params.USE_TF_DATA_PIPELINE:
         print("🔧 Using tf.data pipeline with augmentation...")
-        from utils.data_pipeline import create_tf_dataset_from_arrays
-        
-        train_dataset = create_tf_dataset_from_arrays(x_train, y_train_final, training=True)
-        
-        # Apply augmentation to training dataset only
-        train_dataset = train_dataset.map(
-            lambda x, y: (augmentation_pipeline(x, training=True), y),
-            num_parallel_calls=tf.data.AUTOTUNE
-        )
-        
-        # Validation dataset WITHOUT augmentation
-        val_dataset = create_tf_dataset_from_arrays(x_val, y_val_final, training=False)
-        
+        train_dataset = create_tf_dataset_from_arrays(
+            x_train, y_train_final, training=True)
+        val_dataset   = create_tf_dataset_from_arrays(
+            x_val,   y_val_final,   training=False)
     else:
         print("🔧 Using standard arrays with augmentation...")
-        train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train_final))
-        train_dataset = train_dataset.map(
-            lambda x, y: (augmentation_pipeline(x, training=True), y),
-            num_parallel_calls=tf.data.AUTOTUNE
-        )
-        train_dataset = train_dataset.shuffle(1000).batch(params.BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
-        
-        # Validation dataset WITHOUT augmentation
-        val_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val_final))
-        val_dataset = val_dataset.batch(params.BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
-    
-    # Test data pipeline
+        train_dataset = tf.data.Dataset.from_tensor_slices(
+            (x_train, y_train_final))
+        val_dataset   = tf.data.Dataset.from_tensor_slices(
+            (x_val,   y_val_final))
+
+    # 3️⃣  **Apply augmentation per image** (before batching)
+    #    The lambda receives a single image + its label.
+    train_dataset = train_dataset.map(
+        lambda img, lbl: _augment_one_image(img, lbl, augmentation_pipeline),
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+
+    # 4️⃣  Now batch / shuffle / prefetch
+    train_dataset = train_dataset.shuffle(1000) \
+                                 .batch(params.BATCH_SIZE) \
+                                 .prefetch(tf.data.AUTOTUNE)
+
+    # Validation data – **no augmentation**
+    val_dataset = val_dataset.batch(params.BATCH_SIZE) \
+                             .prefetch(tf.data.AUTOTUNE)
+
+    # 5️⃣  Quick sanity check
     print("🧪 Testing data pipeline...")
     sample_batch = next(iter(train_dataset))
     sample_x, sample_y = sample_batch
-    print(f"   Sample batch - X range: [{sample_x.numpy().min():.3f}, {sample_x.numpy().max():.3f}]")
-    print(f"   Sample batch - Y shape: {sample_y.numpy().shape}")
-    
+    print(f"   Sample batch – X range: [{sample_x.numpy().min():.3f}, "
+          f"{sample_x.numpy().max():.3f}]")
+    print(f"   Sample batch – Y shape: {sample_y.numpy().shape}")
+
     return train_dataset, val_dataset, augmentation_pipeline

@@ -12,10 +12,18 @@ delegate to the implementations that already exist in the codebase.
 """
 
 # --------------------------------------------------------------------------- #
-#  Core data‑loading utilities (already part of the original package)
+#  Core data loading utilities (already part of the original package)
 # --------------------------------------------------------------------------- #
 from .multi_source_loader import get_data_splits, load_combined_dataset
 from .preprocess import preprocess_images, predict_single_image
+
+# --------------------------------------------------------------------------- #
+#  New explicit preprocessing helpers (training vs inference)
+# --------------------------------------------------------------------------- #
+from .preprocess import (
+    preprocess_for_training,
+    preprocess_for_inference,
+)
 
 # --------------------------------------------------------------------------- #
 #  Calibration helper (used by PTQ conversion)
@@ -42,7 +50,7 @@ def get_calibration_data(x_raw: np.ndarray) -> np.ndarray:
 
 
 # --------------------------------------------------------------------------- #
-#  Silent‑output context manager (used while converting to TFLite)
+#  Silent output context manager (used while converting to TFLite)
 # --------------------------------------------------------------------------- #
 import os
 import sys
