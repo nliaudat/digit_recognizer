@@ -796,7 +796,7 @@ class TFLiteModelManager:
             # Use enhanced conversion for better results
             q_blob, q_size = self.save_as_tflite_enhanced(
                 model,
-                params.TFLITE_FILENAME,
+                params.get_tflite_filename(),
                 quantize=True,
                 representative_data=representative_data,
             )
@@ -808,7 +808,7 @@ class TFLiteModelManager:
             # Float version
             self.save_as_tflite_enhanced(
                 model,
-                params.FLOAT_TFLITE_FILENAME,
+                params.get_float_tflite_filename(),
                 quantize=False,
             )
             return q_size

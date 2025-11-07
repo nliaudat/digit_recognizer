@@ -702,7 +702,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     # This will automatically test strategies and use the best one
     tflite_blob, size = tflite_manager.save_as_tflite_enhanced(
         model, 
-        "model.tflite", 
+        params.get_tflite_filename(),
         quantize=True
     )
     
@@ -796,7 +796,9 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     
     # TFLite model evaluation and quantization analysis
     tflite_accuracy = 0.0
-    quantized_tflite_path = os.path.join(training_dir, params.TFLITE_FILENAME)
+    # quantized_tflite_path = os.path.join(training_dir, params.TFLITE_FILENAME)
+    quantized_tflite_path = os.path.join(training_dir, params.get_tflite_filename())
+    
     quantization_results = {
         'tflite_accuracy': 0.0,
         'keras_accuracy': test_accuracy,
