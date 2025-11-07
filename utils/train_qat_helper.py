@@ -28,8 +28,7 @@ import tensorflow as tf
 #  Imports from the rest of the project
 # --------------------------------------------------------------------------- #
 import parameters as params
-from utils import preprocess_images
-from utils.preprocess import preprocess_for_training
+from utils.preprocess import preprocess_for_training, preprocess_for_inference
 
 
 # --------------------------------------------------------------------------- #
@@ -180,11 +179,11 @@ def debug_preprocessing_flow():
     
     # Test BOTH training and inference modes
     print(f"\n🧪 Testing Training Mode (for_training=True):")
-    train_processed = preprocess_images(test_images_raw, for_training=True)
+    train_processed = preprocess_for_training(test_images_raw)
     print(f"   Result: {train_processed.dtype} [{train_processed.min():.3f}, {train_processed.max():.3f}]")
     
     print(f"\n🧪 Testing Inference Mode (for_training=False):")
-    infer_processed = preprocess_images(test_images_raw, for_training=False)
+    infer_processed = preprocess_for_inference(test_images_raw)
     print(f"   Result: {infer_processed.dtype} [{infer_processed.min():.3f}, {infer_processed.max():.3f}]")
     
     # Determine expected behavior

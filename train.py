@@ -374,7 +374,7 @@ def test_all_models(debug: bool = False):
                 raise RuntimeError("Training returned None")
             # Load test data for a quick evaluation
             (_, _), (_, _), (x_test_raw, y_test_raw) = get_data_splits()
-            x_test = preprocess_images(x_test_raw, for_training=False)
+            x_test = preprocess_for_inference(x_test_raw)
             if arch == "original_haverland":
                 y_test = tf.keras.utils.to_categorical(
                     y_test_raw, params.NB_CLASSES
@@ -424,7 +424,7 @@ def train_specific_models(models_to_train, debug: bool = False, no_cleanup: bool
                 raise RuntimeError("Training returned None")
             # Quick test accuracy
             (_, _), (_, _), (x_test_raw, y_test_raw) = get_data_splits()
-            x_test = preprocess_images(x_test_raw, for_training=False)
+            x_test = preprocess_for_inference(x_test_raw)
             if arch == "original_haverland":
                 y_test = tf.keras.utils.to_categorical(
                     y_test_raw, params.NB_CLASSES
@@ -470,8 +470,8 @@ def main():
         print("🚀 Running hyper parameter tuning …")
         # Load a *small* subset for faster tuning
         (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), _ = get_data_splits()
-        x_train = preprocess_images(x_train_raw, for_training=True)
-        x_val   = preprocess_images(x_val_raw,   for_training=True)
+        x_train = preprocess_for_training(x_train_raw)
+        x_val   = preprocess_for_training(x_val_raw)
 
         if params.MODEL_ARCHITECTURE == "original_haverland":
             y_train = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
