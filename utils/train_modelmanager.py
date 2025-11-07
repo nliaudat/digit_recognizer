@@ -5,7 +5,7 @@ from datetime import datetime
 import tensorflow as tf
 import numpy as np
 
-from utils.train_qat_helper import _is_qat_model
+from utils.train_qat_helper import _is_qat_model, create_qat_representative_dataset
 
 # --------------------------------------------------------------------------- #
 #  Absolute imports (no leading dots) – these work when train.py is run directly
@@ -88,16 +88,20 @@ class TFLiteModelManager:
             pass
         else:
             # PTQ – we need a calibration set
-            if representative_data is None:
+            # if representative_data is None:
                 # Default calibration – use the **new** helper that returns float32 data
-                def default_calib():
-                    (x_train_raw, _), _, _ = get_data_splits()
-                    cal = create_qat_representative_dataset(
-                        x_train_raw[: params.QUANTIZE_NUM_SAMPLES]
-                    )
-                    for batch in cal():
-                        yield batch
-                converter.representative_dataset = default_calib
+                # def default_calib():
+                    # (x_train_raw, _), _, _ = get_data_splits()
+                    # cal = create_qat_representative_dataset(
+                        # x_train_raw[: params.QUANTIZE_NUM_SAMPLES]
+                    # )
+                    # for batch in cal():
+                        # yield batch
+                # converter.representative_dataset = default_calib
+            if representative_data is None:
+                representative_data = create_qat_representative_dataset(
+                    x_train_raw[: params.QUANTIZE_NUM_SAMPLES]
+                )
             else:
                 converter.representative_dataset = representative_data
 
@@ -113,7 +117,7 @@ class TFLiteModelManager:
 
             # Enable the newer quantiser (helps QAT models)
             converter.experimental_new_quantizer = True
-            return converter
+        return converter
 
 
     # -----------------------------------------------------------------

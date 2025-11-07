@@ -11,7 +11,7 @@ from utils.train_progressbar import TQDMProgressBar
 
 import parameters as params
 
-def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False, validation_data=None):
+def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False, validation_data=None, x_train_raw=None):
     """Create comprehensive training callbacks with robust error handling"""
     
     callbacks = []
@@ -51,10 +51,14 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
             mode='max',
             verbose=1 if debug else 0,
             save_weights_only=False,
-            save_freq='epoch'   # replaces deprecated ``period`` argument
+            save_freq='epoch'
         )
     )
 
+    # TFLite model checkpoint - pass x_train_raw if available
+    callbacks.append(
+        TFLiteCheckpoint(tflite_manager, representative_data, x_train_raw)
+    )
     
     # Learning rate scheduler
     callbacks.append(
@@ -65,11 +69,6 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
             min_lr=params.LR_SCHEDULER_MIN_LR,
             verbose=1 if debug else 0
         )
-    )
-    
-    # TFLite model checkpoint
-    callbacks.append(
-        TFLiteCheckpoint(tflite_manager, representative_data)
     )
     
     # TQDM progress bar

@@ -72,15 +72,11 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
         
         # Convert input based on model requirements
         if input_dtype == np.int8:
-            # Scale to int8 range
-            input_scale, input_zero_point = input_details[0]['quantization']
-            input_data = input_data / input_scale + input_zero_point
-            input_data = input_data.astype(np.int8)
+            # Convert float [0,1] to int8 [-128, 127]
+            input_data = (input_data * 255.0 - 128.0).astype(np.int8)
         elif input_dtype == np.uint8:
-            # Scale to uint8 range
-            input_scale, input_zero_point = input_details[0]['quantization']
-            input_data = input_data / input_scale + input_zero_point
-            input_data = input_data.astype(np.uint8)
+            # Convert float [0,1] to uint8 [0, 255]
+            input_data = (input_data * 255.0).astype(np.uint8)
         else:
             input_data = input_data.astype(np.float32)
         

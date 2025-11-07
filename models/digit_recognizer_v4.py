@@ -38,7 +38,7 @@ def create_digit_recognizer_v4_grayscale():
         20, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
-        activation='relu',
+        # activation='relu', # relu and next relu6 may confuse converter
         name='conv1_20f'
     )(inputs)
     x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
@@ -49,7 +49,7 @@ def create_digit_recognizer_v4_grayscale():
         36, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
-        activation='relu',
+        # activation='relu',
         name='conv2_36f'
     )(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
@@ -60,7 +60,7 @@ def create_digit_recognizer_v4_grayscale():
         48, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
-        activation='relu',
+        # activation='relu',
         name='conv3_48f'
     )(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
@@ -70,7 +70,7 @@ def create_digit_recognizer_v4_grayscale():
         56, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
-        activation='relu',
+        # activation='relu',
         name='conv4_56f'
     )(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
@@ -79,7 +79,8 @@ def create_digit_recognizer_v4_grayscale():
     x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Dense layer
-    x = tf.keras.layers.Dense(64, activation='relu', name='feature_dense')(x)
+    # x = tf.keras.layers.Dense(64, activation='relu', name='feature_dense')(x)
+    x = tf.keras.layers.Dense(64, activation=None, name='feature_dense')(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
     
     # Output layer
@@ -103,7 +104,7 @@ def create_digit_recognizer_v4_rgb():
         depthwise_initializer='he_normal',
         pointwise_initializer='he_normal',
         use_bias=True,
-        activation='relu',
+        # activation='relu',
         name='sep_conv1_24f'
     )(inputs)
     x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
@@ -114,7 +115,7 @@ def create_digit_recognizer_v4_rgb():
         40, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
-        activation='relu',
+        # activation='relu',
         name='conv2_40f'
     )(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
@@ -125,7 +126,7 @@ def create_digit_recognizer_v4_rgb():
         56, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
-        activation='relu',
+        # activation='relu',
         name='conv3_56f'
     )(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
@@ -135,7 +136,7 @@ def create_digit_recognizer_v4_rgb():
         64, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
-        activation='relu',
+        # activation='relu',
         name='conv4_bottleneck'
     )(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
@@ -144,7 +145,8 @@ def create_digit_recognizer_v4_rgb():
     x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Dense layer
-    x = tf.keras.layers.Dense(72, activation='relu', name='feature_dense')(x)
+    # x = tf.keras.layers.Dense(72, activation='relu', name='feature_dense')(x)
+    x = tf.keras.layers.Dense(72, activation=None, name='feature_dense')(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
     
     # Output layer

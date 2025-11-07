@@ -32,28 +32,34 @@ def _preprocess_common(images, target_size, grayscale):
 
 def preprocess_for_training(images, target_size=None, grayscale=None):
     """
-    ALWAYS return **float32** in the range [0, 1].
-    Even when QAT is enabled the model must see float data;
-    the QAT fake quant layers will emulate uint8 internally.
+    Return data format based on quantization settings.
+    For QAT: Use float32 [0,1] internally but the model will handle quantization
     """
     arr = _preprocess_common(images, target_size, grayscale)
-
-    # Convert to float32 and normalise to [0, 1]
-    arr = arr.astype(np.float32)
-    if arr.max() > 1.0:
-        arr = arr / 255.0
-    return arr
-
+    
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        # QAT training: convert to float32 [0,1] for training
+        # The QAT model will handle fake quantization internally
+        print("QAT Training: Using Float32 [0,1] with fake quantization")
+        arr = arr.astype(np.float32)
+        if arr.max() > 1.0:
+            arr = arr / 255.0
+        return arr
+    else:
+        # Standard training: float32 [0,1]
+        arr = arr.astype(np.float32)
+        if arr.max() > 1.0:
+            arr = arr / 255.0
+        return arr
 
 def preprocess_for_inference(images, target_size=None, grayscale=None):
     """
     Return data in the exact format the exported TFLite model expects.
-    * No quantisation → float32 [0,1]
-    * Quantisation   → uint8 [0,255] (or int8 for ESP DL)
     """
     arr = _preprocess_common(images, target_size, grayscale)
 
     if not params.QUANTIZE_MODEL:
+        # No quantization: float32 [0,1]
         arr = arr.astype(np.float32)
         if arr.max() > 1.0:
             arr = arr / 255.0
@@ -61,9 +67,14 @@ def preprocess_for_inference(images, target_size=None, grayscale=None):
 
     # Quantised inference path
     if params.ESP_DL_QUANTIZE:
-        arr = arr.astype(np.int8)   # signed int8 will be handled by the interpreter
+        arr = arr.astype(np.int8)
+        print(f"Inference: INT8 [0,255] for ESP-DL")
     else:
         arr = arr.astype(np.uint8)
+        if params.USE_QAT:
+            print(f"Inference: UINT8 [0,255] (QAT deployment)")
+        else:
+            print(f"Inference: UINT8 [0,255] (PTQ)")
 
     return arr
 
@@ -104,7 +115,7 @@ def preprocess_images_esp_dl(images, target_size=None):
 
 def preprocess_images_for_qat_calibration(images):
     """Special preprocessing for QAT model calibration."""
-    print("🎯 QAT Calibration Preprocessing")
+    print("QAT Calibration Preprocessing")
     return preprocess_for_training(images)
 
 

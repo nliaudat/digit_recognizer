@@ -49,7 +49,6 @@ from tqdm.auto import tqdm
 from models import create_model, compile_model, model_summary
 from utils import get_data_splits,  preprocess_for_training, preprocess_for_inference, get_calibration_data, suppress_all_output
 from utils.preprocess import (
-    # validate_quantization_combination,
     validate_preprocessing_consistency,
     get_qat_training_format,
     get_preprocessing_info,
@@ -57,6 +56,7 @@ from utils.preprocess import (
 from utils.data_pipeline import create_tf_dataset_from_arrays
 from utils.logging import log_print
 from utils.multi_source_loader import clear_cache
+
 from utils.augmentation import (
     create_augmentation_pipeline,
     apply_augmentation_to_dataset,
@@ -96,6 +96,7 @@ from utils.train_modelmanager   import TFLiteModelManager
 from utils.train_trainingmonitor import TrainingMonitor
 from utils.train_checkpoint     import TFLiteCheckpoint
 from utils.train_progressbar    import TQDMProgressBar
+
 from utils.train_qat_helper     import (
     create_qat_model,
     create_qat_representative_dataset,
@@ -105,7 +106,13 @@ from utils.train_qat_helper     import (
     debug_preprocessing_flow,
     diagnose_quantization_settings,
     validate_quantization_combination,
+    validate_qat_data_consistency,
+    validate_complete_qat_setup,
+    verify_qat_model,
+    debug_qat_layers
 )
+
+
 from utils.train_callbacks import create_callbacks
 from utils.train_helpers import (
     print_training_summary, 
@@ -585,9 +592,6 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
     
     print("🔄 Preprocessing images...")
-    # x_train = preprocess_images(x_train_raw, for_training=True)
-    # x_val = preprocess_images(x_val_raw, for_training=True)  
-    # x_test = preprocess_images(x_test_raw, for_training=True)
     x_train = preprocess_for_training(x_train_raw)
     x_val   = preprocess_for_training(x_val_raw)
     x_test  = preprocess_for_training(x_test_raw)
@@ -603,30 +607,6 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         y_test_final = y_test_raw.copy()
     
     # Create model with QAT if enabled
-    # use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
-    
-    # print(f"\n🔧 Creating model...")
-    # print(f"   Using QAT: {use_qat}")
-    
-    # if use_qat:
-        # print("🎯 Creating model with Quantization Aware Training...")
-        # if strategy:
-            # with strategy.scope():
-                # model = create_qat_model()
-                # model = compile_model(model)
-        # else:
-            # model = create_qat_model()
-            # model = compile_model(model)
-    # else:
-        # print("🔧 Creating standard model...")
-        # if strategy:
-            # with strategy.scope():
-                # model = create_model()
-                # model = compile_model(model)
-        # else:
-            # model = create_model()
-            # model = compile_model(model)
-            
     use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
 
     if use_qat:
@@ -647,13 +627,42 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     print("🔧 Building model with explicit input shape...")
     model.build(input_shape=(None,) + params.INPUT_SHAPE)
     
+    # ✅ MOVE QAT VALIDATION HERE - AFTER MODEL IS CREATED
+    print("🎯 VALIDATING QAT DATA CONSISTENCY...")
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        qat_consistent, qat_msg = validate_qat_data_consistency()
+        if not qat_consistent:
+            print(f"🚨 CRITICAL: {qat_msg}")
+            print("   QAT training may produce incorrect results!")
+        else:
+            print(f"✅ {qat_msg}")
+    
+    # ✅ MOVE COMPREHENSIVE QAT VALIDATION HERE
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        print("🎯 RUNNING COMPREHENSIVE QAT VALIDATION...")
+        qat_valid, qat_summary = validate_complete_qat_setup(model, debug=debug)
+        
+        if not qat_valid:
+            print("🚨 QAT validation failed - consider reviewing quantization settings")
+        else:
+            print("✅ QAT validation passed - ready for quantization-aware training")
+    
     # Validate QAT data flow if using QAT
     if use_qat:
         qat_valid, qat_msg = validate_qat_data_flow(model, x_train, debug=debug)
         if not qat_valid:
             print(f"❌ QAT data flow validation failed: {qat_msg}")
             return None, None, None
+            
+    # Test if the model behaves like a quantized model
+    print("\n🧪 QUICK QAT VERIFICATION TEST:")
+    test_input = tf.convert_to_tensor(np.random.randint(0, 255, (1, 32, 20, 3), dtype=np.uint8))
+    output = model(test_input)
+    print(f"   Input dtype: {test_input.dtype}")
+    print(f"   Output range: [{output.numpy().min():.3f}, {output.numpy().max():.3f}]")
+    print(f"   Output sum: {np.sum(output.numpy(), axis=1)}")
     
+    # Continue with the rest of training...
     # Setup training components
     tflite_manager = TFLiteModelManager(training_dir, debug)
     monitor = TrainingMonitor(training_dir, debug)
@@ -677,10 +686,19 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     # already contains fake quant nodes.  For pure PTQ we must supply
     # float32 data; the helper below now uses the *training* preprocessing
     # (float32) to avoid the previous uint8 → float conversion.
+    # if params.USE_QAT and params.QUANTIZE_MODEL:
+        # representative_data = None
+    # else:
+        # representative_data = create_qat_representative_dataset(x_train_raw)
+        
     if params.USE_QAT and params.QUANTIZE_MODEL:
+        # QAT models already carry quantization information – no calibration needed for TFLite conversion
         representative_data = None
+        print("🎯 QAT model: No representative dataset needed (fake quant layers provide scales)")
     else:
+        # PTQ needs calibration data
         representative_data = create_qat_representative_dataset(x_train_raw)
+        print("🎯 PTQ: Representative dataset created for calibration")
     
     # Create callbacks
     callbacks = create_callbacks(
@@ -690,7 +708,8 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         params.EPOCHS, 
         monitor, 
         debug, 
-        validation_data=(x_val, y_val_final)
+        validation_data=(x_val, y_val_final),
+        x_train_raw=x_train_raw
     )
     
     # Start training

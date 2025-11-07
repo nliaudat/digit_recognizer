@@ -19,20 +19,20 @@ class TFLiteCheckpoint(tf.keras.callbacks.Callback):
         Instance responsible for converting and persisting TFLite models.
     representative_data : callable or None
         Calibration generator for PTQ (passed through to ``save_best_model``).
+    x_train_raw : np.ndarray or None
+        Raw training data for creating representative dataset if needed.
     save_frequency : int, default 10
         How often (in epochs) to write a regular Keras checkpoint.
     """
 
-    def __init__(self, tflite_manager, representative_data, save_frequency: int = 10):
+    def __init__(self, tflite_manager, representative_data, x_train_raw=None, save_frequency: int = 10):
         super().__init__()
         self.tflite_manager = tflite_manager
         self.representative_data = representative_data
+        self.x_train_raw = x_train_raw
         self.save_frequency = save_frequency
         self.last_save_epoch = -1
 
-    # -----------------------------------------------------------------
-    #  Called at the end of every epoch
-    # -----------------------------------------------------------------
     def on_epoch_end(self, epoch, logs=None):
         logs = logs or {}
         val_acc = logs.get("val_accuracy", 0.0)
@@ -42,10 +42,16 @@ class TFLiteCheckpoint(tf.keras.callbacks.Callback):
         # -------------------------------------------------------------
         if val_acc > getattr(self.tflite_manager, "best_accuracy", 0.0):
             try:
+                # If we have raw data but no representative data, create it
+                representative_data_to_use = self.representative_data
+                if representative_data_to_use is None and self.x_train_raw is not None:
+                    from utils.train_qat_helper import create_qat_representative_dataset
+                    representative_data_to_use = create_qat_representative_dataset(self.x_train_raw)
+                
                 self.tflite_manager.save_best_model(
-                    self.model, val_acc, self.representative_data
+                    self.model, val_acc, representative_data_to_use
                 )
-            except Exception as exc:  # pragma: no cover
+            except Exception as exc:
                 if self.tflite_manager.debug:
                     print(f"⚠️  TFLite save failed: {exc}")
 
@@ -60,6 +66,6 @@ class TFLiteCheckpoint(tf.keras.callbacks.Callback):
                 if ckpt_path and self.tflite_manager.debug:
                     print(f"💾 Saved checkpoint: {ckpt_path}")
                 self.last_save_epoch = epoch
-            except Exception as exc:  # pragma: no cover
+            except Exception as exc:
                 if self.tflite_manager.debug:
                     print(f"⚠️  Checkpoint save failed: {exc}")
