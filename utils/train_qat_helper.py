@@ -614,7 +614,26 @@ def check_qat_gradient_flow(model, x_sample, y_sample):
     
     with tf.GradientTape() as tape:
         predictions = model(x_sample[:2], training=True)
-        loss = tf.keras.losses.sparse_categorical_crossentropy(y_sample[:2], predictions)
+        
+        # Handle different label formats based on model architecture
+        if params.MODEL_ARCHITECTURE == "original_haverland":
+            # original_haverland uses categorical_crossentropy with one-hot labels
+            # Make sure labels are the correct shape for categorical_crossentropy
+            if len(y_sample.shape) == 1:
+                # Convert sparse labels to one-hot
+                y_labels = tf.one_hot(y_sample[:2], params.NB_CLASSES)
+            else:
+                y_labels = y_sample[:2]
+            loss = tf.keras.losses.categorical_crossentropy(y_labels, predictions)
+        else:
+            # Other models use sparse_categorical_crossentropy with integer labels
+            if len(y_sample.shape) > 1 and y_sample.shape[1] > 1:
+                # Convert one-hot to sparse labels
+                y_labels = tf.argmax(y_sample[:2], axis=1)
+            else:
+                y_labels = y_sample[:2]
+            loss = tf.keras.losses.sparse_categorical_crossentropy(y_labels, predictions)
+        
         loss = tf.reduce_mean(loss)
     
     gradients = tape.gradient(loss, model.trainable_variables)
@@ -644,6 +663,7 @@ def check_qat_gradient_flow(model, x_sample, y_sample):
         print("✅ Gradients flowing normally")
         return True
 
+
 def diagnose_qat_output_behavior(model, x_train, y_train):
     """Diagnose what's happening inside the QAT model"""
     print("\n🔍 QAT MODEL OUTPUT BEHAVIOR DIAGNOSIS")
@@ -661,7 +681,23 @@ def diagnose_qat_output_behavior(model, x_train, y_train):
     # Get model outputs
     with tf.GradientTape() as tape:
         predictions = model(sample_batch, training=True)
-        loss = tf.keras.losses.sparse_categorical_crossentropy(sample_labels, predictions)
+        
+        # Handle different label formats based on model architecture
+        if params.MODEL_ARCHITECTURE == "original_haverland":
+            # original_haverland uses categorical_crossentropy with one-hot labels
+            if len(sample_labels.shape) == 1:
+                y_labels = tf.one_hot(sample_labels, params.NB_CLASSES)
+            else:
+                y_labels = sample_labels
+            loss = tf.keras.losses.categorical_crossentropy(y_labels, predictions)
+        else:
+            # Other models use sparse_categorical_crossentropy with integer labels
+            if len(sample_labels.shape) > 1 and sample_labels.shape[1] > 1:
+                y_labels = tf.argmax(sample_labels, axis=1)
+            else:
+                y_labels = sample_labels
+            loss = tf.keras.losses.sparse_categorical_crossentropy(y_labels, predictions)
+            
         loss_value = tf.reduce_mean(loss)
     
     print(f"\n📈 Output Analysis:")

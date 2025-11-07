@@ -649,15 +649,37 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         else:
             print("✅ QAT validation passed - ready for quantization-aware training")
             
-    if params.USE_QAT and params.QUANTIZE_MODEL:
+    # if params.USE_QAT and params.QUANTIZE_MODEL:
+        # gradient_ok = check_qat_gradient_flow(model, x_train, y_train_final)
+        # output_ok = diagnose_qat_output_behavior(model, x_train, y_train_final)
+        # if not gradient_ok:
+            # print("🔄 QAT gradient issue - falling back to standard model")
+            # params.USE_QAT = False
+            # model = create_model()
+            # model = compile_model(model)
+            
+    if params.USE_QAT and params.QUANTIZE_MODEL and params.MODEL_ARCHITECTURE != "original_haverland":
         gradient_ok = check_qat_gradient_flow(model, x_train, y_train_final)
         output_ok = diagnose_qat_output_behavior(model, x_train, y_train_final)
         if not gradient_ok:
             print("🔄 QAT gradient issue - falling back to standard model")
             params.USE_QAT = False
             model = create_model()
-            model = compile_model(model)
-    
+
+    # Force recompilation with correct loss
+    if params.MODEL_ARCHITECTURE == "original_haverland":
+        model.compile(
+            optimizer=model.optimizer,
+            loss="categorical_crossentropy",
+            metrics=['accuracy']
+        )
+    else:
+        model.compile(
+            optimizer=model.optimizer, 
+            loss="sparse_categorical_crossentropy",
+            metrics=['accuracy']
+        )
+        
     # Validate QAT data flow if using QAT
     if use_qat:
         qat_valid, qat_msg = validate_qat_data_flow(model, x_train, debug=debug)
