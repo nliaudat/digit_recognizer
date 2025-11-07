@@ -667,7 +667,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             
     # Test if the model behaves like a quantized model
     print("\n🧪 QUICK QAT VERIFICATION TEST:")
-    test_input = tf.convert_to_tensor(np.random.randint(0, 255, (1, 32, 20, 3), dtype=np.uint8))
+    test_input = tf.convert_to_tensor(np.random.randint(0, 255, (1,) + params.INPUT_SHAPE, dtype=np.uint8))
     output = model(test_input)
     print(f"   Input dtype: {test_input.dtype}")
     print(f"   Output range: [{output.numpy().min():.3f}, {output.numpy().max():.3f}]")

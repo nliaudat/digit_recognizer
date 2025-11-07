@@ -98,7 +98,8 @@ class TFLiteModelManager:
                     (x_train_raw, y_train_raw), _, _ = get_data_splits()
                     
                     # Use a subset for calibration - ensure we have enough samples
-                    num_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                    # num_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                    num_samples = min(len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
                     calibration_data = x_train_raw[:num_samples]
                     
                     # CRITICAL FIX: Use the SAME preprocessing as during QAT training
@@ -735,7 +736,8 @@ class TFLiteModelManager:
                         
                         # Use real data instead of random
                         (x_train_raw, _), _, _ = get_data_splits()
-                        num_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                        # num_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                        num_samples = min(len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
                         calibration_data = x_train_raw[:num_samples]
                         
                         # Preprocess properly

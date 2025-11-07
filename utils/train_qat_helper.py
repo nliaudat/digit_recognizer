@@ -374,7 +374,7 @@ def validate_qat_data_flow(
 # --------------------------------------------------------------------------- #
 #  QAT model detection
 # --------------------------------------------------------------------------- #
-def _is_qat_model(self, model):
+def _is_qat_model(model: tf.keras.Model) -> bool:
     """Check if model is a QAT model with better detection"""
     # Check for quantization layers
     for layer in model.layers:

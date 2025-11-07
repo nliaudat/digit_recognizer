@@ -23,3 +23,4 @@ datasets/Tenth-of-step-of-a-meter-digit/commands.txt
 /datasets/tools/aug_real_integra_bad_predictions
 /datasets/tools/static_augmentation
 /venv_digreco
+train_old.py
