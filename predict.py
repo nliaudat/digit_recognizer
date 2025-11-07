@@ -346,7 +346,7 @@ def test_model_with_known_image(predictor, input_channels):
     return prediction, confidence
     
 def debug_model_expectations(predictor):
-    """Debug what the model actually expects"""
+    """Debug what the model actually expects - CORRECTED VERSION"""
     print("\n🔍 MODEL EXPECTATIONS:")
     print("=" * 50)
     
@@ -359,9 +359,34 @@ def debug_model_expectations(predictor):
     if 'quantization' in input_details and input_details['quantization'] != (0, 0):
         scale, zero_point = input_details['quantization']
         print(f"Quantization - scale: {scale}, zero_point: {zero_point}")
-        print(f"Expected range: [{zero_point}, {255 * scale + zero_point}]")
+        
+        # CORRECTED: Show expected integer range and corresponding real value range
+        input_dtype = input_details['dtype']
+        
+        if input_dtype == np.uint8:
+            int_min, int_max = 0, 255
+            real_min = scale * (int_min - zero_point)
+            real_max = scale * (int_max - zero_point)
+            print(f"Expected integer input: uint8 [{int_min}, {int_max}]")
+            print(f"Corresponding real values: [{real_min:.6f}, {real_max:.6f}]")
+            
+        elif input_dtype == np.int8:
+            int_min, int_max = -128, 127
+            real_min = scale * (int_min - zero_point)
+            real_max = scale * (int_max - zero_point)
+            print(f"Expected integer input: int8 [{int_min}, {int_max}]")
+            print(f"Corresponding real values: [{real_min:.6f}, {real_max:.6f}]")
+            
+        else:
+            # For float models or unexpected types
+            print(f"Expected input: {input_dtype} (no quantization)")
+            
+        # Show the dequantization formula
+        print(f"Dequantization formula: real_value = {scale} * (quantized_value - {zero_point})")
+        
     else:
         print("No quantization (float model)")
+        print(f"Expected input: float32 [0.0, 1.0] (normalized)")
     
     # Check current parameters.py settings
     print(f"\n📊 PARAMETERS.PY SETTINGS:")
@@ -386,8 +411,7 @@ def main():
     
     # Load predictor
     predictor = TFLiteDigitPredictor(model_path)
-    if debug:
-        debug_model_expectations(predictor) 
+    debug_model_expectations(predictor) 
     
     # Get model's input requirements
     input_shape = predictor.input_details[0]['shape']
