@@ -205,7 +205,7 @@ ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
                          
 # Quantization Aware Training
-USE_QAT = False  # Enable Quantization Aware Training
+USE_QAT = True  # Enable Quantization Aware Training
 QAT_QUANTIZE_ALL = True  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
 
@@ -218,7 +218,7 @@ TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
 # File Paths
 MODEL_FILENAME = MODEL_ARCHITECTURE
 OUTPUT_DIR = "exported_models"
-QUANTIZE_NUM_SAMPLES = 1000
+QUANTIZE_NUM_SAMPLES = 22000
 TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
 FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
 

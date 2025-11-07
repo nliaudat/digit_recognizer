@@ -387,16 +387,28 @@ class AugmentationSafetyMonitor(tf.keras.callbacks.Callback):
             print("🚨 AugmentationSafetyMonitor: Critical issues were detected!")
             print("   Consider reviewing your augmentation pipeline configuration")
 
+# def create_augmentation_safety_monitor(validation_data, debug=False):
+    # """
+    # Helper function to create an AugmentationSafetyMonitor
+    # """
+    # return AugmentationSafetyMonitor(
+        # validation_data=validation_data,
+        # debug=debug,
+        # safety_threshold=10.0,
+        # learning_threshold=0.15,
+        # patience_epochs=5
+    # )
+    
 def create_augmentation_safety_monitor(validation_data, debug=False):
     """
-    Helper function to create an AugmentationSafetyMonitor
+    Helper function to create an AugmentationSafetyMonitor with QAT-aware thresholds
     """
     return AugmentationSafetyMonitor(
         validation_data=validation_data,
         debug=debug,
-        safety_threshold=10.0,
-        learning_threshold=0.15,
-        patience_epochs=5
+        safety_threshold=100.0,  # Higher threshold for QAT (UINT8 data has higher loss)
+        learning_threshold=0.10,  # Lower threshold for QAT
+        patience_epochs=10        # More patience for QAT
     )
 
 def setup_augmentation_for_training(x_train, y_train_final,

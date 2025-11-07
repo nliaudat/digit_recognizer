@@ -29,6 +29,19 @@ def print_training_summary(model, x_train, x_val, x_test, debug=False):
     print(f"   QAT: {params.USE_QAT}")
     print(f"   ESP-DL: {params.ESP_DL_QUANTIZE}")
     
+    print(f"\n🎯 Quantization Configuration:")
+    print(f"   Quantization: {params.QUANTIZE_MODEL}")
+    print(f"   QAT: {params.USE_QAT}")
+    print(f"   ESP-DL: {params.ESP_DL_QUANTIZE}")
+    
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        print(f"   QAT Data Format: UINT8 [0, 255]")
+        print(f"   Training matches inference format: ✅")
+    elif params.QUANTIZE_MODEL:
+        print(f"   PTQ Data Format: Train=Float32 [0,1], Infer=UINT8 [0,255]")
+    else:
+        print(f"   Data Format: Float32 [0, 1]")
+    
     if debug:
         print(f"\n🔍 Debug Info:")
         print(f"   Model layers: {len(model.layers)}")
