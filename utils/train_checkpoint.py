@@ -9,6 +9,7 @@ Keras callback that handles:
 
 import os
 import tensorflow as tf
+from utils.train_qat_helper import create_qat_representative_dataset
 
 
 class TFLiteCheckpoint(tf.keras.callbacks.Callback):
@@ -45,7 +46,7 @@ class TFLiteCheckpoint(tf.keras.callbacks.Callback):
                 # If we have raw data but no representative data, create it
                 representative_data_to_use = self.representative_data
                 if representative_data_to_use is None and self.x_train_raw is not None:
-                    from utils.train_qat_helper import create_qat_representative_dataset
+                    # from utils.train_qat_helper import create_qat_representative_dataset
                     representative_data_to_use = create_qat_representative_dataset(self.x_train_raw)
                 
                 self.tflite_manager.save_best_model(
