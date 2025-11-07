@@ -48,9 +48,9 @@ class TFLiteModelManager:
             return False
 
 
-    # def _is_qat_model(self, model: tf.keras.Model) -> bool:
-        # """More reliable QAT model detection"""
-        # # This local method SHADOWS the imported one!
+    def _is_qat_model(self, model: tf.keras.Model) -> bool:
+        """More reliable QAT model detection"""
+        # This local method SHADOWS the imported one!
     
     
     # -----------------------------------------------------------------
@@ -98,7 +98,8 @@ class TFLiteModelManager:
                     (x_train_raw, y_train_raw), _, _ = get_data_splits()
                     
                     # Use a subset for calibration - ensure we have enough samples
-                    num_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                    # num_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                    num_samples = min(len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
                     calibration_data = x_train_raw[:num_samples]
                     
                     # CRITICAL FIX: Use the SAME preprocessing as during QAT training
@@ -410,7 +411,7 @@ class TFLiteModelManager:
                 return None, 0
             
             # Step 2: For QAT models, test multiple strategies
-            if quantize and _is_qat_model(model):
+            if quantize and self._is_qat_model(model):
                 print("🎯 QAT Model: Testing conversion strategies...")
                 
                 # Test different approaches
@@ -449,7 +450,7 @@ class TFLiteModelManager:
             return False
         
         # Test 2: Check for QAT layers
-        if _is_qat_model(model):
+        if self._is_qat_model(model):
             qat_layers = sum(1 for layer in model.layers if hasattr(layer, 'quantize_config'))
             print(f"✅ QAT model detected: {qat_layers} quantization layers")
         else:
@@ -501,7 +502,7 @@ class TFLiteModelManager:
         try:
             if self.debug:
                 print(f"🔧 Converting {filename} to TFLite...")
-                print(f"   Quantize: {quantize}, QAT Model: {_is_qat_model(model)}")
+                print(f"   Quantize: {quantize}, QAT Model: {self._is_qat_model(model)}")
             
             # Ensure model is built
             if not model.built:
@@ -509,7 +510,7 @@ class TFLiteModelManager:
                 _ = model(dummy_input)
             
             # Handle QAT models specifically
-            if quantize and _is_qat_model(model):
+            if quantize and self._is_qat_model(model):
                 if self.debug:
                     print("🎯 Converting QAT model to quantized TFLite...")
                 return self._convert_qat_model(model, filename, representative_data)
@@ -615,7 +616,7 @@ class TFLiteModelManager:
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
 
         # QAT models already embed scales → no representative dataset needed
-        if _is_qat_model(model):
+        if self._is_qat_model(model):
             # Nothing to do – the fake quant layers provide the scales
             pass
         else:
@@ -735,7 +736,8 @@ class TFLiteModelManager:
                         
                         # Use real data instead of random
                         (x_train_raw, _), _, _ = get_data_splits()
-                        num_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                        # num_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
+                        num_samples = min(len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
                         calibration_data = x_train_raw[:num_samples]
                         
                         # Preprocess properly
