@@ -52,11 +52,23 @@ def preprocess_for_training(images, target_size=None, grayscale=None):
             arr = arr / 255.0
         return arr
 
+
 # def preprocess_for_inference(images, target_size=None, grayscale=None):
     # """
     # Return data in the exact format the exported TFLite model expects.
+    # FIXED VERSION - handles single images and batches properly
     # """
+    # # Handle single image input
+    # single_image = False
+    # if isinstance(images, np.ndarray) and len(images.shape) == 3:
+        # single_image = True
+        # images = [images]
+    
     # arr = _preprocess_common(images, target_size, grayscale)
+    
+    # # Handle single image output
+    # if single_image:
+        # arr = arr[0]  # Return single image instead of batch
 
     # if not params.QUANTIZE_MODEL:
         # # No quantization: float32 [0,1]
@@ -65,24 +77,28 @@ def preprocess_for_training(images, target_size=None, grayscale=None):
             # arr = arr / 255.0
         # return arr
 
-    # # Quantised inference path
+    # # Quantised inference path - FIXED LOGIC
     # if params.ESP_DL_QUANTIZE:
+        # # ESP-DL expects int8 [-128, 127]
         # arr = arr.astype(np.int8)
-        # print(f"Inference: INT8 [0,255] for ESP-DL")
+        # # if params.USE_QAT:
+            # # print("Inference: INT8 [0,255] for ESP-DL QAT")
+        # # else:
+            # # print("Inference: INT8 [0,255] for ESP-DL PTQ")
     # else:
+        # # Standard quantization expects uint8 [0, 255]
         # arr = arr.astype(np.uint8)
         # # if params.USE_QAT:
-            # # print(f"Inference: UINT8 [0,255] (QAT deployment)")
+            # # print("Inference: UINT8 [0,255] (QAT deployment)")
         # # else:
-            # # print(f"Inference: UINT8 [0,255] (PTQ)")
+            # # print("Inference: UINT8 [0,255] (PTQ)")
 
     # return arr
-
-
+    
 def preprocess_for_inference(images, target_size=None, grayscale=None):
     """
     Return data in the exact format the exported TFLite model expects.
-    FIXED VERSION - handles single images and batches properly
+    FIXED VERSION with correct ESP-DL handling
     """
     # Handle single image input
     single_image = False
@@ -96,28 +112,44 @@ def preprocess_for_inference(images, target_size=None, grayscale=None):
     if single_image:
         arr = arr[0]  # Return single image instead of batch
 
+    print(f"🔧 Preprocessing - Input range: [{arr.min()}, {arr.max()}], dtype: {arr.dtype}")
+
+    # FOR STANDARD QUANTIZED UINT8 MODELS: Keep as uint8 [0, 255]
+    if params.QUANTIZE_MODEL and not params.ESP_DL_QUANTIZE:
+        # Ensure uint8 [0, 255] format
+        if arr.dtype != np.uint8:
+            # If float32 [0,1], convert back to uint8 [0,255]
+            if arr.dtype == np.float32 and arr.max() <= 1.0:
+                arr = (arr * 255.0).astype(np.uint8)
+            else:
+                arr = arr.astype(np.uint8)
+        
+        # Ensure range is [0, 255]
+        arr = np.clip(arr, 0, 255)
+        print(f"   Output: uint8 [{arr.min()}, {arr.max()}] (Standard quantization)")
+        return arr
+
+    # FOR ESP-DL QUANTIZED MODELS: Convert to int8 [-128, 127]
+    if params.QUANTIZE_MODEL and params.ESP_DL_QUANTIZE:
+        # First ensure we have uint8 [0, 255]
+        if arr.dtype != np.uint8:
+            if arr.dtype == np.float32 and arr.max() <= 1.0:
+                arr = (arr * 255.0).astype(np.uint8)
+            else:
+                arr = arr.astype(np.uint8)
+        
+        # CORRECT ESP-DL conversion: uint8 [0,255] -> int8 [-128,127]
+        arr = (arr.astype(np.int32) - 128).astype(np.int8)
+        print(f"   Output: int8 [{arr.min()}, {arr.max()}] (ESP-DL quantization)")
+        return arr
+
+    # For float models: float32 [0,1]
     if not params.QUANTIZE_MODEL:
-        # No quantization: float32 [0,1]
         arr = arr.astype(np.float32)
         if arr.max() > 1.0:
             arr = arr / 255.0
+        print(f"   Output: float32 [{arr.min():.3f}, {arr.max():.3f}] (No quantization)")
         return arr
-
-    # Quantised inference path - FIXED LOGIC
-    if params.ESP_DL_QUANTIZE:
-        # ESP-DL expects int8 [-128, 127]
-        arr = arr.astype(np.int8)
-        # if params.USE_QAT:
-            # print("Inference: INT8 [0,255] for ESP-DL QAT")
-        # else:
-            # print("Inference: INT8 [0,255] for ESP-DL PTQ")
-    else:
-        # Standard quantization expects uint8 [0, 255]
-        arr = arr.astype(np.uint8)
-        # if params.USE_QAT:
-            # print("Inference: UINT8 [0,255] (QAT deployment)")
-        # else:
-            # print("Inference: UINT8 [0,255] (PTQ)")
 
     return arr
 
