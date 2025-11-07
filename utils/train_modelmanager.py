@@ -47,6 +47,12 @@ class TFLiteModelManager:
             print(f"Model verification failed: {exc}")
             return False
 
+
+    # def _is_qat_model(self, model: tf.keras.Model) -> bool:
+        # """More reliable QAT model detection"""
+        # # This local method SHADOWS the imported one!
+    
+    
     # -----------------------------------------------------------------
     #  Save a trainable checkpoint (Keras 3 .keras format)
     # -----------------------------------------------------------------
@@ -404,7 +410,7 @@ class TFLiteModelManager:
                 return None, 0
             
             # Step 2: For QAT models, test multiple strategies
-            if quantize and self._is_qat_model(model):
+            if quantize and _is_qat_model(model):
                 print("🎯 QAT Model: Testing conversion strategies...")
                 
                 # Test different approaches
@@ -428,24 +434,27 @@ class TFLiteModelManager:
 
     def validate_model_before_conversion(self, model):
         """Validate model is ready for conversion"""
-        print("\n🔍 VALIDATING MODEL BEFORE CONVERSION")
-        print("=" * 50)
+        if self.debug:
+            print("\n🔍 VALIDATING MODEL BEFORE CONVERSION")
+            print("=" * 50)
         
         # Test 1: Model can handle inference
         try:
             test_input = tf.random.uniform([1] + list(params.INPUT_SHAPE), 0, 1, dtype=tf.float32)
             output = model(test_input)
-            print(f"✅ Model inference test: output shape {output.shape}")
+            if self.debug:
+                print(f"✅ Model inference test: output shape {output.shape}")
         except Exception as e:
             print(f"❌ Model inference failed: {e}")
             return False
         
         # Test 2: Check for QAT layers
-        if self._is_qat_model(model):
+        if _is_qat_model(model):
             qat_layers = sum(1 for layer in model.layers if hasattr(layer, 'quantize_config'))
             print(f"✅ QAT model detected: {qat_layers} quantization layers")
         else:
-            print("ℹ️  Standard model (non-QAT)")
+            if self.debug:
+                print("ℹ️  Standard model (non-QAT)")
         
         # Test 3: Check output range
         test_outputs = []
@@ -455,7 +464,8 @@ class TFLiteModelManager:
             test_outputs.append(output.numpy())
         
         all_outputs = np.concatenate(test_outputs)
-        print(f"✅ Output range: [{all_outputs.min():.6f}, {all_outputs.max():.6f}]")
+        if self.debug:
+            print(f"✅ Output range: [{all_outputs.min():.6f}, {all_outputs.max():.6f}]")
         
         # Check for problematic outputs
         if np.any(np.isnan(all_outputs)):
@@ -491,7 +501,7 @@ class TFLiteModelManager:
         try:
             if self.debug:
                 print(f"🔧 Converting {filename} to TFLite...")
-                print(f"   Quantize: {quantize}, QAT Model: {self._is_qat_model(model)}")
+                print(f"   Quantize: {quantize}, QAT Model: {_is_qat_model(model)}")
             
             # Ensure model is built
             if not model.built:
@@ -499,7 +509,7 @@ class TFLiteModelManager:
                 _ = model(dummy_input)
             
             # Handle QAT models specifically
-            if quantize and self._is_qat_model(model):
+            if quantize and _is_qat_model(model):
                 if self.debug:
                     print("🎯 Converting QAT model to quantized TFLite...")
                 return self._convert_qat_model(model, filename, representative_data)
