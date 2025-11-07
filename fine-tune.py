@@ -290,7 +290,7 @@ class FineTuneManager:
                 y_augmented = np.array(y_augmented_list)
                 
                 # Apply preprocessing to augmented data
-                x_augmented = preprocess_images(x_augmented)
+                x_augmented = preprocess_for_training(x_augmented)
                 
                 # Use sparse labels for augmented data too
                 y_augmented = y_augmented.astype(np.int32)
