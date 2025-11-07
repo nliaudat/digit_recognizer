@@ -43,47 +43,21 @@ def create_augmentation_pipeline():
     """
     augmentation_layers = []
     
-    # # Ensure float32 for augmentation operations
-    # augmentation_layers.append(
-        # tf.keras.layers.Lambda(
-            # lambda x: tf.cast(x, tf.float32),
-            # name='ensure_float32'
-        # )
-    # )
+    # Ensure float32 for augmentation operations
+    augmentation_layers.append(
+        tf.keras.layers.Lambda(
+            lambda x: tf.cast(x, tf.float32),
+            name='ensure_float32'
+        )
+    )
     
-    # # Verify and clamp data range for augmentation
-    # augmentation_layers.append(
-        # tf.keras.layers.Lambda(
-            # lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure [0,1] range
-            # name='verify_range_before_augmentation'
-        # )
-    # )
-    
-    # For QAT with UINT8, we need different handling
-    if params.USE_QAT and params.QUANTIZE_MODEL:
-        print("QAT Augmentation: Using UINT8-compatible pipeline")
-        
-        # Convert to float32 for augmentation operations, then back to uint8
-        augmentation_layers.append(
-            tf.keras.layers.Lambda(
-                lambda x: tf.cast(x, tf.float32) / 255.0,  # Convert to [0,1] for augmentation
-                name='qat_uint8_to_float'
-            )
+    # Verify and clamp data range for augmentation
+    augmentation_layers.append(
+        tf.keras.layers.Lambda(
+            lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure [0,1] range
+            name='verify_range_before_augmentation'
         )
-    else:
-        # Original float32 pipeline
-        augmentation_layers.append(
-            tf.keras.layers.Lambda(
-                lambda x: tf.cast(x, tf.float32),
-                name='ensure_float32'
-            )
-        )
-        augmentation_layers.append(
-            tf.keras.layers.Lambda(
-                lambda x: tf.clip_by_value(x, 0.0, 1.0),
-                name='verify_range_before_augmentation'
-            )
-        )
+    )
     
     # Rotation
     if params.AUGMENTATION_ROTATION_RANGE > 0:

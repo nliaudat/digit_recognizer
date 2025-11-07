@@ -566,6 +566,190 @@ def debug_qat_layers(model):
             if weights:
                 print(f"      Weights: {[w.shape for w in weights]}")
                 
+def check_qat_gradient_flow(model, x_sample, y_sample):
+    """Check if gradients are flowing in QAT model"""
+    print("\n🔍 CHECKING QAT GRADIENT FLOW")
+    
+    with tf.GradientTape() as tape:
+        predictions = model(x_sample[:2], training=True)
+        loss = tf.keras.losses.sparse_categorical_crossentropy(y_sample[:2], predictions)
+        loss = tf.reduce_mean(loss)
+    
+    gradients = tape.gradient(loss, model.trainable_variables)
+    
+    # Count non-zero gradients
+    zero_grads = 0
+    total_grads = 0
+    
+    for i, (grad, var) in enumerate(zip(gradients, model.trainable_variables)):
+        if grad is not None:
+            grad_norm = tf.reduce_sum(tf.abs(grad)).numpy()
+            total_grads += 1
+            if grad_norm < 1e-8:
+                zero_grads += 1
+            if i < 5:  # Print first few gradients
+                print(f"   {var.name}: {grad_norm:.6f}")
+    
+    print(f"📊 Gradient Summary: {total_grads - zero_grads}/{total_grads} layers have gradients")
+    
+    if zero_grads == total_grads:
+        print("🚨 CRITICAL: No gradients flowing in QAT model!")
+        return False
+    elif zero_grads > total_grads / 2:
+        print("⚠️  WARNING: Many layers have zero gradients")
+        return False
+    else:
+        print("✅ Gradients flowing normally")
+        return True
+
+def diagnose_qat_output_behavior(model, x_train, y_train):
+    """Diagnose what's happening inside the QAT model"""
+    print("\n🔍 QAT MODEL OUTPUT BEHAVIOR DIAGNOSIS")
+    print("=" * 50)
+    
+    # Test with a small batch
+    sample_batch = x_train[:5]
+    sample_labels = y_train[:5]
+    
+    print("📊 Input Analysis:")
+    print(f"   Input dtype: {sample_batch.dtype}")
+    print(f"   Input range: [{sample_batch.min():.3f}, {sample_batch.max():.3f}]")
+    print(f"   Input mean: {sample_batch.mean():.3f}")
+    
+    # Get model outputs
+    with tf.GradientTape() as tape:
+        predictions = model(sample_batch, training=True)
+        loss = tf.keras.losses.sparse_categorical_crossentropy(sample_labels, predictions)
+        loss_value = tf.reduce_mean(loss)
+    
+    print(f"\n📈 Output Analysis:")
+    print(f"   Predictions shape: {predictions.shape}")
+    print(f"   Predictions range: [{predictions.numpy().min():.6f}, {predictions.numpy().max():.6f}]")
+    print(f"   Predictions mean: {predictions.numpy().mean():.6f}")
+    
+    # Check if outputs are reasonable
+    output_sums = np.sum(predictions.numpy(), axis=1)
+    print(f"   Output sums: {output_sums}")
+    
+    # Check loss value
+    print(f"   Loss value: {loss_value.numpy():.6f}")
+    
+    # Check if predictions are collapsing to uniform distribution
+    pred_entropy = -np.sum(predictions.numpy() * np.log(predictions.numpy() + 1e-8), axis=1)
+    uniform_entropy = -np.sum(np.ones(predictions.shape[1]) / predictions.shape[1] * 
+                             np.log(np.ones(predictions.shape[1]) / predictions.shape[1]))
+    
+    print(f"   Prediction entropy: {pred_entropy.mean():.6f} (uniform: {uniform_entropy:.6f})")
+    
+    if np.allclose(pred_entropy, uniform_entropy, atol=0.1):
+        print("🚨 CRITICAL: Predictions are nearly uniform - model isn't learning!")
+        return False
+    else:
+        print("✅ Predictions have structure - model should be able to learn")
+        return True
+
+
+### not used actually
+def two_phase_qat_training(x_train, y_train, x_val, y_val): 
+    """
+    Two-phase training: 
+    1. Train standard model to convergence
+    2. Convert to QAT and fine-tune
+    """
+    print("\n🎯 TWO-PHASE QAT TRAINING")
+    print("=" * 50)
+    
+    # Phase 1: Train standard model
+    print("📚 Phase 1: Training standard model...")
+    params.USE_QAT = False
+    standard_model = create_model()
+    standard_model = compile_model(standard_model)
+    
+    # Train standard model properly
+    standard_history = standard_model.fit(
+        x_train, y_train,
+        epochs=min(50, params.EPOCHS // 2),  # Train for 50 epochs or half of total
+        batch_size=params.BATCH_SIZE,
+        validation_data=(x_val, y_val),
+        verbose=1,
+        callbacks=[
+            tf.keras.callbacks.EarlyStopping(
+                patience=10, 
+                restore_best_weights=True,
+                monitor='val_accuracy'
+            )
+        ]
+    )
+    
+    standard_acc = standard_history.history['val_accuracy'][-1]
+    print(f"✅ Standard model trained: {standard_acc:.4f} val accuracy")
+    
+    if standard_acc < 0.8:
+        print("🚨 Standard model not learning well - cannot proceed with QAT")
+        return standard_model
+    
+    # Phase 2: Convert to QAT and fine-tune
+    print("🔄 Phase 2: Converting to QAT and fine-tuning...")
+    params.USE_QAT = True
+    
+    try:
+        import tensorflow_model_optimization as tfmot
+        
+        # Create QAT model
+        with tfmot.quantization.keras.quantize_scope():
+            qat_model = create_model()
+        
+        # Build the model
+        qat_model.build(input_shape=(None,) + params.INPUT_SHAPE)
+        
+        # Copy weights layer by layer
+        print("📥 Transferring weights to QAT model...")
+        weights_transferred = 0
+        for qat_layer, std_layer in zip(qat_model.layers, standard_model.layers):
+            try:
+                if (hasattr(qat_layer, 'get_weights') and hasattr(std_layer, 'get_weights') and
+                    len(qat_layer.get_weights()) == len(std_layer.get_weights())):
+                    qat_layer.set_weights(std_layer.get_weights())
+                    weights_transferred += 1
+            except Exception as e:
+                print(f"⚠️  Could not transfer weights for {qat_layer.name}: {e}")
+        
+        print(f"✅ Transferred weights for {weights_transferred} layers")
+        
+        # Compile with slightly higher learning rate for fine-tuning
+        qat_optimizer = tf.keras.optimizers.Adam(learning_rate=params.LEARNING_RATE * 2.0)
+        loss = "sparse_categorical_crossentropy" if params.MODEL_ARCHITECTURE != "original_haverland" else "categorical_crossentropy"
+        qat_model.compile(optimizer=qat_optimizer, loss=loss, metrics=['accuracy'])
+        
+        # Fine-tune for a few epochs
+        print("🎯 Fine-tuning QAT model...")
+        qat_history = qat_model.fit(
+            x_train, y_train,
+            epochs=min(20, params.EPOCHS // 4),
+            batch_size=params.BATCH_SIZE,
+            validation_data=(x_val, y_val),
+            verbose=1
+        )
+        
+        qat_acc = qat_history.history['val_accuracy'][-1]
+        accuracy_drop = standard_acc - qat_acc
+        
+        print(f"✅ QAT model fine-tuned:")
+        print(f"   Standard model: {standard_acc:.4f}")
+        print(f"   QAT model: {qat_acc:.4f}")
+        print(f"   Accuracy drop: {accuracy_drop:.4f}")
+        
+        if accuracy_drop < 0.05:
+            print("🎉 QAT successful! Minimal accuracy drop.")
+        else:
+            print("⚠️  QAT caused significant accuracy drop")
+        
+        return qat_model
+        
+    except Exception as e:
+        print(f"❌ QAT conversion failed: {e}")
+        print("🔄 Using standard model")
+        return standard_model
 
 # --------------------------------------------------------------------------- #
 #  Public API list (helps static analysers & IDEs)
@@ -583,4 +767,6 @@ __all__ = [
     "validate_complete_qat_setup", 
     "verify_qat_model", 
     "debug_qat_layers",
+    "check_qat_gradient_flow",
+    "diagnose_qat_output_behavior",
 ]

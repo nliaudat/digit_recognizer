@@ -119,16 +119,22 @@ def preprocess_images_for_qat_calibration(images):
     return preprocess_for_training(images)
 
 
+# def get_qat_training_format():
+    # """Return the data format used during QAT training."""
+    # if params.USE_QAT and params.QUANTIZE_MODEL:
+        # if params.ESP_DL_QUANTIZE:
+            # return np.uint8, 0, 255, "UINT8 [0, 255] (ESP-DL QAT)"
+        # else:
+            # return np.uint8, 0, 255, "UINT8 [0, 255] (Standard QAT)"
+    # else:
+        # return np.float32, 0.0, 1.0, "Float32 [0, 1] (Standard)"
 def get_qat_training_format():
     """Return the data format used during QAT training."""
+    # CORRECTED: QAT training uses float32 [0,1] regardless of ESP-DL setting
     if params.USE_QAT and params.QUANTIZE_MODEL:
-        if params.ESP_DL_QUANTIZE:
-            return np.uint8, 0, 255, "UINT8 [0, 255] (ESP-DL QAT)"
-        else:
-            return np.uint8, 0, 255, "UINT8 [0, 255] (Standard QAT)"
+        return np.float32, 0.0, 1.0, "Float32 [0, 1] (QAT Training)"
     else:
         return np.float32, 0.0, 1.0, "Float32 [0, 1] (Standard)"
-
 
 def validate_preprocessing_consistency():
     """
@@ -221,12 +227,11 @@ def validate_preprocessing_consistency():
 
 def get_preprocessing_info():
     """Return a summary of the current preprocessing configuration."""
+    # CORRECTED: QAT training uses float32 [0,1], inference uses integer types
     if not params.QUANTIZE_MODEL:
         if params.USE_QAT:
             mode = "QAT Training (No quantization applied)"
-            normalization = (
-                "UINT8 [0,255] (simulating ESP-DL)" if params.ESP_DL_QUANTIZE else "UINT8 [0,255] (simulating UINT8)"
-            )
+            normalization = "Float32 [0,1] (simulating quantization)"
         else:
             mode = "Float32 Training"
             normalization = "Float32 [0,1]"
@@ -234,14 +239,14 @@ def get_preprocessing_info():
         if params.USE_QAT:
             if params.ESP_DL_QUANTIZE:
                 mode = "QAT + INT8 ESP-DL Quantization"
-                normalization = "Training: UINT8 [0,255], Inference: UINT8 [0,255]"
+                normalization = "Training: Float32 [0,1], Inference: INT8 [0,255]"
             else:
                 mode = "QAT + UINT8 Quantization"
-                normalization = "Training: UINT8 [0,255], Inference: UINT8 [0,255]"
+                normalization = "Training: Float32 [0,1], Inference: UINT8 [0,255]"
         else:
             if params.ESP_DL_QUANTIZE:
                 mode = "Standard Training + INT8 ESP-DL Quantization"
-                normalization = "Training: Float32 [0,1], Inference: UINT8 [0,255]"
+                normalization = "Training: Float32 [0,1], Inference: INT8 [0,255]"
             else:
                 mode = "Standard Training + UINT8 Quantization"
                 normalization = "Training: Float32 [0,1], Inference: UINT8 [0,255]"
@@ -254,9 +259,7 @@ def get_preprocessing_info():
         "normalization": normalization,
         "input_shape": params.INPUT_SHAPE,
         "recommendation": "QAT compatible" if params.USE_QAT else "Standard training",
-        "data_type_consistency": "✅ Perfect"
-        if (not params.USE_QAT or (params.USE_QAT and params.QUANTIZE_MODEL))
-        else "⚠️ Check",
+        "data_type_consistency": "✅ Perfect" if not params.USE_QAT else "⚠️ Different (expected)"
     }
 
 

@@ -109,7 +109,9 @@ from utils.train_qat_helper     import (
     validate_qat_data_consistency,
     validate_complete_qat_setup,
     verify_qat_model,
-    debug_qat_layers
+    debug_qat_layers,
+    check_qat_gradient_flow,
+    diagnose_qat_output_behavior
 )
 
 
@@ -646,6 +648,15 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             print("🚨 QAT validation failed - consider reviewing quantization settings")
         else:
             print("✅ QAT validation passed - ready for quantization-aware training")
+            
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        gradient_ok = check_qat_gradient_flow(model, x_train, y_train_final)
+        output_ok = diagnose_qat_output_behavior(model, x_train, y_train_final)
+        if not gradient_ok:
+            print("🔄 QAT gradient issue - falling back to standard model")
+            params.USE_QAT = False
+            model = create_model()
+            model = compile_model(model)
     
     # Validate QAT data flow if using QAT
     if use_qat:
@@ -665,6 +676,14 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     # Continue with the rest of training...
     # Setup training components
     tflite_manager = TFLiteModelManager(training_dir, debug)
+
+    # This will automatically test strategies and use the best one
+    tflite_blob, size = tflite_manager.save_as_tflite_enhanced(
+        model, 
+        "model.tflite", 
+        quantize=True
+    )
+    
     monitor = TrainingMonitor(training_dir, debug)
     monitor.set_model(model)
     
