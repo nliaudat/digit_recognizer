@@ -374,22 +374,65 @@ def validate_qat_data_flow(
 # --------------------------------------------------------------------------- #
 #  QAT model detection
 # --------------------------------------------------------------------------- #
-def _is_qat_model(model: tf.keras.Model) -> bool:
-    """More reliable QAT model detection"""
-    # Check for quantization annotations
-    if hasattr(model, '_quantize_scope'):
-        return True
-    
+def _is_qat_model(self, model):
+    """Check if model is a QAT model with better detection"""
     # Check for quantization layers
     for layer in model.layers:
-        if hasattr(layer, 'quantize_config'):
-            return True
-        # Check for specific QAT layer patterns
-        layer_class = layer.__class__.__name__
-        if 'Quant' in layer_class or 'QAT' in layer_class:
+        layer_name = layer.name.lower()
+        layer_class = layer.__class__.__name__.lower()
+        
+        # Check for quantization indicators
+        if (hasattr(layer, 'quantize_config') or 
+            'quant' in layer_name or 
+            'qat' in layer_name or
+            'quantize' in layer_class):
             return True
     
+    # Check model name and attributes
+    model_name = model.name.lower() if hasattr(model, 'name') else ''
+    if 'qat' in model_name or 'quant' in model_name:
+        return True
+    
+    # Check if model was created within quantize_scope
+    if hasattr(model, '_quantize_scope'):
+        return True
+        
     return False
+    
+# def _is_qat_model(model: tf.keras.Model) -> bool:
+    # """Enhanced QAT model detection"""
+    # # Method 1: Check if model was created with QAT
+    # if hasattr(model, '_quantize_scope'):
+        # return True
+    
+    # # Method 2: Check for quantization configs in layers
+    # for layer in model.layers:
+        # # Check for quantization config
+        # if hasattr(layer, 'quantize_config') and layer.quantize_config is not None:
+            # return True
+        
+        # # Check for quantized layer wrappers
+        # layer_class_name = layer.__class__.__name__
+        # if any(qat_indicator in layer_class_name for qat_indicator in 
+               # ['Quant', 'QAT', 'Quantize', 'quantize']):
+            # return True
+            
+        # # Check for specific TFMoT quantization attributes
+        # if hasattr(layer, 'get_quantized_model'):
+            # return True
+            
+        # # Check layer config for quantization hints
+        # if hasattr(layer, 'get_config'):
+            # config = layer.get_config()
+            # if any('quant' in key.lower() for key in config.keys()):
+                # return True
+    
+    # # Method 3: Check if QAT is enabled in parameters
+    # if params.USE_QAT and params.QUANTIZE_MODEL:
+        # print("⚠️  QAT enabled but no quantization layers detected - forcing QAT path")
+        # return True
+    
+    # return False
 
 def verify_qat_model(model: tf.keras.Model, debug: bool = False) -> bool:
     """
