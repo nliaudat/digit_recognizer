@@ -344,6 +344,30 @@ def test_model_with_known_image(predictor, input_channels):
     
     print(f"Test prediction: {prediction}, confidence: {confidence:.4f}")
     return prediction, confidence
+    
+def debug_model_expectations(predictor):
+    """Debug what the model actually expects"""
+    print("\n🔍 MODEL EXPECTATIONS:")
+    print("=" * 50)
+    
+    input_details = predictor.input_details[0]
+    print(f"Input dtype: {input_details['dtype']}")
+    print(f"Input shape: {input_details['shape']}")
+    print(f"Input name: {input_details['name']}")
+    
+    # Check quantization parameters
+    if 'quantization' in input_details and input_details['quantization'] != (0, 0):
+        scale, zero_point = input_details['quantization']
+        print(f"Quantization - scale: {scale}, zero_point: {zero_point}")
+        print(f"Expected range: [{zero_point}, {255 * scale + zero_point}]")
+    else:
+        print("No quantization (float model)")
+    
+    # Check current parameters.py settings
+    print(f"\n📊 PARAMETERS.PY SETTINGS:")
+    print(f"QUANTIZE_MODEL: {params.QUANTIZE_MODEL}")
+    print(f"USE_QAT: {params.USE_QAT}")
+    print(f"ESP_DL_QUANTIZE: {params.ESP_DL_QUANTIZE}")
 
 def main():
     """Simple prediction function"""
@@ -362,6 +386,8 @@ def main():
     
     # Load predictor
     predictor = TFLiteDigitPredictor(model_path)
+    if debug:
+        debug_model_expectations(predictor) 
     
     # Get model's input requirements
     input_shape = predictor.input_details[0]['shape']
