@@ -1,0 +1,26 @@
+{
+  "timestamp": "2025-11-07 14:01:51",
+  "training_duration": "0:18:51.993360",
+  "model_architecture": "mnist_quantization",
+  "input_shape": [
+    32,
+    20,
+    3
+  ],
+  "num_classes": 10,
+  "epochs": 200,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "quantization_enabled": true,
+  "qat_enabled": true,
+  "esp_dl_enabled": false,
+  "data_augmentation": true,
+  "grayscale": false,
+  "best_validation_accuracy": 0.96363365650177,
+  "test_accuracy_keras": 0.9584530591964722,
+  "test_accuracy_tflite": 0.9582136015325671,
+  "model_size_keras_kb": 485.9072265625,
+  "model_size_tflite_kb": 64.15625,
+  "total_parameters": 56970,
+  "size_reduction_percent": 86.79660509396687
+}
