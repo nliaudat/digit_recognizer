@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import pandas as pd
 from PIL import Image
+import shutil
 from utils.multi_source_loader import MultiSourceDataLoader, load_combined_dataset
 
 class TFLiteDigitPredictor:
@@ -55,20 +56,8 @@ class TFLiteDigitPredictor:
         else:
             input_data = processed_image
         
-        # Handle quantization if needed
-        # if self.input_details[0]['dtype'] == np.uint8:
-            # input_data = input_data.astype(np.uint8)
-        # elif self.input_details[0]['dtype'] == np.int8:
-            # input_scale, input_zero_point = self.input_details[0]['quantization']
-            # if input_data.dtype == np.float32:
-                # input_data = (input_data / input_scale + input_zero_point).astype(np.int8)
-            # else:
-                # input_data = input_data.astype(np.int8)
-        # else:
-            # input_data = input_data.astype(np.float32)
-            
         # The image is already in the exact dtype the model expects,
-        # so we only need to cast to the NumPy type that the interpreter  understands.
+        # so we only need to cast to the NumPy type that the interpreter understands.
         if self.input_details[0]['dtype'] == np.uint8:
             input_data = input_data.astype(np.uint8)
         elif self.input_details[0]['dtype'] == np.int8:
@@ -246,8 +235,13 @@ def is_quantized_model(model_path):
     except:
         return False
 
-def get_all_models(quantized_only=False):
-    """Get all available models with parameters count - with error handling"""
+def get_all_models(quantized_only=False, subfolder=None):
+    """Get all available models with parameters count - with error handling
+    
+    Args:
+        quantized_only: If True, only return quantized models
+        subfolder: If specified, only look in this specific subfolder
+    """
     # Look for training directories - exclude test_results and other non-training dirs
     all_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
     
@@ -259,6 +253,20 @@ def get_all_models(quantized_only=False):
         tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite')]
         if tflite_files and not dir_name.startswith('test_results'):
             training_dirs.append(dir_name)
+    
+    # Filter by subfolder if specified
+    if subfolder:
+        if subfolder in training_dirs:
+            training_dirs = [subfolder]
+        else:
+            # Check if subfolder is a partial match
+            matching_dirs = [d for d in training_dirs if subfolder in d]
+            if matching_dirs:
+                training_dirs = matching_dirs
+            else:
+                print(f"⚠️  Subfolder '{subfolder}' not found in training directories")
+                print(f"   Available directories: {training_dirs}")
+                return []
     
     all_models = []
     
@@ -431,12 +439,13 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
     avg_inference_time = total_inference_time / total_tested if total_tested > 0 else 0.0
     inferences_per_second = 1000 / avg_inference_time if avg_inference_time > 0 else 0.0
     
-    # Verify failed count matches expected
+    # CRITICAL: Verify the failed count matches expected
     expected_failed = total_tested - correct_predictions
     if len(failed_predictions) != expected_failed:
-        print(f"⚠️  Failed count mismatch for {model_name}: Expected {expected_failed}, got {len(failed_predictions)}")
-        # Adjust to correct count
-        failed_predictions = failed_predictions[:expected_failed] if len(failed_predictions) > expected_failed else failed_predictions
+        print(f"❌ CRITICAL ERROR: Failed count mismatch for {model_name}!")
+        print(f"   Expected failed: {expected_failed} (total_tested: {total_tested} - correct: {correct_predictions})")
+        print(f"   Actual failed collected: {len(failed_predictions)}")
+        print(f"   This indicates a logic error in the prediction collection!")
     
     if debug:
         print(f"Final accuracy: {accuracy:.3f} ({correct_predictions}/{total_tested})")
@@ -445,7 +454,6 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
         print(f"Inferences per second: {inferences_per_second:.0f}")
     
     return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions
-    
 
 def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=True):
     """Generate separate comparison graphs for the benchmark results"""
@@ -632,19 +640,33 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
     return graph_paths
 
 def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all_datasets=True,
-                   list_failed=False, save_failed=False):
-    """Test all available models and print summary table"""
-    models = get_all_models(quantized_only=quantized_only)
+                   list_failed=False, save_failed=False, subfolder=None):
+    """Test all available models and print summary table
+    
+    Args:
+        quantized_only: If True, only test quantized models
+        num_test_images: Number of test images to use (0 = all)
+        debug: Enable debug output
+        use_all_datasets: Use all available datasets
+        list_failed: Generate CSV of failed predictions
+        save_failed: Save failed prediction images
+        subfolder: Only test models from this specific subfolder
+    """
+    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder)
     
     if not models:
-        print("No models found to test.")
+        if subfolder:
+            print(f"No models found in subfolder '{subfolder}'")
+        else:
+            print("No models found to test.")
         return
     
     # Determine test configuration
+    subfolder_info = f" in subfolder '{subfolder}'" if subfolder else ""
     if use_all_datasets or num_test_images == 0:
-        print(f"\nTesting {len(models)} models on ALL available images from all datasets...")
+        print(f"\nTesting {len(models)} models{subfolder_info} on ALL available images from all datasets...")
     else:
-        print(f"\nTesting {len(models)} models on {num_test_images} images...")
+        print(f"\nTesting {len(models)} models{subfolder_info} on {num_test_images} images...")
     
     print("-" * 80)
     
@@ -723,9 +745,11 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
     # Sort by accuracy descending
     results.sort(key=lambda x: x['Accuracy_Raw'], reverse=True)
     
-    # Print summary table (rest of the function remains the same...)
+    # Print summary table
     print(f"\n{'='*80}")
     print(f"SUMMARY RESULTS")
+    if subfolder:
+        print(f"SUBFOLDER: {subfolder}")
     if use_all_datasets or num_test_images == 0:
         print(f"DATASETS: ALL available images")
     else:
@@ -764,7 +788,7 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
         print(f"⚡ FASTEST MODEL: {fastest_model['Directory']}/{fastest_model['Model']}")
         print(f"   Speed: {fastest_model['Inf/s']} inf/s, Accuracy: {float(fastest_model['Accuracy']):.3f}")
     
-    # Generate comparison graphs (existing code...)
+    # Generate comparison graphs
     graph_paths = generate_comparison_graphs(
         results, 
         quantized_only=quantized_only,
@@ -831,21 +855,24 @@ def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_
     print(f"💾 Full results saved to: {csv_path}")
     return csv_path
 
-def list_available_models(quantized_only=True):
+def list_available_models(quantized_only=True, subfolder=None):
     """List all available models in training directories"""
-    models = get_all_models(quantized_only=quantized_only)
+    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder)
     
     if not models:
-        print("No models found.")
+        if subfolder:
+            print(f"No models found in subfolder '{subfolder}'")
+        else:
+            print("No models found.")
         return
     
-    print(f"Available {'quantized ' if quantized_only else ''}models:")
+    subfolder_info = f" in subfolder '{subfolder}'" if subfolder else ""
+    print(f"Available {'quantized ' if quantized_only else ''}models{subfolder_info}:")
     print("-" * 50)
     
     for model in models:
         print(f"{model['directory']}/{model['name']} ({model['type']}, {model['size_kb']:.1f} KB, {model['parameters']} params)")
-        
-        
+
 def save_failed_images(failed_predictions, output_dir):
     """Save failed prediction images to directory for manual review"""
     failed_dir = os.path.join(output_dir, "failed-predictions")
@@ -880,7 +907,6 @@ def save_failed_images(failed_predictions, output_dir):
                 
             elif isinstance(image_data, str) and os.path.exists(image_data):
                 # If it's a file path, copy the file
-                import shutil
                 shutil.copy2(image_data, filepath)
                 saved_count += 1
                 
@@ -915,6 +941,7 @@ def generate_failed_predictions_csv(failed_predictions, output_dir):
             'predicted_label': failure['predicted_label'],
             'confidence': f"{failure['confidence']:.4f}",
             'model': failure.get('model', 'unknown'),
+            'model_directory': failure.get('model_directory', 'unknown'),
             'image_source': failure.get('image_source', 'unknown')
         }
         csv_data.append(row)
@@ -934,7 +961,6 @@ def generate_failed_predictions_csv(failed_predictions, output_dir):
             print(f"  Label {label}: {count} failures")
     
     return csv_path
-    
 
 def test_single_model(model_path, num_test_images=0, debug=False, use_all_datasets=True, 
                      list_failed=False, save_failed=False):
@@ -988,7 +1014,6 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
                     print(f"✗ {i:4d}: Wrong - Pred: {prediction}, True: {true_label}, Conf: {confidence:.3f}")
                 
                 # ALWAYS collect failed prediction for accurate counting
-                # We'll only save/export if list_failed or save_failed is enabled
                 failed_predictions.append({
                     'image': image,
                     'true_label': true_label,
@@ -1020,12 +1045,20 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
     print(f"Average inference time: {avg_inference_time:.2f} ms")
     print(f"Inferences per second: {inferences_per_second:.0f}")
     
-    # Verify the math matches
+    # CRITICAL: Verify the failed count matches expected
     expected_failed = total_tested - correct_predictions
     if len(failed_predictions) != expected_failed:
-        print(f"⚠️  WARNING: Failed count mismatch! Expected: {expected_failed}, Got: {len(failed_predictions)}")
-        # Force correct count
-        failed_predictions = failed_predictions[:expected_failed] if len(failed_predictions) > expected_failed else failed_predictions
+        print(f"❌ CRITICAL ERROR: Failed count mismatch!")
+        print(f"   Expected failed: {expected_failed} (total_tested: {total_tested} - correct: {correct_predictions})")
+        print(f"   Actual failed collected: {len(failed_predictions)}")
+        print(f"   This indicates a logic error in the prediction collection!")
+        print(f"   Please investigate the code - data may be incomplete!")
+        
+        # Don't proceed with failed prediction analysis if counts don't match
+        if list_failed or save_failed:
+            print(f"⚠️  Skipping failed prediction export due to count mismatch")
+            list_failed = False
+            save_failed = False
     
     # Handle failed predictions export if requested
     if list_failed and failed_predictions:
@@ -1034,8 +1067,8 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
     if save_failed and failed_predictions:
         save_failed_images(failed_predictions, params.OUTPUT_DIR)
     
-    # Print failed predictions summary
-    if failed_predictions:
+    # Print failed predictions summary (only if counts match)
+    if failed_predictions and len(failed_predictions) == expected_failed:
         print(f"\nFailed predictions breakdown:")
         failed_by_true_label = {}
         for failure in failed_predictions:
@@ -1055,7 +1088,6 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
                 print(f"    → as {pred_label}: {count} times ({percentage:.1f}%)")
     
     return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions
-    
 
 def main():
     """Main function with command line arguments"""
@@ -1075,10 +1107,13 @@ def main():
     parser.add_argument('--list-failed', action='store_true', help='Generate CSV with details of failed predictions')
     parser.add_argument('--save-failed', action='store_true', help='Save failed prediction images to directory')
     
+    # New argument for subfolder
+    parser.add_argument('--subfolder', type=str, help='Only test/list models from this specific subfolder')
+    
     args = parser.parse_args()
     
     if args.list:
-        list_available_models(quantized_only=args.quantized)
+        list_available_models(quantized_only=args.quantized, subfolder=args.subfolder)
         return
     
     # Handle single model prediction (highest priority)
@@ -1087,7 +1122,7 @@ def main():
         if model_path is None:
             print(f"❌ Model '{args.model}' not found!")
             print("Available models:")
-            list_available_models(quantized_only=args.quantized)
+            list_available_models(quantized_only=args.quantized, subfolder=args.subfolder)
             return
         
         test_single_model(
@@ -1108,7 +1143,8 @@ def main():
             debug=args.debug,
             use_all_datasets=args.all_datasets,
             list_failed=args.list_failed,
-            save_failed=args.save_failed
+            save_failed=args.save_failed,
+            subfolder=args.subfolder
         )
         return
     
@@ -1128,12 +1164,9 @@ def main():
         debug=args.debug,
         use_all_datasets=args.all_datasets,
         list_failed=args.list_failed,
-        save_failed=args.save_failed
+        save_failed=args.save_failed,
+        subfolder=args.subfolder
     )
 
 if __name__ == "__main__":
     main()
-    
-# py bench_predict.py --test_all
-
-# py bench_predict.py --model digit_recognizer_v4.tflite --list-failed --save-failed
