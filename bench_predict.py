@@ -14,6 +14,8 @@ from datetime import datetime
 import time
 import matplotlib.pyplot as plt
 from pathlib import Path
+import pandas as pd
+from PIL import Image
 from utils.multi_source_loader import MultiSourceDataLoader, load_combined_dataset
 
 class TFLiteDigitPredictor:
@@ -351,19 +353,21 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     
     return test_data
 
-def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_datasets=True):
+def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_datasets=True, 
+                         collect_failed=False, model_name=None):
     """Test a model on random images from dataset and return accuracy and performance metrics"""
     predictor = TFLiteDigitPredictor(model_path)
     correct_predictions = 0
     total_tested = 0
     total_inference_time = 0.0
+    failed_predictions = []
     
     # Load test data with proper labels
     test_data = load_test_dataset_with_labels(num_test_images, use_all_datasets)
     
     if not test_data:
         print("❌ No test data available")
-        return 0.0, 0, 0.0, 0.0
+        return 0.0, 0, 0.0, 0.0, failed_predictions
     
     # Warm-up run to avoid cold start timing issues
     if len(test_data) > 0:
@@ -393,7 +397,7 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
             prediction, confidence, _ = predictor.predict(image, debug=debug)
             end_time = time.perf_counter()
             
-            inference_time = (end_time - start_time) * 1000  # Convert to milliseconds
+            inference_time = (end_time - start_time) * 1000
             total_inference_time += inference_time
             
             # Check if prediction matches true label
@@ -404,6 +408,16 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
             else:
                 if debug:
                     print(f"✗ Wrong: {prediction} (true: {true_label}, confidence: {confidence:.3f})")
+                
+                # ALWAYS collect failed prediction for accurate counting
+                failed_predictions.append({
+                    'image': image,
+                    'true_label': true_label,
+                    'predicted_label': prediction,
+                    'confidence': confidence,
+                    'model': model_name or os.path.basename(model_path),
+                    'image_source': 'dataset'
+                })
             
             total_tested += 1
             
@@ -414,16 +428,24 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
     
     # Calculate performance metrics
     accuracy = correct_predictions / total_tested if total_tested > 0 else 0.0
-    
     avg_inference_time = total_inference_time / total_tested if total_tested > 0 else 0.0
     inferences_per_second = 1000 / avg_inference_time if avg_inference_time > 0 else 0.0
     
+    # Verify failed count matches expected
+    expected_failed = total_tested - correct_predictions
+    if len(failed_predictions) != expected_failed:
+        print(f"⚠️  Failed count mismatch for {model_name}: Expected {expected_failed}, got {len(failed_predictions)}")
+        # Adjust to correct count
+        failed_predictions = failed_predictions[:expected_failed] if len(failed_predictions) > expected_failed else failed_predictions
+    
     if debug:
         print(f"Final accuracy: {accuracy:.3f} ({correct_predictions}/{total_tested})")
+        print(f"Failed predictions: {len(failed_predictions)}")
         print(f"Average inference time: {avg_inference_time:.2f} ms")
         print(f"Inferences per second: {inferences_per_second:.0f}")
     
-    return accuracy, total_tested, avg_inference_time, inferences_per_second
+    return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions
+    
 
 def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=True):
     """Generate separate comparison graphs for the benchmark results"""
@@ -609,7 +631,8 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
     
     return graph_paths
 
-def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all_datasets=True):
+def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all_datasets=True,
+                   list_failed=False, save_failed=False):
     """Test all available models and print summary table"""
     models = get_all_models(quantized_only=quantized_only)
     
@@ -626,6 +649,7 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
     print("-" * 80)
     
     results = []
+    all_failed_predictions = []  # Collect all failed predictions across models
     
     # Test all models (with or without progress bar based on debug mode)
     if debug:
@@ -640,12 +664,22 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
         if debug:
             print(f"\n🔍 Testing model: {model_info['directory']}/{model_info['name']}")
         
-        accuracy, tested_count, avg_inference_time, inferences_per_second = test_model_on_dataset(
+        # Pass collect_failed=True if either list_failed or save_failed is enabled
+        collect_failed = list_failed or save_failed
+        
+        accuracy, tested_count, avg_inference_time, inferences_per_second, failed_predictions = test_model_on_dataset(
             model_info['path'], 
             num_test_images=num_test_images,
             debug=debug,
-            use_all_datasets=use_all_datasets
+            use_all_datasets=use_all_datasets,
+            collect_failed=collect_failed,
+            model_name=model_info['name']
         )
+        
+        # Add model info to failed predictions
+        for failure in failed_predictions:
+            failure['model_directory'] = model_info['directory']
+            all_failed_predictions.append(failure)
         
         # Format parameters for display
         params_count = model_info['parameters']
@@ -670,16 +704,26 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
             'Inf Time_Raw': avg_inference_time,
             'Inf/s': f"{inferences_per_second:.0f}",
             'Inf/s_Raw': inferences_per_second,
-            'Tested': tested_count
+            'Tested': tested_count,
+            'Failed_Count': len(failed_predictions)
         })
         
         if debug:
             print(f"✅ Completed: {model_info['directory']}/{model_info['name']} - Accuracy: {accuracy:.3f}")
+            if failed_predictions:
+                print(f"   Failed predictions: {len(failed_predictions)}")
+    
+    # Handle failed predictions if requested
+    if list_failed and all_failed_predictions:
+        csv_path = generate_failed_predictions_csv(all_failed_predictions, params.OUTPUT_DIR)
+    
+    if save_failed and all_failed_predictions:
+        failed_dir = save_failed_images(all_failed_predictions, params.OUTPUT_DIR)
     
     # Sort by accuracy descending
     results.sort(key=lambda x: x['Accuracy_Raw'], reverse=True)
     
-    # Print summary table
+    # Print summary table (rest of the function remains the same...)
     print(f"\n{'='*80}")
     print(f"SUMMARY RESULTS")
     if use_all_datasets or num_test_images == 0:
@@ -687,10 +731,12 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
     else:
         print(f"DATASETS: {num_test_images} sampled images")
     print(f"MODELS: {'Quantized only' if quantized_only else 'All models'}")
+    if list_failed or save_failed:
+        print(f"FAILED PREDICTIONS: {len(all_failed_predictions)} total across all models")
     print(f"{'='*80}")
     
-    # Simplified console output
-    headers = ['Directory', 'Model', 'Type', 'Params', 'Size', 'Accuracy', 'Inf/s', 'Images']
+    # Simplified console output (modified to show failed count)
+    headers = ['Directory', 'Model', 'Type', 'Params', 'Size', 'Accuracy', 'Inf/s', 'Images', 'Failed']
     table_data = []
     for result in results:
         table_data.append([
@@ -701,7 +747,8 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
             result['Size (KB)'],
             f"{float(result['Accuracy']):.3f}",
             result['Inf/s'],
-            result['Tested']
+            result['Tested'],
+            result['Failed_Count']
         ])
     
     print(tabulate(table_data, headers=headers, tablefmt='simple_grid', stralign='right'))
@@ -717,7 +764,7 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
         print(f"⚡ FASTEST MODEL: {fastest_model['Directory']}/{fastest_model['Model']}")
         print(f"   Speed: {fastest_model['Inf/s']} inf/s, Accuracy: {float(fastest_model['Accuracy']):.3f}")
     
-    # Generate comparison graphs
+    # Generate comparison graphs (existing code...)
     graph_paths = generate_comparison_graphs(
         results, 
         quantized_only=quantized_only,
@@ -732,7 +779,7 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
         test_images_count=num_test_images
     )
     
-    return results
+    return results, all_failed_predictions
 
 def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_images_count=0):
     """Save FULL results to CSV file with all information"""
@@ -797,6 +844,218 @@ def list_available_models(quantized_only=True):
     
     for model in models:
         print(f"{model['directory']}/{model['name']} ({model['type']}, {model['size_kb']:.1f} KB, {model['parameters']} params)")
+        
+        
+def save_failed_images(failed_predictions, output_dir):
+    """Save failed prediction images to directory for manual review"""
+    failed_dir = os.path.join(output_dir, "failed-predictions")
+    os.makedirs(failed_dir, exist_ok=True)
+    
+    saved_count = 0
+    for i, failure in enumerate(failed_predictions):
+        try:
+            # Extract image data (could be array or path)
+            image_data = failure['image']
+            true_label = failure['true_label']
+            predicted_label = failure['predicted_label']
+            confidence = failure['confidence']
+            
+            # Generate filename
+            filename = f"fail_{i:04d}_true{true_label}_pred{predicted_label}_conf{confidence:.3f}.png"
+            filepath = os.path.join(failed_dir, filename)
+            
+            # Handle different image data types
+            if isinstance(image_data, np.ndarray):
+                # If it's a numpy array (from dataset)
+                if len(image_data.shape) == 3 and image_data.shape[2] == 3:
+                    # RGB image
+                    img = Image.fromarray(image_data.astype(np.uint8))
+                elif len(image_data.shape) == 2 or (len(image_data.shape) == 3 and image_data.shape[2] == 1):
+                    # Grayscale image
+                    if len(image_data.shape) == 3:
+                        image_data = image_data.squeeze()
+                    img = Image.fromarray(image_data.astype(np.uint8))
+                img.save(filepath)
+                saved_count += 1
+                
+            elif isinstance(image_data, str) and os.path.exists(image_data):
+                # If it's a file path, copy the file
+                import shutil
+                shutil.copy2(image_data, filepath)
+                saved_count += 1
+                
+        except Exception as e:
+            print(f"Warning: Could not save failed image {i}: {e}")
+            continue
+    
+    print(f"💾 Saved {saved_count} failed images to: {failed_dir}")
+    return failed_dir
+
+def generate_failed_predictions_csv(failed_predictions, output_dir):
+    """Generate CSV file with details of failed predictions"""
+    if not failed_predictions:
+        print("No failed predictions to save.")
+        return None
+    
+    # Create results directory
+    results_dir = os.path.join(output_dir, "test_results")
+    os.makedirs(results_dir, exist_ok=True)
+    
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_filename = f"failed_predictions_{timestamp}.csv"
+    csv_path = os.path.join(results_dir, csv_filename)
+    
+    # Prepare data for CSV
+    csv_data = []
+    for i, failure in enumerate(failed_predictions):
+        row = {
+            'index': i,
+            'true_label': failure['true_label'],
+            'predicted_label': failure['predicted_label'],
+            'confidence': f"{failure['confidence']:.4f}",
+            'model': failure.get('model', 'unknown'),
+            'image_source': failure.get('image_source', 'unknown')
+        }
+        csv_data.append(row)
+    
+    # Create DataFrame and save to CSV
+    df = pd.DataFrame(csv_data)
+    df.to_csv(csv_path, index=False)
+    
+    print(f"📊 Failed predictions CSV saved to: {csv_path}")
+    print(f"   Total failed predictions: {len(failed_predictions)}")
+    
+    # Print summary by true label
+    if len(failed_predictions) > 0:
+        print("\nFailed predictions by true label:")
+        failed_by_label = df.groupby('true_label').size()
+        for label, count in failed_by_label.items():
+            print(f"  Label {label}: {count} failures")
+    
+    return csv_path
+    
+
+def test_single_model(model_path, num_test_images=0, debug=False, use_all_datasets=True, 
+                     list_failed=False, save_failed=False):
+    """Test a single model and optionally collect failed predictions"""
+    predictor = TFLiteDigitPredictor(model_path)
+    
+    # Load test data with proper labels
+    test_data = load_test_dataset_with_labels(num_test_images, use_all_datasets)
+    
+    if not test_data:
+        print("❌ No test data available")
+        return
+    
+    print(f"Testing model: {os.path.basename(model_path)}")
+    print(f"Test images: {len(test_data)}")
+    print("-" * 50)
+    
+    correct_predictions = 0
+    total_tested = 0
+    total_inference_time = 0.0
+    failed_predictions = []
+    
+    # Warm-up run
+    if len(test_data) > 0:
+        warmup_image, _ = test_data[0]
+        if warmup_image is not None:
+            try:
+                predictor.predict(warmup_image, debug=False)
+            except:
+                pass
+    
+    # Test the model - ALWAYS collect failed predictions for accurate counting
+    for i, (image, true_label) in enumerate(test_data):
+        if image is None:
+            continue
+        
+        try:
+            start_time = time.perf_counter()
+            prediction, confidence, _ = predictor.predict(image, debug=debug)
+            end_time = time.perf_counter()
+            
+            inference_time = (end_time - start_time) * 1000
+            total_inference_time += inference_time
+            
+            if prediction == true_label:
+                correct_predictions += 1
+                if debug:
+                    print(f"✓ {i:4d}: Correct - Pred: {prediction}, True: {true_label}, Conf: {confidence:.3f}")
+            else:
+                if debug:
+                    print(f"✗ {i:4d}: Wrong - Pred: {prediction}, True: {true_label}, Conf: {confidence:.3f}")
+                
+                # ALWAYS collect failed prediction for accurate counting
+                # We'll only save/export if list_failed or save_failed is enabled
+                failed_predictions.append({
+                    'image': image,
+                    'true_label': true_label,
+                    'predicted_label': prediction,
+                    'confidence': confidence,
+                    'model': os.path.basename(model_path),
+                    'image_source': 'dataset',
+                    'index': i
+                })
+            
+            total_tested += 1
+            
+        except Exception as e:
+            if debug:
+                print(f"Prediction error on image {i}: {e}")
+            continue
+    
+    # Calculate metrics
+    accuracy = correct_predictions / total_tested if total_tested > 0 else 0.0
+    avg_inference_time = total_inference_time / total_tested if total_tested > 0 else 0.0
+    inferences_per_second = 1000 / avg_inference_time if avg_inference_time > 0 else 0.0
+    
+    # Print results
+    print(f"\n{'='*50}")
+    print(f"RESULTS for {os.path.basename(model_path)}")
+    print(f"{'='*50}")
+    print(f"Accuracy: {accuracy:.4f} ({correct_predictions}/{total_tested})")
+    print(f"Failed predictions: {len(failed_predictions)}")
+    print(f"Average inference time: {avg_inference_time:.2f} ms")
+    print(f"Inferences per second: {inferences_per_second:.0f}")
+    
+    # Verify the math matches
+    expected_failed = total_tested - correct_predictions
+    if len(failed_predictions) != expected_failed:
+        print(f"⚠️  WARNING: Failed count mismatch! Expected: {expected_failed}, Got: {len(failed_predictions)}")
+        # Force correct count
+        failed_predictions = failed_predictions[:expected_failed] if len(failed_predictions) > expected_failed else failed_predictions
+    
+    # Handle failed predictions export if requested
+    if list_failed and failed_predictions:
+        generate_failed_predictions_csv(failed_predictions, params.OUTPUT_DIR)
+    
+    if save_failed and failed_predictions:
+        save_failed_images(failed_predictions, params.OUTPUT_DIR)
+    
+    # Print failed predictions summary
+    if failed_predictions:
+        print(f"\nFailed predictions breakdown:")
+        failed_by_true_label = {}
+        for failure in failed_predictions:
+            true_label = failure['true_label']
+            predicted_label = failure['predicted_label']
+            if true_label not in failed_by_true_label:
+                failed_by_true_label[true_label] = {}
+            if predicted_label not in failed_by_true_label[true_label]:
+                failed_by_true_label[true_label][predicted_label] = 0
+            failed_by_true_label[true_label][predicted_label] += 1
+        
+        for true_label in sorted(failed_by_true_label.keys()):
+            total_for_label = sum(failed_by_true_label[true_label].values())
+            print(f"  True label {true_label}: {total_for_label} misclassifications")
+            for pred_label, count in sorted(failed_by_true_label[true_label].items()):
+                percentage = (count / total_for_label) * 100
+                print(f"    → as {pred_label}: {count} times ({percentage:.1f}%)")
+    
+    return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions
+    
 
 def main():
     """Main function with command line arguments"""
@@ -804,7 +1063,7 @@ def main():
     parser.add_argument('--model', type=str, help='Model name to use for prediction')
     parser.add_argument('--quantized', action='store_true', default=True, help='Use only quantized models (default: True)')
     parser.add_argument('--no-quantized', action='store_false', dest='quantized', help='Include non-quantized models')
-    parser.add_argument('--test_all', action='store_true', default=True, help='Test all available models and print accuracy summary (default: True)')
+    parser.add_argument('--test_all', action='store_true', help='Test all available models and print accuracy summary')
     parser.add_argument('--no-test_all', action='store_false', dest='test_all', help='Do not run automatic benchmark')
     parser.add_argument('--test_images', type=int, default=0, help='Number of test images per model. 0 means use all images (default: 0)')
     parser.add_argument('--all_datasets', action='store_true', default=True, help='Use all available images from dataset (default: True)')
@@ -812,33 +1071,69 @@ def main():
     parser.add_argument('--debug', action='store_true', help='Debug model output interpretation')
     parser.add_argument('--list', action='store_true', help='List all available models')
     
+    # New arguments for failed predictions
+    parser.add_argument('--list-failed', action='store_true', help='Generate CSV with details of failed predictions')
+    parser.add_argument('--save-failed', action='store_true', help='Save failed prediction images to directory')
+    
     args = parser.parse_args()
     
     if args.list:
         list_available_models(quantized_only=args.quantized)
         return
     
-    if args.test_all:
-        # Validate that --all_datasets is only used with --test_all
-        if args.all_datasets and not args.test_all:
-            print("Warning: --all_datasets can only be used with --test_all. Ignoring --all_datasets.")
-            args.all_datasets = False
+    # Handle single model prediction (highest priority)
+    if args.model:
+        model_path = find_model_path(args.model)
+        if model_path is None:
+            print(f"❌ Model '{args.model}' not found!")
+            print("Available models:")
+            list_available_models(quantized_only=args.quantized)
+            return
         
+        test_single_model(
+            model_path=model_path,
+            num_test_images=args.test_images,
+            debug=args.debug,
+            use_all_datasets=args.all_datasets,
+            list_failed=args.list_failed,
+            save_failed=args.save_failed
+        )
+        return
+    
+    # Handle test_all mode
+    if args.test_all:
         test_all_models(
             quantized_only=args.quantized, 
             num_test_images=args.test_images,
             debug=args.debug,
-            use_all_datasets=args.all_datasets
+            use_all_datasets=args.all_datasets,
+            list_failed=args.list_failed,
+            save_failed=args.save_failed
         )
         return
     
+    # Default behavior (when no specific mode is specified)
     if args.debug:
-        print("Debug mode requires --test_all for benchmarking. Use --test_all --debug")
+        print("Debug mode requires either --model or --test_all")
         return
     
-    print("Use --list to see available models or run with default benchmark settings.")
+    # If no arguments provided, show help and run default benchmark
+    print("No specific mode selected. Running default benchmark...")
+    print("Use --list to see available models, --model to test specific model, or --test_all for full benchmark.")
+    print("-" * 60)
+    
+    test_all_models(
+        quantized_only=args.quantized, 
+        num_test_images=args.test_images,
+        debug=args.debug,
+        use_all_datasets=args.all_datasets,
+        list_failed=args.list_failed,
+        save_failed=args.save_failed
+    )
 
 if __name__ == "__main__":
     main()
     
-# py bench_predict.py
+# py bench_predict.py --test_all
+
+# py bench_predict.py --model digit_recognizer_v4.tflite --list-failed --save-failed

@@ -112,7 +112,7 @@ def preprocess_for_inference(images, target_size=None, grayscale=None):
     if single_image:
         arr = arr[0]  # Return single image instead of batch
 
-    print(f"🔧 Preprocessing - Input range: [{arr.min()}, {arr.max()}], dtype: {arr.dtype}")
+    # print(f"🔧 Preprocessing - Input range: [{arr.min()}, {arr.max()}], dtype: {arr.dtype}")
 
     # FOR STANDARD QUANTIZED UINT8 MODELS: Keep as uint8 [0, 255]
     if params.QUANTIZE_MODEL and not params.ESP_DL_QUANTIZE:
@@ -126,7 +126,7 @@ def preprocess_for_inference(images, target_size=None, grayscale=None):
         
         # Ensure range is [0, 255]
         arr = np.clip(arr, 0, 255)
-        print(f"   Output: uint8 [{arr.min()}, {arr.max()}] (Standard quantization)")
+        # print(f"   Output: uint8 [{arr.min()}, {arr.max()}] (Standard quantization)")
         return arr
 
     # FOR ESP-DL QUANTIZED MODELS: Convert to int8 [-128, 127]
@@ -140,7 +140,7 @@ def preprocess_for_inference(images, target_size=None, grayscale=None):
         
         # CORRECT ESP-DL conversion: uint8 [0,255] -> int8 [-128,127]
         arr = (arr.astype(np.int32) - 128).astype(np.int8)
-        print(f"   Output: int8 [{arr.min()}, {arr.max()}] (ESP-DL quantization)")
+        # print(f"   Output: int8 [{arr.min()}, {arr.max()}] (ESP-DL quantization)")
         return arr
 
     # For float models: float32 [0,1]
@@ -148,7 +148,7 @@ def preprocess_for_inference(images, target_size=None, grayscale=None):
         arr = arr.astype(np.float32)
         if arr.max() > 1.0:
             arr = arr / 255.0
-        print(f"   Output: float32 [{arr.min():.3f}, {arr.max():.3f}] (No quantization)")
+        # print(f"   Output: float32 [{arr.min():.3f}, {arr.max():.3f}] (No quantization)")
         return arr
 
     return arr

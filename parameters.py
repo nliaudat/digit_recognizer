@@ -31,11 +31,15 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v3",
     "digit_recognizer_v4",
     # "digit_recognizer_v5",
-    # "digit_recognizer_v6",
-    # "digit_recognizer_v7",
+    "digit_recognizer_v6",
+    "digit_recognizer_v7",
+    "digit_recognizer_v8", #not for IOT
+    "digit_recognizer_v9", #not for IOT
+    "digit_recognizer_v10", #not for IOT
+    "digit_recognizer_v11", #not for IOT
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "digit_recognizer_v11" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
@@ -45,7 +49,7 @@ MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODE
 # Image Parameters
 INPUT_WIDTH = 20
 INPUT_HEIGHT = 32
-INPUT_CHANNELS = 3  # 1 for grayscale, 3 for RGB
+INPUT_CHANNELS = 1  # 1 for grayscale, 3 for RGB
 INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
 USE_GRAYSCALE = (INPUT_CHANNELS == 1) 
 
@@ -84,13 +88,13 @@ DATA_SOURCES = [
         'path': 'datasets/real_integra', 
         'weight': 0.7,
     },
-    # {
-        # 'name': 'static_augmentation',
-        # 'type': 'label_file', 
-        # 'labels': 'labels_10_shuffle.txt',  
-        # 'path': 'datasets/static_augmentation', 
-        # 'weight': 0.6,
-    # },
+    {
+        'name': 'static_augmentation',
+        'type': 'label_file', 
+        'labels': 'labels_10_shuffle.txt',  
+        'path': 'datasets/static_augmentation', 
+        'weight': 0.6,
+    },
 ########### class 100 training #############
     # {
         # 'name': 'Tenth-of-step-of-a-meter-digit',
@@ -216,11 +220,11 @@ TF_DATA_SHUFFLE_BUFFER = 1000
 TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
 
 # File Paths
-MODEL_FILENAME = MODEL_ARCHITECTURE
+# MODEL_FILENAME = MODEL_ARCHITECTURE
 OUTPUT_DIR = "exported_models"
 QUANTIZE_NUM_SAMPLES = 22000
-TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
-FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
+# TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
+# FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
 
 # Debug and Logging
 VERBOSE = 1
@@ -461,6 +465,21 @@ TUNER_BATCH_SIZES = [16, 32, 64, 128]  # More options
 # Early Stopping for Tuning
 TUNER_EARLY_STOPPING_PATIENCE = 10
 TUNER_MIN_DELTA = 0.001
+
+# ==============================================================================
+# output FUNCTIONS
+# ==============================================================================
+
+
+def get_model_filename():
+    return MODEL_ARCHITECTURE
+
+def get_tflite_filename():
+    return f"{get_model_filename()}.tflite"
+
+def get_float_tflite_filename():
+    return f"{get_model_filename()}_float.tflite"
+
 
 # ==============================================================================
 # VALIDATION FUNCTIONS
