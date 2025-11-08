@@ -33,10 +33,10 @@ AVAILABLE_MODELS = [
     # "digit_recognizer_v5",
     "digit_recognizer_v6",
     "digit_recognizer_v7",
-    "digit_recognizer_v8",
-    "digit_recognizer_v9",
-    "digit_recognizer_v10",
-    "digit_recognizer_v11",
+    "digit_recognizer_v8", #not for IOT
+    "digit_recognizer_v9", #not for IOT
+    "digit_recognizer_v10", #not for IOT
+    "digit_recognizer_v11", #not for IOT
 ]
 
 MODEL_ARCHITECTURE = "digit_recognizer_v11" # one of the models in AVAILABLE_MODELS
