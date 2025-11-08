@@ -22,24 +22,25 @@ AVAILABLE_MODELS = [
     # "esp_quantization_ready_v2",
     # "esp_quantization_ready_v2_aggressive",
     # "esp_quantization_ready_v3",
-    "mnist_quantization",
+    # "mnist_quantization", #64.2	0.9645
     # "digit_recognizer_v1",
     # "simple_cnn_v2",
     # "minimal_cnn",
     # "mobilenet_style",
     # "digit_recognizer_v2",
-    "digit_recognizer_v3",
-    "digit_recognizer_v4",
-    # "digit_recognizer_v5",
-    "digit_recognizer_v6",
-    "digit_recognizer_v7",
-    "digit_recognizer_v8", #not for IOT
-    "digit_recognizer_v9", #not for IOT
-    "digit_recognizer_v10", #not for IOT
+    "digit_recognizer_v3", #69.4	0.9804
+    "digit_recognizer_v4", # 61.4	0.9855
+    # "digit_recognizer_v5", #37.4	0.9502
+    "digit_recognizer_v6", # 36.5	0.9652
+    "digit_recognizer_v7", #46.7	0.9673
+    # "digit_recognizer_v8", #not for IOT #396.4	0.9915
+    "digit_recognizer_v9", #not for IOT #148.6	0.9907
+    # "digit_recognizer_v10", #not for IOT #1392.3	0.9917
     "digit_recognizer_v11", #not for IOT
+    "digit_recognizer_v12",
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v11" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
