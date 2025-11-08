@@ -22,7 +22,7 @@ AVAILABLE_MODELS = [
     # "esp_quantization_ready_v2",
     # "esp_quantization_ready_v2_aggressive",
     # "esp_quantization_ready_v3",
-    # "mnist_quantization",
+    "mnist_quantization",
     # "digit_recognizer_v1",
     # "simple_cnn_v2",
     # "minimal_cnn",
@@ -31,11 +31,15 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v3",
     "digit_recognizer_v4",
     # "digit_recognizer_v5",
-    # "digit_recognizer_v6",
-    # "digit_recognizer_v7",
+    "digit_recognizer_v6",
+    "digit_recognizer_v7",
+    "digit_recognizer_v8",
+    "digit_recognizer_v9",
+    "digit_recognizer_v10",
+    "digit_recognizer_v11",
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "digit_recognizer_v11" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================

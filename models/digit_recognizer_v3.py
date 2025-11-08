@@ -11,7 +11,8 @@ def create_digit_recognizer_v3():
     
     if input_channels == 1:
         print("Creating optimized grayscale model (v3_grayscale)")
-        return create_digit_recognizer_v3_grayscale()
+        # return create_digit_recognizer_v3_grayscale()
+        return create_digit_recognizer_v3_grayscale_improved()
     elif input_channels == 3:
         print("Creating optimized RGB model (v3_rgb)")
         return create_digit_recognizer_v3_rgb()
@@ -74,6 +75,83 @@ def create_digit_recognizer_v3_grayscale():
     )(x)
 
     return tf.keras.Model(inputs, outputs, name="digit_recognizer_v3_grayscale")
+    
+    
+def create_digit_recognizer_v3_grayscale_improved():
+    """
+    Improved version for grayscale images with better accuracy
+    """
+    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    
+    # Layer 1: Increased filters for better feature detection
+    x = tf.keras.layers.Conv2D(
+        16, (3, 3), padding='same',  # Increased from 8 to 16
+        kernel_initializer='he_normal',
+        use_bias=True,
+        activation='relu',
+        name='conv1_16f'
+    )(inputs)
+    x = tf.keras.layers.BatchNormalization(name='bn1')(x)  # Added BN
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_1')(x)
+    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+    x = tf.keras.layers.Dropout(0.1, name='drop1')(x)  # Light dropout
+    
+    # Layer 2: Increased capacity
+    x = tf.keras.layers.Conv2D(
+        32, (3, 3), padding='same',  # Increased from 16 to 32
+        kernel_initializer='he_normal',
+        use_bias=True,
+        activation='relu',
+        name='conv2_32f'
+    )(x)
+    x = tf.keras.layers.BatchNormalization(name='bn2')(x)  # Added BN
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_2')(x)
+    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
+    x = tf.keras.layers.Dropout(0.2, name='drop2')(x)
+    
+    # Layer 3: Additional convolutional layer for better features
+    x = tf.keras.layers.Conv2D(
+        48, (3, 3), padding='same',  # Increased from 24 to 48
+        kernel_initializer='he_normal',
+        use_bias=True,
+        activation='relu',
+        name='conv3_48f'
+    )(x)
+    x = tf.keras.layers.BatchNormalization(name='bn3')(x)
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_3')(x)
+    
+    # Layer 4: Additional layer for complex feature learning
+    x = tf.keras.layers.Conv2D(
+        64, (3, 3), padding='same',
+        kernel_initializer='he_normal',
+        use_bias=True,
+        activation='relu',
+        name='conv4_64f'
+    )(x)
+    x = tf.keras.layers.BatchNormalization(name='bn4')(x)
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_4')(x)
+    x = tf.keras.layers.Dropout(0.3, name='drop3')(x)
+    
+    # Alternative to GlobalAveragePooling - try Flatten or keep spatial info
+    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    
+    # Increased dense layer capacity
+    x = tf.keras.layers.Dense(64, activation='relu', name='feature_dense1')(x)  # Increased from 32 to 64
+    x = tf.keras.layers.BatchNormalization(name='bn_dense')(x)
+    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense')(x)
+    x = tf.keras.layers.Dropout(0.4, name='drop_dense')(x)
+    
+    # Optional: Additional small dense layer
+    x = tf.keras.layers.Dense(32, activation='relu', name='feature_dense2')(x)
+    
+    # Output layer
+    outputs = tf.keras.layers.Dense(
+        params.NB_CLASSES, 
+        activation='softmax', 
+        name='output'
+    )(x)
+
+    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v3_grayscale_improved")
 
 def create_digit_recognizer_v3_rgb():
     """
