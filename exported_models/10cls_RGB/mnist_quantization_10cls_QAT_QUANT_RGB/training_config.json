@@ -1,6 +1,6 @@
 {
-  "timestamp": "2025-11-07 14:01:51",
-  "training_duration": "0:18:51.993360",
+  "timestamp": "2025-11-09 10:22:16",
+  "training_duration": "0:19:47.953427",
   "model_architecture": "mnist_quantization",
   "input_shape": [
     32,

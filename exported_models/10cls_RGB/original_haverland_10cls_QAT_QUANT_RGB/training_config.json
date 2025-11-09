@@ -1,6 +1,6 @@
 {
-  "timestamp": "2025-11-07 15:59:36",
-  "training_duration": "0:48:26.905267",
+  "timestamp": "2025-11-09 10:02:17",
+  "training_duration": "0:51:09.837117",
   "model_architecture": "original_haverland",
   "input_shape": [
     32,

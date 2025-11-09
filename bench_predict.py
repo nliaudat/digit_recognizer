@@ -803,6 +803,18 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
         test_images_count=num_test_images
     )
     
+    # Generate markdown report
+    if csv_path and graph_paths:
+        markdown_path = generate_markdown_report(
+            csv_path,
+            graph_paths,
+            results,
+            quantized_only=quantized_only,
+            use_all_datasets=use_all_datasets,
+            test_images_count=num_test_images
+        )
+        print(f"📄 Comprehensive markdown report generated: {markdown_path}")
+    
     return results, all_failed_predictions
 
 def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_images_count=0):
@@ -854,6 +866,124 @@ def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_
     
     print(f"💾 Full results saved to: {csv_path}")
     return csv_path
+    
+def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True, use_all_datasets=True, test_images_count=0):
+    """Generate a comprehensive Markdown report from CSV results and graphs"""
+    
+    # Read the CSV data
+    df = pd.read_csv(csv_path)
+    
+    # Create report directory
+    reports_dir = os.path.join(params.OUTPUT_DIR, "test_results", "reports")
+    os.makedirs(reports_dir, exist_ok=True)
+    
+    # Generate report filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_filename = f"benchmark_report_{timestamp}.md"
+    report_path = os.path.join(reports_dir, report_filename)
+    
+    # Prepare data for markdown
+    best_accuracy_model = df.loc[df['Accuracy'].idxmax()]
+    fastest_model = df.loc[df['Inferences_per_second'].idxmax()]
+    smallest_model = df.loc[df['Size_KB'].idxmin()]
+    
+    # Generate markdown content
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write("# Digit Recognition Benchmark Report\n\n")
+        
+        # Summary section
+        f.write("## 📊 Executive Summary\n\n")
+        f.write(f"- **Test Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"- **Models Tested**: {len(df)} {'quantized' if quantized_only else 'all'} models\n")
+        f.write(f"- **Test Images**: {'All available' if use_all_datasets else f'{test_images_count} samples'}\n")
+        f.write(f"- **Best Accuracy**: **{best_accuracy_model['Model']}** ({best_accuracy_model['Accuracy']:.3f})\n")
+        f.write(f"- **Fastest Model**: **{fastest_model['Model']}** ({fastest_model['Inferences_per_second']:.0f} inf/s)\n")
+        f.write(f"- **Smallest Model**: **{smallest_model['Model']}** ({smallest_model['Size_KB']:.1f} KB)\n\n")
+        
+        # Results table
+        f.write("## 📋 Detailed Results\n\n")
+        f.write("| Model | Directory | Type | Parameters | Size (KB) | Accuracy | Inf/s |\n")
+        f.write("|-------|-----------|------|------------|-----------|----------|-------|\n")
+        
+        for _, row in df.iterrows():
+            f.write(f"| {row['Model']} | {row['Directory']} | {row['Type']} | {row['Parameters']:,} | {row['Size_KB']:.1f} | {row['Accuracy']:.3f} | {row['Inferences_per_second']:.0f} |\n")
+        f.write("\n")
+        
+        # Performance Analysis
+        f.write("## 🏆 Performance Analysis\n\n")
+        
+        f.write("### Best by Accuracy\n")
+        f.write(f"- **Model**: {best_accuracy_model['Model']}\n")
+        f.write(f"- **Directory**: {best_accuracy_model['Directory']}\n")
+        f.write(f"- **Accuracy**: {best_accuracy_model['Accuracy']:.3f}\n")
+        f.write(f"- **Speed**: {best_accuracy_model['Inferences_per_second']:.0f} inf/s\n")
+        f.write(f"- **Size**: {best_accuracy_model['Size_KB']:.1f} KB\n\n")
+        
+        f.write("### Fastest Model\n")
+        f.write(f"- **Model**: {fastest_model['Model']}\n")
+        f.write(f"- **Directory**: {fastest_model['Directory']}\n")
+        f.write(f"- **Speed**: {fastest_model['Inferences_per_second']:.0f} inf/s\n")
+        f.write(f"- **Accuracy**: {fastest_model['Accuracy']:.3f}\n")
+        f.write(f"- **Size**: {fastest_model['Size_KB']:.1f} KB\n\n")
+        
+        f.write("### Most Efficient (Smallest)\n")
+        f.write(f"- **Model**: {smallest_model['Model']}\n")
+        f.write(f"- **Directory**: {smallest_model['Directory']}\n")
+        f.write(f"- **Size**: {smallest_model['Size_KB']:.1f} KB\n")
+        f.write(f"- **Accuracy**: {smallest_model['Accuracy']:.3f}\n")
+        f.write(f"- **Speed**: {smallest_model['Inferences_per_second']:.0f} inf/s\n\n")
+        
+        # Visualizations section
+        f.write("## 📈 Visualizations\n\n")
+        
+        for graph_path in graph_paths:
+            graph_filename = os.path.basename(graph_path)
+            graph_relative_path = os.path.relpath(graph_path, reports_dir)
+            graph_title = graph_filename.replace('_', ' ').replace('.png', '').title()
+            
+            f.write(f"### {graph_title}\n\n")
+            f.write(f"![{graph_title}]({graph_relative_path})\n\n")
+            f.write("*Click image to view full resolution*\n\n")
+        
+        # Recommendations
+        f.write("## 💡 Recommendations\n\n")
+        
+        f.write("### For High Accuracy Applications\n")
+        f.write(f"- Use **{best_accuracy_model['Model']}** from {best_accuracy_model['Directory']}\n")
+        f.write(f"- Accuracy: {best_accuracy_model['Accuracy']:.3f}\n")
+        f.write(f"- Trade-off: {best_accuracy_model['Inferences_per_second']:.0f} inf/s\n\n")
+        
+        f.write("### For Real-time Applications\n")
+        f.write(f"- Use **{fastest_model['Model']}** from {fastest_model['Directory']}\n")
+        f.write(f"- Speed: {fastest_model['Inferences_per_second']:.0f} inf/s\n")
+        f.write(f"- Trade-off: {fastest_model['Accuracy']:.3f} accuracy\n\n")
+        
+        f.write("### For Resource-Constrained Environments\n")
+        f.write(f"- Use **{smallest_model['Model']}** from {smallest_model['Directory']}\n")
+        f.write(f"- Size: {smallest_model['Size_KB']:.1f} KB\n")
+        f.write(f"- Trade-off: {smallest_model['Accuracy']:.3f} accuracy\n\n")
+        
+        # Technical Details
+        f.write("## 🔧 Technical Details\n\n")
+        f.write("### Test Configuration\n")
+        f.write(f"- Quantized Models Only: {quantized_only}\n")
+        f.write(f"- Use All Datasets: {use_all_datasets}\n")
+        f.write(f"- Test Images Count: {test_images_count if test_images_count > 0 else 'All available'}\n")
+        f.write(f"- Total Models Tested: {len(df)}\n")
+        f.write(f"- Average Accuracy: {df['Accuracy'].mean():.3f}\n")
+        f.write(f"- Average Speed: {df['Inferences_per_second'].mean():.0f} inf/s\n")
+        f.write(f"- Average Model Size: {df['Size_KB'].mean():.1f} KB\n\n")
+        
+        f.write("### Files Generated\n")
+        f.write(f"- **CSV Results**: `{os.path.basename(csv_path)}`\n")
+        f.write(f"- **Graphs**: {len(graph_paths)} visualization files\n")
+        f.write(f"- **This Report**: `{report_filename}`\n\n")
+        
+        f.write("---\n")
+        f.write("*Report generated automatically by Digit Recognition Benchmarking Tool*\n")
+    
+    print(f"📄 Markdown report generated: {report_path}")
+    return report_path
 
 def list_available_models(quantized_only=True, subfolder=None):
     """List all available models in training directories"""
@@ -1170,3 +1300,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+# py bench_predict.py --test_all
+
+# py bench_predict.py --model digit_recognizer_v4.tflite --list-failed --save-failed
