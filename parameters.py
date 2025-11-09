@@ -13,7 +13,7 @@ AVAILABLE_MODELS = [
     # "practical_tiny_depthwise",
     # "simple_cnn", 
     # "dig_class100_s2",
-    "original_haverland",
+    "original_haverland", #203.3	0.9822
     # "esp_optimized_cnn",
     # "esp_ultra_light", 
     # "esp_high_capacity",
@@ -22,7 +22,7 @@ AVAILABLE_MODELS = [
     # "esp_quantization_ready_v2",
     # "esp_quantization_ready_v2_aggressive",
     # "esp_quantization_ready_v3",
-    # "mnist_quantization", #64.2	0.9645
+    "mnist_quantization", #64.2	0.9645
     # "digit_recognizer_v1",
     # "simple_cnn_v2",
     # "minimal_cnn",
@@ -35,9 +35,9 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v7", #46.7	0.9673
     # "digit_recognizer_v8", #not for IOT #396.4	0.9915
     "digit_recognizer_v9", #not for IOT #148.6	0.9907
-    # "digit_recognizer_v10", #not for IOT #1392.3	0.9917
-    "digit_recognizer_v11", #not for IOT
-    "digit_recognizer_v12",
+    # "digit_recognizer_v10", #not for IOT #1392.3	0.9917 (5h30 training)
+    # "digit_recognizer_v11", #not for IOT # 1370.8	0.9897
+    "digit_recognizer_v12", #406.7	0.9925
 ]
 
 MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODELS
@@ -50,7 +50,7 @@ MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODE
 # Image Parameters
 INPUT_WIDTH = 20
 INPUT_HEIGHT = 32
-INPUT_CHANNELS = 1  # 1 for grayscale, 3 for RGB
+INPUT_CHANNELS = 3  # 1 for grayscale, 3 for RGB
 INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
 USE_GRAYSCALE = (INPUT_CHANNELS == 1) 
 

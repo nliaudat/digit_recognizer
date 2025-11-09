@@ -912,3 +912,5 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
 if __name__ == "__main__":
     main()
     clear_cache()
+    
+# py train.py --train_all
