@@ -933,17 +933,17 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
         f.write(f"- **Accuracy**: {smallest_model['Accuracy']:.3f}\n")
         f.write(f"- **Speed**: {smallest_model['Inferences_per_second']:.0f} inf/s\n\n")
         
-        # Visualizations section
-        f.write("## 📈 Visualizations\n\n")
+        # # Visualizations section
+        # f.write("## 📈 Visualizations\n\n")
         
-        for graph_path in graph_paths:
-            graph_filename = os.path.basename(graph_path)
-            graph_relative_path = os.path.relpath(graph_path, reports_dir)
-            graph_title = graph_filename.replace('_', ' ').replace('.png', '').title()
+        # for graph_path in graph_paths:
+            # graph_filename = os.path.basename(graph_path)
+            # graph_relative_path = os.path.relpath(graph_path, reports_dir)
+            # graph_title = graph_filename.replace('_', ' ').replace('.png', '').title()
             
-            f.write(f"### {graph_title}\n\n")
-            f.write(f"![{graph_title}]({graph_relative_path})\n\n")
-            f.write("*Click image to view full resolution*\n\n")
+            # f.write(f"### {graph_title}\n\n")
+            # f.write(f"![{graph_title}]({graph_relative_path})\n\n")
+            # f.write("*Click image to view full resolution*\n\n")
         
         # Recommendations
         f.write("## 💡 Recommendations\n\n")
@@ -963,21 +963,21 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
         f.write(f"- Size: {smallest_model['Size_KB']:.1f} KB\n")
         f.write(f"- Trade-off: {smallest_model['Accuracy']:.3f} accuracy\n\n")
         
-        # Technical Details
-        f.write("## 🔧 Technical Details\n\n")
-        f.write("### Test Configuration\n")
-        f.write(f"- Quantized Models Only: {quantized_only}\n")
-        f.write(f"- Use All Datasets: {use_all_datasets}\n")
-        f.write(f"- Test Images Count: {test_images_count if test_images_count > 0 else 'All available'}\n")
-        f.write(f"- Total Models Tested: {len(df)}\n")
-        f.write(f"- Average Accuracy: {df['Accuracy'].mean():.3f}\n")
-        f.write(f"- Average Speed: {df['Inferences_per_second'].mean():.0f} inf/s\n")
-        f.write(f"- Average Model Size: {df['Size_KB'].mean():.1f} KB\n\n")
+        # # Technical Details
+        # f.write("## 🔧 Technical Details\n\n")
+        # f.write("### Test Configuration\n")
+        # f.write(f"- Quantized Models Only: {quantized_only}\n")
+        # f.write(f"- Use All Datasets: {use_all_datasets}\n")
+        # f.write(f"- Test Images Count: {test_images_count if test_images_count > 0 else 'All available'}\n")
+        # f.write(f"- Total Models Tested: {len(df)}\n")
+        # f.write(f"- Average Accuracy: {df['Accuracy'].mean():.3f}\n")
+        # f.write(f"- Average Speed: {df['Inferences_per_second'].mean():.0f} inf/s\n")
+        # f.write(f"- Average Model Size: {df['Size_KB'].mean():.1f} KB\n\n")
         
-        f.write("### Files Generated\n")
-        f.write(f"- **CSV Results**: `{os.path.basename(csv_path)}`\n")
-        f.write(f"- **Graphs**: {len(graph_paths)} visualization files\n")
-        f.write(f"- **This Report**: `{report_filename}`\n\n")
+        # f.write("### Files Generated\n")
+        # f.write(f"- **CSV Results**: `{os.path.basename(csv_path)}`\n")
+        # f.write(f"- **Graphs**: {len(graph_paths)} visualization files\n")
+        # f.write(f"- **This Report**: `{report_filename}`\n\n")
         
         f.write("---\n")
         f.write("*Report generated automatically by Digit Recognition Benchmarking Tool*\n")
