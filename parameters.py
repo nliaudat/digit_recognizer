@@ -50,7 +50,7 @@ MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODE
 # Image Parameters
 INPUT_WIDTH = 20
 INPUT_HEIGHT = 32
-INPUT_CHANNELS = 3  # 1 for grayscale, 3 for RGB
+INPUT_CHANNELS = 1  # 1 for grayscale, 3 for RGB
 INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
 USE_GRAYSCALE = (INPUT_CHANNELS == 1) 
 
@@ -68,63 +68,63 @@ USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 # Multiple Data Sources Configuration
 DATA_SOURCES = [ 
 ########### class 10 training #############
-    {
-        'name': 'Tenth-of-step-of-a-meter-digit',
-        'type': 'label_file', 
-        'labels': 'labels_10_shuffle.txt',  # Optional: specify label file name (default: 'labels.txt' - tab separated)
-        'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
-        'weight': 1.0, # undersample if weight < 1.0
-    },
-    {
-        'name': 'real_integra_bad_predictions',
-        'type': 'label_file', 
-        'labels': 'labels_10_shuffle.txt',  
-        'path': 'datasets/real_integra_bad_predictions', 
-        'weight': 1.0,
-    },
-    {
-        'name': 'real_integra',
-        'type': 'label_file', 
-        'labels': 'labels_10_shuffle.txt',  
-        'path': 'datasets/real_integra', 
-        'weight': 0.7,
-    },
-    {
-        'name': 'static_augmentation',
-        'type': 'label_file', 
-        'labels': 'labels_10_shuffle.txt',  
-        'path': 'datasets/static_augmentation', 
-        'weight': 0.6,
-    },
-########### class 100 training #############
     # {
         # 'name': 'Tenth-of-step-of-a-meter-digit',
         # 'type': 'label_file', 
-        # 'labels': 'labels_100_shuffle.txt',  # Optional: specify label file name (default: 'labels.txt' - tab separated)
+        # 'labels': 'labels_10_shuffle.txt',  # Optional: specify label file name (default: 'labels.txt' - tab separated)
         # 'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
         # 'weight': 1.0, # undersample if weight < 1.0
     # },
     # {
         # 'name': 'real_integra_bad_predictions',
         # 'type': 'label_file', 
-        # 'labels': 'labels_100_shuffle.txt',  
+        # 'labels': 'labels_10_shuffle.txt',  
         # 'path': 'datasets/real_integra_bad_predictions', 
         # 'weight': 1.0,
     # },
     # {
         # 'name': 'real_integra',
         # 'type': 'label_file', 
-        # 'labels': 'labels_100_shuffle.txt',  
+        # 'labels': 'labels_10_shuffle.txt',  
         # 'path': 'datasets/real_integra', 
         # 'weight': 0.7,
     # },
     # {
         # 'name': 'static_augmentation',
         # 'type': 'label_file', 
-        # 'labels': 'labels_100_shuffle.txt',  
+        # 'labels': 'labels_10_shuffle.txt',  
         # 'path': 'datasets/static_augmentation', 
         # 'weight': 0.6,
     # },
+########### class 100 training #############
+    {
+        'name': 'Tenth-of-step-of-a-meter-digit',
+        'type': 'label_file', 
+        'labels': 'labels_100_shuffle.txt',  # Optional: specify label file name (default: 'labels.txt' - tab separated)
+        'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
+        'weight': 1.0, # undersample if weight < 1.0
+    },
+    {
+        'name': 'real_integra_bad_predictions',
+        'type': 'label_file', 
+        'labels': 'labels_100_shuffle.txt',  
+        'path': 'datasets/real_integra_bad_predictions', 
+        'weight': 1.0,
+    },
+    {
+        'name': 'real_integra',
+        'type': 'label_file', 
+        'labels': 'labels_100_shuffle.txt',  
+        'path': 'datasets/real_integra', 
+        'weight': 0.7,
+    },
+    {
+        'name': 'static_augmentation',
+        'type': 'label_file', 
+        'labels': 'labels_100_shuffle.txt',  
+        'path': 'datasets/static_augmentation', 
+        'weight': 0.6,
+    },
 ########### testing #############
     # {
         # 'name': 'meterdigits_100',
@@ -175,7 +175,7 @@ DATA_SOURCES = [
 # ==============================================================================
 
 # Model Parameters
-NB_CLASSES = 10  # [0-9]
+NB_CLASSES = 100  # [0-9]
 
 # QUANTIZATION MODES (9 possible combinations):
 
