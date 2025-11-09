@@ -223,6 +223,10 @@ TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
 # File Paths
 # MODEL_FILENAME = MODEL_ARCHITECTURE
 OUTPUT_DIR = "exported_models"
+# OUTPUT_DIR = "exported_models/10cls_GRAY"
+# OUTPUT_DIR = "exported_models/10cls_RGB"
+# OUTPUT_DIR = "exported_models/100cls_GRAY"
+# OUTPUT_DIR = "exported_models/100cls_RGB"
 QUANTIZE_NUM_SAMPLES = 22000
 # TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
 # FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
