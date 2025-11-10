@@ -867,6 +867,196 @@ def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_
     print(f"💾 Full results saved to: {csv_path}")
     return csv_path
     
+def calculate_best_iot_model(df, accuracy_weight=0.5, size_weight=0.3, speed_weight=0.2):
+    """
+    Dynamically calculate the best IoT model based on weighted criteria
+    
+    Args:
+        df: DataFrame with model results
+        accuracy_weight: Weight for accuracy (0-1)
+        size_weight: Weight for inverse size (0-1) 
+        speed_weight: Weight for inference speed (0-1)
+    
+    Returns:
+        Dictionary with best model and analysis
+    """
+    # Normalize the metrics
+    df = df.copy()
+    
+    # Higher accuracy is better
+    df['accuracy_norm'] = df['Accuracy'] / df['Accuracy'].max()
+    
+    # Smaller size is better - use inverse
+    df['size_norm'] = (1 / df['Size_KB']) / (1 / df['Size_KB']).max()
+    
+    # Higher speed is better
+    df['speed_norm'] = df['Inferences_per_second'] / df['Inferences_per_second'].max()
+    
+    # Calculate IoT score with weights
+    df['iot_score'] = (
+        df['accuracy_norm'] * accuracy_weight +
+        df['size_norm'] * size_weight + 
+        df['speed_norm'] * speed_weight
+    )
+    
+    # Find the best model
+    best_iot_model = df.loc[df['iot_score'].idxmax()]
+    
+    # Calculate efficiency metrics (only if Parameters column exists)
+    df['accuracy_per_kb'] = df['Accuracy'] / df['Size_KB']
+    
+    if 'Parameters' in df.columns:
+        df['accuracy_per_param'] = df['Accuracy'] / df['Parameters']
+    else:
+        df['accuracy_per_param'] = 0  # Default value if Parameters not available
+    
+    # Find best in each category with error handling
+    small_models = df[df['Size_KB'] <= 100]
+    accurate_models = df[df['Accuracy'] >= 0.90]
+    
+    if not small_models.empty:
+        best_accuracy_small = small_models.loc[small_models['Accuracy'].idxmax()]
+        best_speed_small = small_models.loc[small_models['Inferences_per_second'].idxmax()]
+    else:
+        # Fallback to smallest models if none under 100KB
+        best_accuracy_small = df.loc[df['Size_KB'].idxmin()]
+        best_speed_small = df.loc[df['Inferences_per_second'].idxmax()]
+    
+    if not accurate_models.empty:
+        smallest_adequate = accurate_models.loc[accurate_models['Size_KB'].idxmin()]
+    else:
+        # Fallback to most accurate if none meet accuracy threshold
+        smallest_adequate = df.loc[df['Accuracy'].idxmax()]
+    
+    # Generate analysis - include all necessary columns
+    result_columns = ['Model', 'Accuracy', 'Size_KB', 'Inferences_per_second', 'iot_score', 'accuracy_per_kb']
+    if 'Parameters' in df.columns:
+        result_columns.append('Parameters')
+    if 'accuracy_per_param' in df.columns:
+        result_columns.append('accuracy_per_param')
+    
+    analysis = {
+        'best_overall': best_iot_model,
+        'best_accuracy_small': best_accuracy_small,
+        'best_speed_small': best_speed_small,
+        'smallest_adequate': smallest_adequate,
+        'all_scores': df[result_columns].sort_values('iot_score', ascending=False),
+        'weights_used': {
+            'accuracy': accuracy_weight,
+            'size': size_weight, 
+            'speed': speed_weight
+        }
+    }
+    
+    return analysis
+
+def generate_iot_recommendation_section(f, df):
+    """Generate dynamic IoT recommendations section"""
+    
+    # Only calculate if we have multiple models
+    if len(df) <= 1:
+        f.write("## 💡 IoT-Specific Recommendations\n\n")
+        f.write("*Not enough models for comparative IoT analysis*\n\n")
+        return
+    
+    # Use the provided DataFrame which should already have iot_score
+    # If it doesn't have iot_score, calculate it
+    if 'iot_score' not in df.columns:
+        analysis = calculate_best_iot_model(df)
+        df_with_scores = analysis['all_scores']
+    else:
+        df_with_scores = df
+        analysis = calculate_best_iot_model(df_with_scores)
+    
+    best_model = analysis['best_overall']
+    best_accuracy_small = analysis['best_accuracy_small']
+    best_speed_small = analysis['best_speed_small']
+    smallest_adequate = analysis['smallest_adequate']
+    
+    f.write("## 💡 IoT-Specific Recommendations\n\n")
+    
+    f.write("### 🏆 Dynamic IoT Model Selection\n\n")
+    
+    f.write("#### 🎯 Best Overall for ESP32\n")
+    f.write(f"- **Model**: **{best_model['Model']}**\n")
+    f.write(f"- **IoT Score**: {best_model['iot_score']:.3f}\n")
+    f.write(f"- **Accuracy**: {best_model['Accuracy']:.3f}\n")
+    f.write(f"- **Size**: {best_model['Size_KB']:.1f} KB\n")
+    f.write(f"- **Speed**: {best_model['Inferences_per_second']:.0f} inf/s\n")
+    
+    # Calculate efficiency safely
+    accuracy_per_kb = best_model.get('accuracy_per_kb', best_model['Accuracy'] / best_model['Size_KB'])
+    f.write(f"- **Efficiency**: {accuracy_per_kb:.4f} accuracy per KB\n\n")
+    
+    f.write("#### 📊 IoT Model Comparison (Under 100KB)\n")
+    f.write("| Model | Accuracy | Size | Speed | IoT Score | Use Case |\n")
+    f.write("|-------|----------|------|-------|-----------|----------|\n")
+    
+    # Show top small models
+    small_models = df_with_scores[df_with_scores['Size_KB'] <= 100].nlargest(5, 'iot_score')
+    if small_models.empty:
+        f.write("| *No models under 100KB* | - | - | - | - | - |\n")
+    else:
+        for _, model in small_models.iterrows():
+            if model['Model'] == best_model['Model']:
+                use_case = "🏆 **BEST BALANCED**"
+            elif model['Model'] == best_accuracy_small['Model']:
+                use_case = "🎯 Best Accuracy"
+            elif model['Model'] == best_speed_small['Model']:
+                use_case = "⚡ Fastest"
+            elif model['Model'] == smallest_adequate['Model']:
+                use_case = "💾 Smallest Adequate"
+            else:
+                use_case = "Alternative"
+                
+            f.write(f"| {model['Model']} | {model['Accuracy']:.3f} | {model['Size_KB']:.1f}KB | {model['Inferences_per_second']:.0f}/s | {model['iot_score']:.3f} | {use_case} |\n")
+    
+    f.write("\n")
+    
+    f.write("#### 🔧 Alternative IoT Scenarios\n\n")
+    
+    f.write("**For Accuracy-Critical IoT:**\n")
+    f.write(f"- **Choice**: {best_accuracy_small['Model']}\n")
+    f.write(f"- **Accuracy**: {best_accuracy_small['Accuracy']:.3f} (best under 100KB)\n")
+    f.write(f"- **Trade-off**: {best_accuracy_small['Size_KB']:.1f}KB size\n\n")
+    
+    f.write("**For Speed-Critical IoT:**\n")
+    f.write(f"- **Choice**: {best_speed_small['Model']}\n")
+    f.write(f"- **Speed**: {best_speed_small['Inferences_per_second']:.0f} inf/s (fastest under 100KB)\n")
+    f.write(f"- **Trade-off**: {best_speed_small['Accuracy']:.3f} accuracy\n\n")
+    
+    f.write("**For Memory-Constrained IoT:**\n")
+    f.write(f"- **Choice**: {smallest_adequate['Model']}\n")
+    f.write(f"- **Size**: {smallest_adequate['Size_KB']:.1f}KB (smallest with ≥85% accuracy)\n")
+    f.write(f"- **Trade-off**: {smallest_adequate['Accuracy']:.3f} accuracy\n\n")
+    
+    f.write("#### 📈 Efficiency Analysis\n")
+    f.write("| Model | Acc/KB | Acc/Param | Parameters | Verdict |\n")
+    f.write("|-------|--------|-----------|------------|---------|\n")
+    
+    top_models = df_with_scores.nlargest(5, 'iot_score')
+    for _, model in top_models.iterrows():
+        acc_per_kb = model['Accuracy'] / model['Size_KB']
+        
+        # Handle Parameters column safely
+        if 'Parameters' in model:
+            parameters = model['Parameters']
+            acc_per_param = model['Accuracy'] / parameters * 1000000 if parameters > 0 else 0
+        else:
+            parameters = 'N/A'
+            acc_per_param = 'N/A'
+        
+        if model['Model'] == best_model['Model']:
+            verdict = "🎯 **OPTIMAL**"
+        elif model['Size_KB'] > 100:
+            verdict = "❌ Too large"
+        else:
+            verdict = "⚖️ Good"
+            
+        f.write(f"| {model['Model']} | {acc_per_kb:.4f} | {acc_per_param if acc_per_param != 'N/A' else 'N/A'} | {parameters} | {verdict} |\n")
+    
+    f.write("\n")
+
 def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True, use_all_datasets=True, test_images_count=0):
     """Generate a comprehensive Markdown report from CSV results and graphs"""
     
@@ -882,108 +1072,50 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
     report_filename = f"benchmark_report_{timestamp}.md"
     report_path = os.path.join(reports_dir, report_filename)
     
-    # Prepare data for markdown
-    best_accuracy_model = df.loc[df['Accuracy'].idxmax()]
-    fastest_model = df.loc[df['Inferences_per_second'].idxmax()]
-    smallest_model = df.loc[df['Size_KB'].idxmin()]
-    
     # Generate markdown content
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write("# Digit Recognition Benchmark Report\n\n")
         
-        # Summary section
+        # Executive Summary with IoT focus
         f.write("## 📊 Executive Summary\n\n")
+        
+        # Calculate best models dynamically
+        iot_analysis = calculate_best_iot_model(df)
+        best_iot = iot_analysis['best_overall']
+        best_accuracy = df.loc[df['Accuracy'].idxmax()]
+        fastest = df.loc[df['Inferences_per_second'].idxmax()]
+        smallest = df.loc[df['Size_KB'].idxmin()]
+        
         f.write(f"- **Test Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"- **Models Tested**: {len(df)} {'quantized' if quantized_only else 'all'} models\n")
-        f.write(f"- **Test Images**: {'All available' if use_all_datasets else f'{test_images_count} samples'}\n")
-        f.write(f"- **Best Accuracy**: **{best_accuracy_model['Model']}** ({best_accuracy_model['Accuracy']:.3f})\n")
-        f.write(f"- **Fastest Model**: **{fastest_model['Model']}** ({fastest_model['Inferences_per_second']:.0f} inf/s)\n")
-        f.write(f"- **Smallest Model**: **{smallest_model['Model']}** ({smallest_model['Size_KB']:.1f} KB)\n\n")
+        f.write(f"- **Best IoT Model**: **{best_iot['Model']}** ({best_iot['Size_KB']:.1f}KB, {best_iot['Accuracy']:.3f} acc, {best_iot['Inferences_per_second']:.0f} inf/s)\n")
+        f.write(f"- **Best Accuracy**: **{best_accuracy['Model']}** ({best_accuracy['Accuracy']:.3f})\n")
+        f.write(f"- **Fastest Model**: **{fastest['Model']}** ({fastest['Inferences_per_second']:.0f} inf/s)\n")
+        f.write(f"- **Smallest Model**: **{smallest['Model']}** ({smallest['Size_KB']:.1f} KB)\n\n")
         
         # Results table
         f.write("## 📋 Detailed Results\n\n")
-        f.write("| Model | Directory | Type | Parameters | Size (KB) | Accuracy | Inf/s |\n")
-        f.write("|-------|-----------|------|------------|-----------|----------|-------|\n")
+        f.write("| Model | Size (KB) | Accuracy | Inf/s | Parameters | IoT Score |\n")
+        f.write("|-------|-----------|----------|-------|------------|-----------|\n")
         
-        for _, row in df.iterrows():
-            f.write(f"| {row['Model']} | {row['Directory']} | {row['Type']} | {row['Parameters']:,} | {row['Size_KB']:.1f} | {row['Accuracy']:.3f} | {row['Inferences_per_second']:.0f} |\n")
+        # Use the all_scores from analysis which includes iot_score
+        scored_df = iot_analysis['all_scores']
+        
+        for _, row in scored_df.iterrows():
+            # Get Parameters safely
+            parameters = row.get('Parameters', 'N/A')
+            f.write(f"| {row['Model']} | {row['Size_KB']:.1f} | {row['Accuracy']:.3f} | {row['Inferences_per_second']:.0f} | {parameters} | {row['iot_score']:.3f} |\n")
         f.write("\n")
         
-        # Performance Analysis
-        f.write("## 🏆 Performance Analysis\n\n")
-        
-        f.write("### Best by Accuracy\n")
-        f.write(f"- **Model**: {best_accuracy_model['Model']}\n")
-        f.write(f"- **Directory**: {best_accuracy_model['Directory']}\n")
-        f.write(f"- **Accuracy**: {best_accuracy_model['Accuracy']:.3f}\n")
-        f.write(f"- **Speed**: {best_accuracy_model['Inferences_per_second']:.0f} inf/s\n")
-        f.write(f"- **Size**: {best_accuracy_model['Size_KB']:.1f} KB\n\n")
-        
-        f.write("### Fastest Model\n")
-        f.write(f"- **Model**: {fastest_model['Model']}\n")
-        f.write(f"- **Directory**: {fastest_model['Directory']}\n")
-        f.write(f"- **Speed**: {fastest_model['Inferences_per_second']:.0f} inf/s\n")
-        f.write(f"- **Accuracy**: {fastest_model['Accuracy']:.3f}\n")
-        f.write(f"- **Size**: {fastest_model['Size_KB']:.1f} KB\n\n")
-        
-        f.write("### Most Efficient (Smallest)\n")
-        f.write(f"- **Model**: {smallest_model['Model']}\n")
-        f.write(f"- **Directory**: {smallest_model['Directory']}\n")
-        f.write(f"- **Size**: {smallest_model['Size_KB']:.1f} KB\n")
-        f.write(f"- **Accuracy**: {smallest_model['Accuracy']:.3f}\n")
-        f.write(f"- **Speed**: {smallest_model['Inferences_per_second']:.0f} inf/s\n\n")
-        
-        # # Visualizations section
-        # f.write("## 📈 Visualizations\n\n")
-        
-        # for graph_path in graph_paths:
-            # graph_filename = os.path.basename(graph_path)
-            # graph_relative_path = os.path.relpath(graph_path, reports_dir)
-            # graph_title = graph_filename.replace('_', ' ').replace('.png', '').title()
-            
-            # f.write(f"### {graph_title}\n\n")
-            # f.write(f"![{graph_title}]({graph_relative_path})\n\n")
-            # f.write("*Click image to view full resolution*\n\n")
-        
-        # Recommendations
-        f.write("## 💡 Recommendations\n\n")
-        
-        f.write("### For High Accuracy Applications\n")
-        f.write(f"- Use **{best_accuracy_model['Model']}** from {best_accuracy_model['Directory']}\n")
-        f.write(f"- Accuracy: {best_accuracy_model['Accuracy']:.3f}\n")
-        f.write(f"- Trade-off: {best_accuracy_model['Inferences_per_second']:.0f} inf/s\n\n")
-        
-        f.write("### For Real-time Applications\n")
-        f.write(f"- Use **{fastest_model['Model']}** from {fastest_model['Directory']}\n")
-        f.write(f"- Speed: {fastest_model['Inferences_per_second']:.0f} inf/s\n")
-        f.write(f"- Trade-off: {fastest_model['Accuracy']:.3f} accuracy\n\n")
-        
-        f.write("### For Resource-Constrained Environments\n")
-        f.write(f"- Use **{smallest_model['Model']}** from {smallest_model['Directory']}\n")
-        f.write(f"- Size: {smallest_model['Size_KB']:.1f} KB\n")
-        f.write(f"- Trade-off: {smallest_model['Accuracy']:.3f} accuracy\n\n")
-        
-        # # Technical Details
-        # f.write("## 🔧 Technical Details\n\n")
-        # f.write("### Test Configuration\n")
-        # f.write(f"- Quantized Models Only: {quantized_only}\n")
-        # f.write(f"- Use All Datasets: {use_all_datasets}\n")
-        # f.write(f"- Test Images Count: {test_images_count if test_images_count > 0 else 'All available'}\n")
-        # f.write(f"- Total Models Tested: {len(df)}\n")
-        # f.write(f"- Average Accuracy: {df['Accuracy'].mean():.3f}\n")
-        # f.write(f"- Average Speed: {df['Inferences_per_second'].mean():.0f} inf/s\n")
-        # f.write(f"- Average Model Size: {df['Size_KB'].mean():.1f} KB\n\n")
-        
-        # f.write("### Files Generated\n")
-        # f.write(f"- **CSV Results**: `{os.path.basename(csv_path)}`\n")
-        # f.write(f"- **Graphs**: {len(graph_paths)} visualization files\n")
-        # f.write(f"- **This Report**: `{report_filename}`\n\n")
+        # Dynamic IoT Recommendations - pass the original df to maintain all columns
+        generate_iot_recommendation_section(f, df)
         
         f.write("---\n")
         f.write("*Report generated automatically by Digit Recognition Benchmarking Tool*\n")
     
     print(f"📄 Markdown report generated: {report_path}")
     return report_path
+
 
 def list_available_models(quantized_only=True, subfolder=None):
     """List all available models in training directories"""
