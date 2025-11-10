@@ -1,0 +1,26 @@
+{
+  "timestamp": "2025-11-09 11:51:25",
+  "training_duration": "0:45:49.802495",
+  "model_architecture": "original_haverland",
+  "input_shape": [
+    32,
+    20,
+    3
+  ],
+  "num_classes": 100,
+  "epochs": 200,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "quantization_enabled": true,
+  "qat_enabled": true,
+  "esp_dl_enabled": false,
+  "data_augmentation": true,
+  "grayscale": false,
+  "best_validation_accuracy": 0.7959305644035339,
+  "test_accuracy_keras": 0.799281895160675,
+  "test_accuracy_tflite": 0.7910233393177738,
+  "model_size_keras_kb": 1752.447265625,
+  "model_size_tflite_kb": 228.8046875,
+  "total_parameters": 214000,
+  "size_reduction_percent": 86.94370484133238
+}
