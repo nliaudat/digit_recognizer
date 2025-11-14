@@ -6,3 +6,6 @@ docker-compose up -d
 
 # Test
 docker-compose exec digit-recognizer python3 -c "import tensorflow as tf; import torch; print('TF GPU:', len(tf.config.list_physical_devices('GPU')) > 0); print('PyTorch CUDA:', torch.cuda.is_available())"
+
+docker-compose exec digit-recognizer bash
+#docker-compose run digit-recognizer bash
