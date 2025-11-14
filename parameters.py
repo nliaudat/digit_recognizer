@@ -419,7 +419,7 @@ AUGMENTATION_VERTICAL_FLIP = False
 # GPU CONFIGURATION
 # ==============================================================================
 
-USE_GPU = False  # Set to False to force CPU usage
+USE_GPU = True  # Set to False to force CPU usage
 GPU_MEMORY_GROWTH = True  # Gradually allocate GPU memory instead of all at once
 GPU_MEMORY_LIMIT = None  # Set specific memory limit in MB, or None for no limit
 

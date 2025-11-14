@@ -23,4 +23,6 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["python3", "-c", "import tensorflow as tf; import torch; print('Libraries imported successfully'); print('TF GPU:', len(tf.config.list_physical_devices('GPU')) > 0); print('PyTorch CUDA:', torch.cuda.is_available())"]
+#CMD ["python3", "-c", "import tensorflow as tf; import torch; print('Libraries imported successfully'); print('TF GPU:', len(tf.config.list_physical_devices('GPU')) > 0); print('PyTorch CUDA:', torch.cuda.is_available())"]
+CMD ["bash"]
+#CMD ["python3"]
