@@ -13,35 +13,35 @@ AVAILABLE_MODELS = [
     # "practical_tiny_depthwise",
     # "simple_cnn", 
     # "dig_class100_s2",
-    "original_haverland", #203.3	0.9822
-    # "esp_optimized_cnn",
-    # "esp_ultra_light", 
-    # "esp_high_capacity",
-    # "esp_quantization_ready",
-    # "esp_haverland_compatible",
-    # "esp_quantization_ready_v2",
-    # "esp_quantization_ready_v2_aggressive",
-    # "esp_quantization_ready_v3",
-    "mnist_quantization", #64.2	0.9645
-    # "digit_recognizer_v1",
-    # "simple_cnn_v2",
-    # "minimal_cnn",
-    # "mobilenet_style",
-    # "digit_recognizer_v2",
-    "digit_recognizer_v3", #69.4	0.9804
-    "digit_recognizer_v4", # 61.4	0.9855
-    # "digit_recognizer_v5", #37.4	0.9502
-    "digit_recognizer_v6", # 36.5	0.9652
-    "digit_recognizer_v7", #46.7	0.9673
-    # "digit_recognizer_v8", #not for IOT #396.4	0.9915
-    "digit_recognizer_v9", #not for IOT #148.6	0.9907
-    # "digit_recognizer_v10", #not for IOT #1392.3	0.9917 (5h30 training)
-    # "digit_recognizer_v11", #not for IOT # 1370.8	0.9897
+    "cnn32",
+    "digit_recognizer_v1",
+    "digit_recognizer_v2",
+    "digit_recognizer_v3",
+    "digit_recognizer_v4",
+    "digit_recognizer_v5",
+    "digit_recognizer_v6",
+    "digit_recognizer_v7",
+    "digit_recognizer_v8",
+    "digit_recognizer_v9",
+    "digit_recognizer_v10",
+    "digit_recognizer_v11",
     "digit_recognizer_v12", #406.7	0.9925
+    "digit_recognizer_v13",
+    "digit_recognizer_v14",
+    "esp_quantization_ready",
+    "high_accuracy_validator", # strictly for PC validation (not for ESP32)
+    "mnist_quantization", #63.6kB	0.9848
+    "original_haverland", #203.3	0.9822 & baseline
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "high_accuracy_validator" # one of the models in AVAILABLE_MODELS
 
+
+# ==============================================================================
+# GENERAL PARAMETERS
+# ==============================================================================
+
+NB_CLASSES = 100  # 10 for [0-9], 100 for [0-99]
 
 # ==============================================================================
 # INPUT IMAGES 
@@ -50,11 +50,9 @@ MODEL_ARCHITECTURE = "digit_recognizer_v4" # one of the models in AVAILABLE_MODE
 # Image Parameters
 INPUT_WIDTH = 20
 INPUT_HEIGHT = 32
-INPUT_CHANNELS = 1  # 1 for grayscale, 3 for RGB
+INPUT_CHANNELS = 3  # 1 for grayscale, 3 for RGB
 INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
 USE_GRAYSCALE = (INPUT_CHANNELS == 1) 
-
-
 
 # ==============================================================================
 # DATA SOURCES
@@ -62,120 +60,41 @@ USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 
 # This is far better to use labels that have been shuffled for training, folder_structure shuffle by batch TF_DATA_SHUFFLE_BUFFER and SHUFFLE_SEED
 
-    # label_file_path = os.path.join(params.DATASET_PATH, 'labels.txt')
-    # images_dir = os.path.join(params.DATASET_PATH, 'images')
-
 # Multiple Data Sources Configuration
-DATA_SOURCES = [ 
-########### class 10 training #############
+DATA_SOURCES = [
     {
         'name': 'Tenth-of-step-of-a-meter-digit',
         'type': 'label_file', 
-        'labels': 'labels_10_shuffle.txt',  # Optional: specify label file name (default: 'labels.txt' - tab separated)
+        'labels': f'labels_{NB_CLASSES}_shuffle.txt',
         'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
-        'weight': 1.0, # undersample if weight < 1.0
+        'weight': 1.0,
     },
     {
         'name': 'real_integra_bad_predictions',
         'type': 'label_file', 
-        'labels': 'labels_10_shuffle.txt',  
+        'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
         'path': 'datasets/real_integra_bad_predictions', 
         'weight': 1.0,
     },
     {
         'name': 'real_integra',
         'type': 'label_file', 
-        'labels': 'labels_10_shuffle.txt',  
+        'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
         'path': 'datasets/real_integra', 
         'weight': 0.7,
     },
     {
         'name': 'static_augmentation',
         'type': 'label_file', 
-        'labels': 'labels_10_shuffle.txt',  
+        'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
         'path': 'datasets/static_augmentation', 
         'weight': 0.6,
     },
-########### class 100 training #############
-    # {
-        # 'name': 'Tenth-of-step-of-a-meter-digit',
-        # 'type': 'label_file', 
-        # 'labels': 'labels_100_shuffle.txt',  # Optional: specify label file name (default: 'labels.txt' - tab separated)
-        # 'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
-        # 'weight': 1.0, # undersample if weight < 1.0
-    # },
-    # {
-        # 'name': 'real_integra_bad_predictions',
-        # 'type': 'label_file', 
-        # 'labels': 'labels_100_shuffle.txt',  
-        # 'path': 'datasets/real_integra_bad_predictions', 
-        # 'weight': 1.0,
-    # },
-    # {
-        # 'name': 'real_integra',
-        # 'type': 'label_file', 
-        # 'labels': 'labels_100_shuffle.txt',  
-        # 'path': 'datasets/real_integra', 
-        # 'weight': 0.7,
-    # },
-    # {
-        # 'name': 'static_augmentation',
-        # 'type': 'label_file', 
-        # 'labels': 'labels_100_shuffle.txt',  
-        # 'path': 'datasets/static_augmentation', 
-        # 'weight': 0.6,
-    # },
-########### testing #############
-    # {
-        # 'name': 'meterdigits_100',
-        # 'type': 'folder_structure',
-        # 'path': 'datasets/meterdigits_100',
-        # 'weight': 1.0,
-    # },
-    # {
-        # 'name': 'meterdigits_100_augmented',
-        # 'type': 'folder_structure',
-        # 'path': 'datasets/meterdigits_10_augmented',
-        # 'weight': 0.3,
-    # },
-    # {
-        # 'name': 'meterdigits_10',
-        # 'type': 'folder_structure',
-        # 'path': 'datasets/meterdigits_10',
-        # 'weight': 1.0,
-    # },
-    # {
-        # 'name': 'meterdigits_10_augmented',
-        # 'type': 'folder_structure',
-        # 'path': 'datasets/meterdigits_10_augmented',
-        # 'weight': 0.3,
-    # },
-    # {
-    #     'name': 'MNIST',
-    #     'type': 'folder_structure',
-    #     'path': 'mnist_dataset_folders',
-    #     'weight': 0.2,
-    # },
-    # {
-    #     'name': 'QMNIST',
-    #     'type': 'folder_structure',
-    #     'path': 'qmnist_dataset_folders',
-    #     'weight': 0.3,
-    # },
-    # {
-    #     'name': 'MR-AMR Dataset',
-    #     'type': 'folder_structure',
-    #     'path': 'MR-AMR Dataset',
-    #     'weight': 0.15,
-    # },
 ]
 
 # ==============================================================================
-# MODEL GENERAL PARAMETERS
+# QUANTIZATION PARAMETERS
 # ==============================================================================
-
-# Model Parameters
-NB_CLASSES = 10  # [0-9]
 
 # QUANTIZATION MODES (9 possible combinations):
 
@@ -213,6 +132,12 @@ ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
 USE_QAT = True  # Enable Quantization Aware Training
 QAT_QUANTIZE_ALL = True  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
+
+# Automatically disable quantization flags for high_accuracy_validator
+if MODEL_ARCHITECTURE == "high_accuracy_validator":
+    QUANTIZE_MODEL = False
+    ESP_DL_QUANTIZE = False
+    USE_QAT = False
 
 # Data pipeline configuration
 USE_TF_DATA_PIPELINE = False
@@ -535,6 +460,15 @@ def validate_quantization_parameters():
     
     corrected_params = original_params.copy()
     messages = []
+    
+    # Rule 0: high_accuracy_validator does not support quantization
+    if MODEL_ARCHITECTURE == "high_accuracy_validator":
+        if QUANTIZE_MODEL or USE_QAT or ESP_DL_QUANTIZE:
+            messages.append("❌ 'high_accuracy_validator' selected: Disabling all quantization flags (QUANTIZE_MODEL, USE_QAT, ESP_DL_QUANTIZE)")
+            corrected_params['QUANTIZE_MODEL'] = False
+            corrected_params['USE_QAT'] = False
+            corrected_params['ESP_DL_QUANTIZE'] = False
+            messages.append("✅ Auto-corrected: Set all quantization flags to False for 'high_accuracy_validator'")
     
     # Rule 1: ESP_DL_QUANTIZE requires QUANTIZE_MODEL
     if ESP_DL_QUANTIZE and not QUANTIZE_MODEL:

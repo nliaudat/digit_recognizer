@@ -434,11 +434,23 @@ def analyze_confusion_matrix(model, x_test, y_test, save_path=None):
     # Create confusion matrix
     cm = confusion_matrix(true_classes, pred_classes)
     
+    # Determine figure settings based on the number of classes
+    num_classes = params.NB_CLASSES
+    fig_size = min(40, max(10, num_classes * 0.4))
+    show_annot = num_classes <= 20
+    
     # Plot confusion matrix
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=range(params.NB_CLASSES),
-                yticklabels=range(params.NB_CLASSES))
+    plt.figure(figsize=(fig_size, fig_size * 0.8))
+    ax = sns.heatmap(cm, annot=show_annot, fmt='d', cmap='Blues', 
+                     xticklabels=range(num_classes),
+                     yticklabels=range(num_classes))
+    
+    if num_classes > 20:
+        # For large class counts, adjust ticks to prevent overlapping
+        tick_fontsize = max(4, 12 - (num_classes * 0.05))
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=90, fontsize=tick_fontsize)
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=tick_fontsize)
+        
     plt.title('Confusion Matrix')
     plt.xlabel('Predicted Label')
     plt.ylabel('True Label')

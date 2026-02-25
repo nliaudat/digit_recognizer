@@ -101,6 +101,15 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     )
     callbacks.append(csv_logger)
     
+    # TensorBoard Logger
+    tb_log_dir = os.path.join(output_dir, 'tensorboard_logs')
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(
+        log_dir=tb_log_dir,
+        histogram_freq=1 if debug else 0,
+        update_freq='epoch'
+    )
+    callbacks.append(tensorboard_callback)
+    
     # Create checkpoints directory
     os.makedirs(os.path.join(output_dir, "checkpoints"), exist_ok=True)
     

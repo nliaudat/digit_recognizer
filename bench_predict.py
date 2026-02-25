@@ -115,23 +115,22 @@ def load_image_from_path(image_path, input_channels):
     
     return image
 
-def find_model_path(model_name=None):
+def find_model_path(model_name=None, input_dir=params.OUTPUT_DIR):
     """Find the model path based on model name"""
     # Look for training directories - exclude test_results and other non-training dirs
-    all_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
+    all_dirs = [d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))]
     
     # Filter out non-training directories
     training_dirs = []
     for dir_name in all_dirs:
-        dir_path = os.path.join(params.OUTPUT_DIR, dir_name)
+        dir_path = os.path.join(input_dir, dir_name)
         # Check if this directory contains .tflite files and is likely a training directory
         tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite')]
         if tflite_files and not dir_name.startswith('test_results'):
             training_dirs.append(dir_name)
     
     if not training_dirs:
-        print("No training directories with TFLite models found.")
-        print(f"Please check if models exist in: {params.OUTPUT_DIR}")
+        print(f"No training directories with TFLite models found in {input_dir}.")
         return None
     
     if model_name:
@@ -150,7 +149,7 @@ def find_model_path(model_name=None):
             if not best_match and matching_dirs:
                 best_match = matching_dirs[0]  # Use first partial match
             
-            training_path = os.path.join(params.OUTPUT_DIR, best_match)
+            training_path = os.path.join(input_dir, best_match)
             tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
             
             if tflite_files:
@@ -165,7 +164,7 @@ def find_model_path(model_name=None):
         
         # If no directory match, search for specific model files
         for training_dir in sorted(training_dirs, reverse=True):
-            training_path = os.path.join(params.OUTPUT_DIR, training_dir)
+            training_path = os.path.join(input_dir, training_dir)
             
             # Check for exact model file matches
             tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
@@ -185,7 +184,7 @@ def find_model_path(model_name=None):
     else:
         # Use default behavior - latest training directory
         latest_training = sorted(training_dirs)[-1]
-        latest_dir_path = os.path.join(params.OUTPUT_DIR, latest_training)
+        latest_dir_path = os.path.join(input_dir, latest_training)
         
         # Look for any .tflite file in the latest directory
         tflite_files = [f for f in os.listdir(latest_dir_path) if f.endswith('.tflite')]
@@ -235,20 +234,21 @@ def is_quantized_model(model_path):
     except:
         return False
 
-def get_all_models(quantized_only=False, subfolder=None):
+def get_all_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT_DIR):
     """Get all available models with parameters count - with error handling
     
     Args:
         quantized_only: If True, only return quantized models
         subfolder: If specified, only look in this specific subfolder
+        input_dir: Base directory to search for models
     """
     # Look for training directories - exclude test_results and other non-training dirs
-    all_dirs = [d for d in os.listdir(params.OUTPUT_DIR) if os.path.isdir(os.path.join(params.OUTPUT_DIR, d))]
+    all_dirs = [d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))]
     
     # Filter out non-training directories
     training_dirs = []
     for dir_name in all_dirs:
-        dir_path = os.path.join(params.OUTPUT_DIR, dir_name)
+        dir_path = os.path.join(input_dir, dir_name)
         # Check if this directory contains .tflite files and is likely a training directory
         tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite')]
         if tflite_files and not dir_name.startswith('test_results'):
@@ -271,7 +271,7 @@ def get_all_models(quantized_only=False, subfolder=None):
     all_models = []
     
     for training_dir in training_dirs:
-        training_path = os.path.join(params.OUTPUT_DIR, training_dir)
+        training_path = os.path.join(input_dir, training_dir)
         
         # Look for any .tflite files in the directory
         tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
@@ -455,13 +455,12 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
     
     return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions
 
-def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=True):
+def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=True, output_dir=params.OUTPUT_DIR):
     """Generate separate comparison graphs for the benchmark results"""
     # Create graphs directory
-    graphs_dir = os.path.join(params.OUTPUT_DIR, "test_results", "graphs")
+    graphs_dir = os.path.join(output_dir, "test_results", "graphs")
     os.makedirs(graphs_dir, exist_ok=True)
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     quant_suffix = "quantized" if quantized_only else "all"
     dataset_suffix = "full" if use_all_datasets else "sampled"
     
@@ -518,7 +517,7 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=9)
     
     plt.tight_layout()
-    graph1_filename = f"accuracy_vs_speed_{timestamp}_{quant_suffix}_{dataset_suffix}.png"
+    graph1_filename = f"accuracy_vs_speed_{quant_suffix}_{dataset_suffix}.png"
     graph1_path = os.path.join(graphs_dir, graph1_filename)
     plt.savefig(graph1_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -542,7 +541,7 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
     cbar.set_label('Parameters (Millions)', fontsize=10)
     
     plt.tight_layout()
-    graph2_filename = f"accuracy_vs_size_{timestamp}_{quant_suffix}_{dataset_suffix}.png"
+    graph2_filename = f"accuracy_vs_size_{quant_suffix}_{dataset_suffix}.png"
     graph2_path = os.path.join(graphs_dir, graph2_filename)
     plt.savefig(graph2_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -563,7 +562,7 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=9)
     
     plt.tight_layout()
-    graph3_filename = f"speed_vs_complexity_{timestamp}_{quant_suffix}_{dataset_suffix}.png"
+    graph3_filename = f"speed_vs_complexity_{quant_suffix}_{dataset_suffix}.png"
     graph3_path = os.path.join(graphs_dir, graph3_filename)
     plt.savefig(graph3_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -594,7 +593,7 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
                borderaxespad=0., fontsize=8)
     
     plt.tight_layout()
-    graph4_filename = f"speed_comparison_{timestamp}_{quant_suffix}_{dataset_suffix}.png"
+    graph4_filename = f"speed_comparison_{quant_suffix}_{dataset_suffix}.png"
     graph4_path = os.path.join(graphs_dir, graph4_filename)
     plt.savefig(graph4_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -627,7 +626,7 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
                borderaxespad=0., fontsize=8)
     
     plt.tight_layout()
-    graph5_filename = f"accuracy_comparison_{timestamp}_{quant_suffix}_{dataset_suffix}.png"
+    graph5_filename = f"accuracy_comparison_{quant_suffix}_{dataset_suffix}.png"
     graph5_path = os.path.join(graphs_dir, graph5_filename)
     plt.savefig(graph5_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -640,7 +639,7 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
     return graph_paths
 
 def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all_datasets=True,
-                   list_failed=False, save_failed=False, subfolder=None):
+                   list_failed=False, save_failed=False, subfolder=None, input_dir=params.OUTPUT_DIR):
     """Test all available models and print summary table
     
     Args:
@@ -651,8 +650,9 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
         list_failed: Generate CSV of failed predictions
         save_failed: Save failed prediction images
         subfolder: Only test models from this specific subfolder
+        input_dir: Directory containing models to test
     """
-    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder)
+    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, input_dir=input_dir)
     
     if not models:
         if subfolder:
@@ -737,10 +737,10 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
     
     # Handle failed predictions if requested
     if list_failed and all_failed_predictions:
-        csv_path = generate_failed_predictions_csv(all_failed_predictions, params.OUTPUT_DIR)
+        csv_path = generate_failed_predictions_csv(all_failed_predictions, input_dir)
     
     if save_failed and all_failed_predictions:
-        failed_dir = save_failed_images(all_failed_predictions, params.OUTPUT_DIR)
+        failed_dir = save_failed_images(all_failed_predictions, input_dir)
     
     # Sort by accuracy descending
     results.sort(key=lambda x: x['Accuracy_Raw'], reverse=True)
@@ -792,7 +792,8 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
     graph_paths = generate_comparison_graphs(
         results, 
         quantized_only=quantized_only,
-        use_all_datasets=use_all_datasets
+        use_all_datasets=use_all_datasets,
+        output_dir=input_dir
     )
     
     # Save full results to CSV
@@ -800,7 +801,8 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
         results, 
         quantized_only=quantized_only,
         use_all_images=use_all_datasets,
-        test_images_count=num_test_images
+        test_images_count=num_test_images,
+        output_dir=input_dir
     )
     
     # Generate markdown report
@@ -811,24 +813,23 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
             results,
             quantized_only=quantized_only,
             use_all_datasets=use_all_datasets,
-            test_images_count=num_test_images
+            test_images_count=num_test_images,
+            output_dir=input_dir
         )
         print(f"📄 Comprehensive markdown report generated: {markdown_path}")
     
     return results, all_failed_predictions
 
-def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_images_count=0):
+def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_images_count=0, output_dir=params.OUTPUT_DIR):
     """Save FULL results to CSV file with all information"""
     # Create results directory if it doesn't exist
-    results_dir = os.path.join(params.OUTPUT_DIR, "test_results")
+    results_dir = os.path.join(output_dir, "test_results")
     os.makedirs(results_dir, exist_ok=True)
     
-    # Generate filename with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     quant_suffix = "quantized" if quantized_only else "all"
     dataset_suffix = "full" if use_all_images else f"{test_images_count}images"
     
-    filename = f"model_comparison_{timestamp}_{quant_suffix}_{dataset_suffix}.csv"
+    filename = f"model_comparison_{quant_suffix}_{dataset_suffix}.csv"
     csv_path = os.path.join(results_dir, filename)
     
     # Prepare FULL data for CSV (all information)
@@ -1057,19 +1058,18 @@ def generate_iot_recommendation_section(f, df):
     
     f.write("\n")
 
-def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True, use_all_datasets=True, test_images_count=0):
+def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True, use_all_datasets=True, test_images_count=0, output_dir=params.OUTPUT_DIR):
     """Generate a comprehensive Markdown report from CSV results and graphs"""
     
     # Read the CSV data
     df = pd.read_csv(csv_path)
     
     # Create report directory
-    reports_dir = os.path.join(params.OUTPUT_DIR, "test_results", "reports")
+    reports_dir = os.path.join(output_dir, "test_results", "reports")
     os.makedirs(reports_dir, exist_ok=True)
     
-    # Generate report filename
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_filename = f"benchmark_report_{timestamp}.md"
+    # Generate report filename without timestamp
+    report_filename = "benchmark_report.md"
     report_path = os.path.join(reports_dir, report_filename)
     
     # Generate markdown content
@@ -1117,9 +1117,9 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
     return report_path
 
 
-def list_available_models(quantized_only=True, subfolder=None):
+def list_available_models(quantized_only=True, subfolder=None, input_dir=params.OUTPUT_DIR):
     """List all available models in training directories"""
-    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder)
+    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, input_dir=input_dir)
     
     if not models:
         if subfolder:
@@ -1189,9 +1189,8 @@ def generate_failed_predictions_csv(failed_predictions, output_dir):
     results_dir = os.path.join(output_dir, "test_results")
     os.makedirs(results_dir, exist_ok=True)
     
-    # Generate filename with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_filename = f"failed_predictions_{timestamp}.csv"
+    # Generate filename without timestamp
+    csv_filename = "failed_predictions.csv"
     csv_path = os.path.join(results_dir, csv_filename)
     
     # Prepare data for CSV
@@ -1355,6 +1354,7 @@ def main():
     """Main function with command line arguments"""
     parser = argparse.ArgumentParser(description='Digit Recognition Benchmarking')
     parser.add_argument('--model', type=str, help='Model name to use for prediction')
+    parser.add_argument('--input_dir', type=str, default=params.OUTPUT_DIR, help='Directory containing models to test (default: params.OUTPUT_DIR)')
     parser.add_argument('--quantized', action='store_true', default=True, help='Use only quantized models (default: True)')
     parser.add_argument('--no-quantized', action='store_false', dest='quantized', help='Include non-quantized models')
     parser.add_argument('--test_all', action='store_true', help='Test all available models and print accuracy summary')
@@ -1375,16 +1375,16 @@ def main():
     args = parser.parse_args()
     
     if args.list:
-        list_available_models(quantized_only=args.quantized, subfolder=args.subfolder)
+        list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, input_dir=args.input_dir)
         return
     
     # Handle single model prediction (highest priority)
     if args.model:
-        model_path = find_model_path(args.model)
+        model_path = find_model_path(args.model, input_dir=args.input_dir)
         if model_path is None:
-            print(f"❌ Model '{args.model}' not found!")
+            print(f"❌ Model '{args.model}' not found in {args.input_dir}!")
             print("Available models:")
-            list_available_models(quantized_only=args.quantized, subfolder=args.subfolder)
+            list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, input_dir=args.input_dir)
             return
         
         test_single_model(
@@ -1393,7 +1393,8 @@ def main():
             debug=args.debug,
             use_all_datasets=args.all_datasets,
             list_failed=args.list_failed,
-            save_failed=args.save_failed
+            save_failed=args.save_failed,
+            output_dir=args.input_dir
         )
         return
     
@@ -1406,7 +1407,8 @@ def main():
             use_all_datasets=args.all_datasets,
             list_failed=args.list_failed,
             save_failed=args.save_failed,
-            subfolder=args.subfolder
+            subfolder=args.subfolder,
+            input_dir=args.input_dir
         )
         return
     
@@ -1427,7 +1429,8 @@ def main():
         use_all_datasets=args.all_datasets,
         list_failed=args.list_failed,
         save_failed=args.save_failed,
-        subfolder=args.subfolder
+        subfolder=args.subfolder,
+        input_dir=args.input_dir
     )
 
 if __name__ == "__main__":

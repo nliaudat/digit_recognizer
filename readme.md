@@ -18,16 +18,66 @@ Grayscale or RGB runs the same on test datasets, but RGB need more resources at 
 
 The graph above shows the relationship between model accuracy and model size across different neural network architectures. As demonstrated, the project explores how different model complexities affect recognition performance.
 
-## Benchmark on 25000 real images
+## Directory Organization
+
+The exported models in the `exported_models/` directory are organized by classification complexity and color space:
+- `100cls_GRAY` and `100cls_RGB`: Stress-test models trained on 100 classes (0-99).
+- `10cls_GRAY` and `10cls_RGB`: Standard digits models trained on 10 classes (0-9).
+
+## Benchmark on 10 Classes (Standard Digits [0-9])
+
+The primary use case is 10-class recognition. The models perform exceptionally well on grayscale images, offering high accuracy for IoT deployment.
 
 | Model                          | Parameters | Size (KB) | Accuracy | Inferences/sec |
 | ------------------------------ | ---------- | --------- | -------- | -------------- |
-| original_haverland_10cls_GRAY  | 234500     | 203.4     | 0.9928   | 6508           |
-| digit_recognizer_v4_10cls_GRAY | 102400     | 62.5      | 0.9919   | 4391           |
-| mnist_quantization_10cls_GRAY  | 98700      | 63.6      | 0.9848   | 6696           |
-| digit_recognizer_v1_10cls_GRAY | 135700     | 97.6      | 0.984    | 7463           |
-| digit_recognizer_v5_10cls_GRAY | 90400      | 37.4      | 0.9712   | 3706           |
-| digit_recognizer_v3_10cls_GRAY | 26500      | 13.9      | 0.8566   | 11257          |
+| digit_recognizer_v12_10cls_GRAY| 490000     | 406.7     | 0.996    | 1917           |
+| digit_recognizer_v9_10cls_GRAY | 902500     | 148.6     | 0.993    | 3079           |
+| digit_recognizer_v4_10cls_GRAY | 79700      | 61.4      | 0.990    | 7617           |
+| original_haverland_10cls_GRAY  | 234500     | 203.3     | 0.987    | 5873           |
+| digit_recognizer_v3_10cls_GRAY | 118400     | 69.4      | 0.985    | 8420           |
+| mnist_quantization_10cls_GRAY  | 98700      | 63.6      | 0.977    | 6045           |
+| digit_recognizer_v7_10cls_GRAY | 75600      | 46.7      | 0.974    | 8884           |
+| digit_recognizer_v6_10cls_GRAY | 61500      | 36.5      | 0.971    | 6643           |
+
+### Pareto-Optimal Choice: `v4` vs `original_haverland`
+
+When comparing the `original_haverland` baseline to `digit_recognizer_v4` on the 10-class dataset, `v4` demonstrates strict superiority across all key edge-deployment metrics:
+
+1.  **Higher Accuracy**: `v4` achieves **99.0%** accuracy compared to the original's **98.7%**.
+2.  **Dramatically Smaller Memory Footprint**: `v4` is only **61.4 KB**, making it roughly **3.3x smaller** than the original's **203.3 KB**, saving critical flash memory on ESP32 devices.
+3.  **Faster Inference**: `v4` processes **7617 inferences/second**, making it nearly **30% faster** than the original's **5873 inferences/second**.
+4.  **Fewer Parameters**: `v4` utilizes nearly 3 times fewer parameters (79k vs 234k), directly reducing the required RAM tensor arena size.
+
+## Benchmark on 24351 real images (100 Classes [0-99])
+
+To ensure a fair and comprehensive comparison between architectures under stress, the following benchmark utilizes the 100 classes (`0` to `99`) dataset, which represents a significantly harder classification task than the simple 0-9 digits.
+
+| Model                          | Parameters | Size (KB) | Accuracy | Inferences/sec |
+| ------------------------------ | ---------- | --------- | -------- | -------------- |
+| digit_recognizer_v12_100cls_GRAY| 496100     | 414.8     | 0.9149   | 2039           |
+| digit_recognizer_v9_100cls_GRAY | 911500     | 159.5     | 0.8734   | 3145           |
+| digit_recognizer_v6_100cls_GRAY | 171800     | 132.5     | 0.8622   | 3343           |
+| digit_recognizer_v4_100cls_GRAY | 85800      | 69.5      | 0.8558   | 8003           |
+| original_haverland_100cls_GRAY  | 257899     | 228.2     | 0.8435   | 6220           |
+| mnist_quantization_100cls_GRAY  | 104800     | 71.7      | 0.8159   | 6400           |
+| digit_recognizer_v3_100cls_GRAY | 121600     | 74.6      | 0.7873   | 8331           |
+| digit_recognizer_v7_100cls_GRAY | 82400      | 55.5      | 0.7807   | 9270           |
+
+### Performance under Stress: `v4` vs `original_haverland` (100-Class)
+
+Even on the harder dataset, `v4` maintains its sheer edge over `original_haverland`:
+
+1.  **Higher Accuracy**: `v4` achieves **85.58%** accuracy compared to the original's **84.35%**.
+2.  **Dramatically Smaller Memory Footprint**: `v4` drops to **69.5 KB** while the original is **228.2 KB**.
+3.  **Faster Inference**: `v4` processes **8003 inferences/second**, beating the original's **6220 inferences/second**.
+4.  **Fewer Parameters**: `v4` utilizes nearly 3 times fewer parameters (85k vs 257k).
+
+## Documentation
+
+For detailed guides analyzing how to train, benchmark, and debug the models within this repository, refer to the guides in the [`documentations/`](documentations/) folder:
+- [Training Guide](documentations/training_guide.md)
+- [Benchmarking & Prediction](documentations/benchmarking_and_prediction.md)
+- [Analysis & Debugging](documentations/analysis_and_debugging.md)
 
 ## Features
 
@@ -48,8 +98,11 @@ The project demonstrates that :
  - CPU operations must be also taken into parameters for IOT
  - RGB or grayscale has very same benchmark results, but the processing is not the same as in parameters needed. It also needs a lot of more cpu and memory to process
  
- ## RGB - Grayscale model comparison : 
- if the model use Conv2D (fast all), it flatten all channel, that's why the result are very the same between RGB and grayscale
+ ## RGB vs Grayscale Model Comparison
+
+ If the model uses Conv2D (first layer), it flattens all channels, which is why the theoretical benchmark results (accuracy and raw inference speed) are very similar between RGB and grayscale variants. 
+
+ However, **RGB increases the pre-processing time in IoT devices by a significant factor**. The image processing pipeline must handle 3 times as much data (e.g., resizing and normalizing channels). Furthermore, the input tensor memory footprint (`H, W, 3`) takes substantially more RAM before inference even begins. Therefore, Grayscale (`10cls_GRAY`) is highly recommended for constrained microcontrollers.
  
  ##### How Conv2D Actually Works with Channels:
 -   **Input**: `(height, width, channels)` - e.g., `(32, 20, 1)` for grayscale or `(32, 20, 3)` for RGB
