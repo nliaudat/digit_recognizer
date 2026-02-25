@@ -549,6 +549,13 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     setup_tensorflow_logging(debug)
     set_all_seeds(params.SHUFFLE_SEED)
     
+    try:
+        import mlflow
+        MLFLOW_AVAILABLE = True
+    except ImportError:
+        MLFLOW_AVAILABLE = False
+        print("ℹ️ MLflow not installed. Skipping experiment tracking. (Run `pip install mlflow` to enable)")
+    
     # Validate quantization parameters
     print("🎯 VALIDATING QUANTIZATION PARAMETERS...")
     is_valid, corrected_params, message = validate_quantization_parameters()
@@ -757,6 +764,22 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     print("\n🎯 Starting training...")
     start_time = datetime.now()
     
+    active_run = None
+    if MLFLOW_AVAILABLE:
+        try:
+            import mlflow
+            mlflow.set_tracking_uri("file://" + os.path.abspath("mlruns"))
+            mlflow.set_experiment("Digit_Recognizer")
+            active_run = mlflow.start_run(run_name=f"{params.MODEL_ARCHITECTURE}_{color_mode}")
+            mlflow.tensorflow.autolog(log_models=False, log_datasets=False)
+            mlflow.log_param("architecture", params.MODEL_ARCHITECTURE)
+            mlflow.log_param("qat_enabled", params.USE_QAT)
+            mlflow.log_param("epochs", params.EPOCHS)
+            mlflow.log_param("batch_size", params.BATCH_SIZE)
+        except Exception as e:
+            print(f"⚠️ MLflow tracking initialization failed: {e}")
+            MLFLOW_AVAILABLE = False
+
     if params.USE_DATA_AUGMENTATION:
         train_dataset, val_dataset, _ = setup_augmentation_for_training(
             x_train, y_train_final, x_val, y_val_final, debug=debug
@@ -906,8 +929,21 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             print("🔍 Debug mode - skipping cleanup")
         if no_cleanup:
             print("🚫 Cleanup disabled - keeping checkpoints")
-    
-    return model, history, training_dir
+        
+        if MLFLOW_AVAILABLE:
+            mlflow.log_metric("test_accuracy", test_accuracy)
+            mlflow.log_metric("tflite_accuracy", tflite_accuracy)
+            
+            # Log the optimized TFLite model as an artifact
+            for root, dirs, files in os.walk(training_dir):
+                for file in files:
+                    if file.endswith(".tflite"):
+                        mlflow.log_artifact(os.path.join(root, file))
+            
+            if active_run:
+                mlflow.end_run()
+
+        return model, history, training_dir
 
 if __name__ == "__main__":
     main()

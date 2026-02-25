@@ -20,6 +20,23 @@ from .model_factory import (
 # from .dig_class100_s2 import create_dig_class100_s2
 from .original_haverland import create_original_haverland
 from .cnn32 import CNN_s2
+from .digit_recognizer_v1 import create_digit_recognizer_v1
+from .digit_recognizer_v2 import create_digit_recognizer_v2
+from .digit_recognizer_v3 import create_digit_recognizer_v3
+from .digit_recognizer_v4 import create_digit_recognizer_v4
+from .digit_recognizer_v5 import create_digit_recognizer_v5
+from .digit_recognizer_v6 import create_digit_recognizer_v6
+from .digit_recognizer_v7 import create_digit_recognizer_v7
+from .digit_recognizer_v8 import create_digit_recognizer_v8
+from .digit_recognizer_v9 import create_digit_recognizer_v9
+from .digit_recognizer_v10 import create_digit_recognizer_v10
+from .digit_recognizer_v11 import create_digit_recognizer_v11
+from .digit_recognizer_v12 import create_digit_recognizer_v12
+from .digit_recognizer_v13 import create_digit_recognizer_v13
+from .digit_recognizer_v14 import create_digit_recognizer_v14
+from .esp_quantization_ready import create_esp_quantization_ready
+from .mnist_quantization import create_mnist_quantization
+from .high_accuracy_validator import create_high_accuracy_validator
 
 __all__ = [
     'create_model',
@@ -38,4 +55,21 @@ __all__ = [
     'create_dig_class100_s2',
     'create_original_haverland',
     'CNN_s2',
+    'create_digit_recognizer_v1',
+    'create_digit_recognizer_v2',
+    'create_digit_recognizer_v3',
+    'create_digit_recognizer_v4',
+    'create_digit_recognizer_v5',
+    'create_digit_recognizer_v6',
+    'create_digit_recognizer_v7',
+    'create_digit_recognizer_v8',
+    'create_digit_recognizer_v9',
+    'create_digit_recognizer_v10',
+    'create_digit_recognizer_v11',
+    'create_digit_recognizer_v12',
+    'create_digit_recognizer_v13',
+    'create_digit_recognizer_v14',
+    'create_esp_quantization_ready',
+    'create_mnist_quantization',
+    'create_high_accuracy_validator',
 ]

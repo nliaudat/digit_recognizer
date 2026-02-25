@@ -18,16 +18,29 @@ Grayscale or RGB runs the same on test datasets, but RGB need more resources at 
 
 The graph above shows the relationship between model accuracy and model size across different neural network architectures. As demonstrated, the project explores how different model complexities affect recognition performance.
 
-## Benchmark on 25000 real images
+## Benchmark on 24351 real images (100 Classes [0-99])
+
+To ensure a fair and comprehensive comparison between architectures, the following benchmark utilizes the 100 classes (`0` to `99`) dataset, which represents a significantly harder classification task than the simple 0-9 digits.
 
 | Model                          | Parameters | Size (KB) | Accuracy | Inferences/sec |
 | ------------------------------ | ---------- | --------- | -------- | -------------- |
-| original_haverland_10cls_GRAY  | 234500     | 203.4     | 0.9928   | 6508           |
-| digit_recognizer_v4_10cls_GRAY | 102400     | 62.5      | 0.9919   | 4391           |
-| mnist_quantization_10cls_GRAY  | 98700      | 63.6      | 0.9848   | 6696           |
-| digit_recognizer_v1_10cls_GRAY | 135700     | 97.6      | 0.984    | 7463           |
-| digit_recognizer_v5_10cls_GRAY | 90400      | 37.4      | 0.9712   | 3706           |
-| digit_recognizer_v3_10cls_GRAY | 26500      | 13.9      | 0.8566   | 11257          |
+| digit_recognizer_v12_100cls_GRAY| 496100     | 414.8     | 0.9149   | 2039           |
+| digit_recognizer_v9_100cls_GRAY | 911500     | 159.5     | 0.8734   | 3145           |
+| digit_recognizer_v6_100cls_GRAY | 171800     | 132.5     | 0.8622   | 3343           |
+| digit_recognizer_v4_100cls_GRAY | 85800      | 69.5      | 0.8558   | 8003           |
+| original_haverland_100cls_GRAY  | 257899     | 228.2     | 0.8435   | 6220           |
+| mnist_quantization_100cls_GRAY  | 104800     | 71.7      | 0.8159   | 6400           |
+| digit_recognizer_v3_100cls_GRAY | 121600     | 74.6      | 0.7873   | 8331           |
+| digit_recognizer_v7_100cls_GRAY | 82400      | 55.5      | 0.7807   | 9270           |
+
+### Pareto-Optimal Choice: `v4` vs `original_haverland`
+
+When comparing the `original_haverland` baseline to `digit_recognizer_v4` on the 100 classes dataset, `v4` demonstrates strict superiority across all key edge-deployment metrics:
+
+1.  **Higher Accuracy**: `v4` achieves **85.58%** accuracy compared to the original's **84.35%**.
+2.  **Dramatically Smaller Memory Footprint**: `v4` is only **69.5 KB**, making it roughly **3.3x smaller** than the original's **228.2 KB**, saving critical flash memory on ESP32 devices.
+3.  **Faster Inference**: `v4` processes **8003 inferences/second**, making it nearly **30% faster** than the original's **6220 inferences/second**.
+4.  **Fewer Parameters**: `v4` utilizes nearly 3 times fewer parameters (85k vs 257k), directly reducing the required RAM tensor arena size.
 
 ## Features
 
