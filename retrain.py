@@ -153,8 +153,14 @@ def main():
             
     converter.representative_dataset = representative_dataset_gen
     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-    converter.inference_input_type = tf.uint8
-    converter.inference_output_type = tf.uint8
+    if params.ESP_DL_QUANTIZE:
+        print("INFO: Using INT8 quantization scheme for ESP-DL.")
+        converter.inference_input_type = tf.int8
+        converter.inference_output_type = tf.int8
+    else:
+        print("INFO: Using standard UINT8 quantization scheme.")
+        converter.inference_input_type = tf.uint8
+        converter.inference_output_type = tf.uint8
     
     try:
         tflite_model = converter.convert()
