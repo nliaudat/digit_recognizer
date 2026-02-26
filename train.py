@@ -792,6 +792,21 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             verbose=0
         )
     else:
+        # Compute class weights to handle imbalanced datasets
+        try:
+            from sklearn.utils.class_weight import compute_class_weight
+            unique_classes = np.unique(y_train_final)
+            weights = compute_class_weight(
+                class_weight='balanced',
+                classes=unique_classes,
+                y=y_train_final
+            )
+            class_weight_dict = dict(zip(unique_classes, weights))
+            print(f"⚖️  Using class weights for {len(unique_classes)} classes (max ratio: {max(weights)/min(weights):.2f}x)")
+        except Exception as e:
+            print(f"⚠️  Could not compute class weights: {e}. Training without class weighting.")
+            class_weight_dict = None
+
         history = model.fit(
             x_train, y_train_final,
             batch_size=params.BATCH_SIZE,
@@ -799,7 +814,8 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             validation_data=(x_val, y_val_final),
             callbacks=callbacks,
             verbose=0,
-            shuffle=True
+            shuffle=True,
+            class_weight=class_weight_dict
         )
     
     training_time = datetime.now() - start_time
