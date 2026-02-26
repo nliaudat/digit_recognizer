@@ -1,4 +1,33 @@
 # models/digit_recognizer_v6.py
+"""
+digit_recognizer_v6 – TFLite Micro & ESP-DL Optimized CNN
+==========================================================
+Design goal: Maximum hardware compatibility with ESP-DL by switching from
+ReLU6 to standard ReLU and replacing SeparableConv2D with regular Conv2D.
+Maintains the class-count adaptive capacity scaling from v5.
+
+Architecture (grayscale):
+  - Conv2D(24→36→48) + ReLU + MaxPool after first block
+  - Optional Conv2D(56) for ≥50 classes
+  - GlobalAveragePooling2D
+  - Dense(64, optional Dense(48)) + ReLU → Softmax
+
+Architecture (RGB):
+  - Standard Conv2D(28→42→56) + ReLU (avoids SeparableConv for ESP-DL)
+  - Class-adaptive Dense head
+
+ESP-DL compatible ops: Conv2D, ReLU, MaxPool2D, GlobalAveragePool2D,
+  FullyConnected, Softmax. Explicitly avoids: ReLU6, SeparableConv2D,
+  BatchNormalization.
+
+Notes:
+  - No BatchNormalization (intentionally omitted for ESP-DL friendliness)
+  - Dropout only applied in grayscale variant
+  - No QAT wrapper
+
+Estimated: ~50–140K parameters depending on class count and variant.
+"""
+
 import tensorflow as tf
 import parameters as params
 

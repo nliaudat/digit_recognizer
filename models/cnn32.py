@@ -1,4 +1,30 @@
 # models/cnn32.py
+"""
+cnn32 / CNN_s2 – Exact Haverland Original Reference Model
+==========================================================
+Design goal: Faithful replica of the `CNN_s2` model from Haverland's
+`b2n.models.cnn32` notebook for the Tenth-of-step meter-digit project.
+Used as the primary reference baseline to compare all custom models against.
+
+Reference:
+  https://github.com/haverland/Tenth-of-step-of-a-meter-digit/blob/master/dig-class100-s2.ipynb
+
+Architecture:
+  - BN → Conv2D(32, 3×3) + BN + ReLU + MaxPool + Dropout(0.2)   → Block 1
+  - Conv2D(64, 3×3) + BN + ReLU + MaxPool + Dropout(0.2)         → Block 2
+  - Conv2D(64, 3×3) + BN + ReLU + MaxPool                        → Block 3
+  - Flatten → Dropout(0.4) → Dense(256) + ReLU + Dropout(0.4)
+  - Dense(NB_CLASSES, softmax)
+
+Notes:
+  - Input normalization via first BN layer (replaces image preprocessing)
+  - Uses Flatten + Dense(256) head — large; not quantization optimal
+  - Configurable activation_top (None = logits, 'softmax' = probabilities)
+  - Wrapped as create_original_haverland() for factory compatibility
+
+Estimated: ~200–300K parameters → reference only, not intended for ESP32.
+"""
+
 import tensorflow as tf
 import parameters as params
 

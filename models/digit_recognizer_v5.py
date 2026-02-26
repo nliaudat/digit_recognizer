@@ -1,4 +1,35 @@
 # models/digit_recognizer_v5.py
+"""
+digit_recognizer_v5 – Class-Count Adaptive CNN (10 vs 100 Classes)
+===================================================================
+Design goal: Dynamically scale the model's capacity based on NB_CLASSES —
+compact for 10-class digit recognition, progressively larger for 100-class
+two-digit recognition.
+
+Architecture (grayscale, 10-class):
+  - Conv2D(24→36→48) + ReLU6 + MaxPool after first block
+  - GlobalAveragePooling2D
+  - Dense(64) + ReLU6 → Softmax
+
+Architecture (grayscale, 100-class):
+  - Conv2D(32→48→64→72) + ReLU6 progression (extra layer for ≥50 classes)
+  - Dense(128) + Dense(96) two-stage classification head
+
+Architecture (RGB):
+  - SeparableConv2D entry for RGB channel efficiency
+  - Same class-adaptive filter/dense scaling
+
+Helpers:
+  - get_filters(base_10, base_100)     → picks filter count by NB_CLASSES
+  - get_dense_units(base_10, base_100) → picks Dense size by NB_CLASSES
+
+Notes:
+  - No QAT wrapper (use v12+ for residual + QAT)
+  - Dropout scaled from 0.1 (10-class) to 0.2 (100-class)
+
+Estimated: ~55–130K parameters depending on class count and variant.
+"""
+
 import tensorflow as tf
 import parameters as params
 

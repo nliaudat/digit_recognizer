@@ -1,4 +1,21 @@
 # models/template.py
+"""
+template – Starter Template for New Model Architectures
+========================================================
+Design goal: Minimal boilerplate to copy-paste when creating a new model.
+Replace the placeholder layers with your actual architecture and update
+this docstring with the design goal, layer list, notes, and estimated size.
+
+Architecture (placeholder):
+  - Conv2D(32, 3×3) + ReLU + MaxPool  → replace with your layers
+  - GlobalAveragePooling2D → Dense(NB_CLASSES) Softmax
+
+Notes:
+  - Copy this file and rename to digit_recognizer_vXX.py
+  - Register the new model in models/__init__.py and parameters.py
+  - Update the header docstring before committing
+"""
+
 import tensorflow as tf
 import parameters as params
 

@@ -1,4 +1,33 @@
 # models/high_accuracy_validator.py
+"""
+high_accuracy_validator – ResNet with SE Attention (PC/Server Only)
+====================================================================
+Design goal: Maximize classification accuracy for ambiguous meter images
+on PC/server hardware. No IoT size or latency constraints. Residual blocks
+with Squeeze-and-Excitation (SE) attention throughout for strong feature
+discrimination.
+
+Architecture:
+  - Conv2D(64) + BN + ReLU + MaxPool              → entry stem
+  - ResSEBlock(64) × 2                            → Stage 1
+  - ResSEBlock(128, stride=2) + ResSEBlock(128)   → Stage 2 (spatial /2)
+  - ResSEBlock(256, stride=2) + ResSEBlock(256)   → Stage 3 (spatial /2)
+  - GlobalAveragePooling2D
+  - Dense(512) + BN + ReLU + Dropout(0.5)
+  - Dense(256) + BN + ReLU + Dropout(0.3) → Dense(NB_CLASSES) Softmax
+
+Custom helpers:
+  - se_block(x, ratio=16): GAP → Dense(C/r) ReLU → Dense(C) Sigmoid → Scale
+  - res_se_block(x, filters, strides): Standard ResNet block + SE attention
+
+Notes:
+  - Not QAT-compatible; create_qat_model() returns the float32 model as-is
+  - SE blocks use Reshape which is not TFLite Micro safe
+  - Predecessor to deep_accuracy_validator (uses BN, not ConvNeXt style)
+
+Estimated: ~3–5M parameters → PC/server validation only.
+"""
+
 import tensorflow as tf
 import parameters as params
 

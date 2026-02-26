@@ -1,4 +1,25 @@
 # models/digit_recognizer_v1.py
+"""
+digit_recognizer_v1 – ESP-DL Compatible Baseline Model
+=======================================================
+Design goal: Simple, quantization-ready CNN baseline with high accuracy
+and full ESP-DL / TFLite Micro compatibility.
+
+Architecture:
+  - Conv2D(32) entry block + BN + ReLU + MaxPool
+  - Depthwise separable block (Dw + Pointwise Conv(64)) + BN + ReLU + MaxPool
+  - Conv2D(128) feature refinement block + BN + ReLU
+  - GlobalAveragePooling2D         → no spatial blowup from Flatten
+  - Dense(64) classification head + Softmax
+
+Notes:
+  - No bias when followed by BatchNormalization (folds cleanly during QAT)
+  - Standard ReLU (broader ESP-DL compatibility than ReLU6)
+  - Lacks QAT wrapper; use v4+ for QAT-compatible variants
+
+Estimated: ~135K parameters → ~130 KB after INT8 quantization.
+"""
+
 import tensorflow as tf
 import parameters as params
 

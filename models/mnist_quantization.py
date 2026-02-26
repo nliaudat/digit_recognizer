@@ -1,4 +1,36 @@
 # models/mnist_quantization.py
+"""
+mnist_quantization – TF QAT Guide Reference Implementation
+===========================================================
+Design goal: Replicate the MNIST model from the TensorFlow Model Optimization
+quantization training guide. Used as a reference/teaching example for QAT
+practices in this project (ReLU6, no BN, GAP, explicit bias).
+
+Reference:
+  https://www.tensorflow.org/model_optimization/guide/quantization/training_example
+
+Architecture (mnist_quantization — quantization-friendly):
+  - Conv2D(32) + ReLU6 + MaxPool    → Block 1
+  - Conv2D(64) + ReLU6 + MaxPool    → Block 2
+  - Conv2D(64) + ReLU6              → Block 3
+  - GlobalAveragePooling2D → Dense(NB_CLASSES) Softmax  (no hidden Dense)
+
+Architecture (mnist_baseline — for comparison):
+  - Conv2D(32,64,64) + ReLU + MaxPool × 2 → Flatten → Dense(64) → Softmax
+
+Utilities also provided:
+  - apply_qat_to_mnist(model): wraps with tfmot.quantize_model()
+  - convert_to_tflite(model, rep_dataset): full INT8 or dynamic-range convert
+  - create_representative_dataset(x_data): calibration generator
+
+Notes:
+  - ReLU6 via tf.keras.layers.ReLU(max_value=6) — cleanest QAT pattern
+  - No QAT wrapper on the function itself; call apply_qat_to_mnist() separately
+  - Explicit use_bias=True on all conv layers for clean quantizer behavior
+
+Estimated: ~60K parameters → ~60 KB after INT8 quantization.
+"""
+
 import tensorflow as tf
 import parameters as params
 
