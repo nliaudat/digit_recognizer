@@ -1,4 +1,31 @@
 # models/digit_recognizer_v7.py
+"""
+digit_recognizer_v7 – Balanced Depthwise Separable CNN (~80K params)
+======================================================================
+Design goal: Best balance of accuracy, model size, and speed based on
+analysis of v1–v6 benchmark results. Targets ~80K parameters — between
+v1's 135K and v4's 90K — using a depthwise separable middle block.
+
+Architecture (grayscale, default):
+  - Conv2D(28) + ReLU + MaxPool          → wider entry than v4(20)
+  - DepthwiseConv2D(3×3) + Pointwise Conv2D(48) + ReLU + MaxPool
+    (depthwise separable: ~3× cheaper than full Conv)
+  - Conv2D(64) + ReLU                   → feature refinement
+  - GlobalAveragePooling2D
+  - Dense(72) + ReLU + Dropout(0.2) → Softmax
+
+Variants also provided:
+  - create_digit_recognizer_v7_compact()      → ~50K params, faster
+  - create_digit_recognizer_v7_high_accuracy() → ~100K params, more accurate
+
+Notes:
+  - Standard ReLU throughout (ESP-DL compatible)
+  - No BatchNormalization → simpler quantization graph
+  - No QAT wrapper
+
+Estimated: ~80K parameters → ~45–50 KB after INT8 quantization.
+"""
+
 import tensorflow as tf
 import parameters as params
 

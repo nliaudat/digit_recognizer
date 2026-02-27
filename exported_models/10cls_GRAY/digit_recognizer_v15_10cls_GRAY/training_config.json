@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-02-26 21:30:08",
+  "training_duration": "1:19:20.933973",
+  "model_architecture": "digit_recognizer_v15",
+  "input_shape": [
+    32,
+    20,
+    1
+  ],
+  "num_classes": 10,
+  "epochs": 200,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "quantization_enabled": true,
+  "qat_enabled": true,
+  "esp_dl_enabled": false,
+  "data_augmentation": true,
+  "grayscale": true,
+  "best_validation_accuracy": 0.9839868545532227,
+  "test_accuracy_keras": 0.9800047874450684,
+  "test_accuracy_tflite": 0.9801245210727969,
+  "model_size_keras_kb": 616.828125,
+  "model_size_tflite_kb": 79.328125,
+  "total_parameters": 64970,
+  "size_reduction_percent": 87.13934696152191
+}

@@ -535,13 +535,15 @@ def main():
     #  Default – train the single architecture defined in parameters.py
     # -----------------------------------------------------------------
     print(f"🚀 Training architecture: {params.MODEL_ARCHITECTURE}")
-    model, hist, out_dir = train_model(debug=args.debug, 
+    result = train_model(debug=args.debug, 
                                      no_cleanup=args.no_cleanup,
                                      full_analysis=not args.no_analysis)
-    if model is not None:
-        print(f"\n✅ Training completed – results stored in {out_dir}")
+    
+    if result is not None and len(result) == 3 and result[0] is not None:
+        model, hist, out_dir = result
+        print(f"\n✅ Training completed - results stored in {out_dir}")
     else:
-        print("\n❌ Training failed.")
+        print("\n❌ Training failed or returned early.")
 
 
 def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, full_analysis: bool = True):
@@ -792,6 +794,21 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             verbose=0
         )
     else:
+        # Compute class weights to handle imbalanced datasets
+        try:
+            from sklearn.utils.class_weight import compute_class_weight
+            unique_classes = np.unique(y_train_final)
+            weights = compute_class_weight(
+                class_weight='balanced',
+                classes=unique_classes,
+                y=y_train_final
+            )
+            class_weight_dict = dict(zip(unique_classes, weights))
+            print(f"⚖️  Using class weights for {len(unique_classes)} classes (max ratio: {max(weights)/min(weights):.2f}x)")
+        except Exception as e:
+            print(f"⚠️  Could not compute class weights: {e}. Training without class weighting.")
+            class_weight_dict = None
+
         history = model.fit(
             x_train, y_train_final,
             batch_size=params.BATCH_SIZE,
@@ -799,7 +816,8 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             validation_data=(x_val, y_val_final),
             callbacks=callbacks,
             verbose=0,
-            shuffle=True
+            shuffle=True,
+            class_weight=class_weight_dict
         )
     
     training_time = datetime.now() - start_time

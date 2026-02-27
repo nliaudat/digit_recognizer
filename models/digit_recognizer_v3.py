@@ -1,4 +1,33 @@
 # models/digit_recognizer_v3.py
+"""
+digit_recognizer_v3 – Channel-Adaptive Multi-Variant CNN
+=========================================================
+Design goal: Flexible baseline that auto-selects grayscale or RGB
+sub-architectures based on INPUT_SHAPE channels. Introduces BatchNorm
+and Dropout for improved training stability and regularization.
+
+Architecture (grayscale improved, the default):
+  - Conv2D(16) + BN + ReLU6 + MaxPool + Dropout(0.1)
+  - Conv2D(32) + BN + ReLU6 + MaxPool + Dropout(0.2)
+  - Conv2D(48) + BN + ReLU6
+  - Conv2D(64) + BN + ReLU6 + Dropout(0.3)
+  - GlobalAveragePooling2D
+  - Dense(64) + BN + ReLU6 + Dropout(0.4)
+  - Dense(32) → Dense(NB_CLASSES) Softmax
+
+Architecture (RGB variant):
+  - SeparableConv2D entry to handle 3-channel cost efficiently
+  - Conv2D(24,32,48) progression + ReLU6
+  - Dense(48) classification head
+
+Notes:
+  - ReLU6 via tf.keras.layers.Activation(tf.nn.relu6) — may cause
+    issues with some quantization converters; prefer v4+ for QAT
+  - Dropout rates scaled from 0.1 to 0.4 for regularization
+
+Estimated: ~80–120K parameters depending on variant.
+"""
+
 import tensorflow as tf
 import parameters as params
 

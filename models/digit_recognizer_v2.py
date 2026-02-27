@@ -1,4 +1,26 @@
 # models/digit_recognizer_v2.py
+"""
+digit_recognizer_v2 – ReLU6 Clip Baseline (TF QAT Example Style)
+=================================================================
+Design goal: Minimal, quantization-compatible baseline following the
+TensorFlow model optimization training example pattern.
+
+Architecture:
+  - Three stacked Conv2D blocks (32 → 64 → 64) + ReLU6 (via clip)
+  - MaxPooling2D after first two conv blocks
+  - GlobalAveragePooling2D  → replaces Flatten, quantization-friendly
+  - Direct Dense(NB_CLASSES) + Softmax output (no hidden Dense)
+
+Notes:
+  - ReLU6 implemented as tf.clip_by_value(relu(x), 0, 6) for broad
+    ESP-DL and TFLite Micro compatibility without a Lambda layer
+  - No BatchNormalization → simpler, but less stable training
+  - No bias when not needed for quantization
+
+Reference: https://www.tensorflow.org/model_optimization/guide/quantization/training_example
+Estimated: ~50K parameters → ~50 KB after INT8 quantization.
+"""
+
 import tensorflow as tf
 import parameters as params
 

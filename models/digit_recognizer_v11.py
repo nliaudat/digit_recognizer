@@ -1,42 +1,40 @@
 # models/digit_recognizer_v11.py
+"""
+digit_recognizer_v11 – Modern SOTA CNN with GELU, Swish, SE & MBConv
+======================================================================
+Design goal: Push accuracy using state-of-the-art components —
+GELU/Swish activations, MBConv blocks with SE attention, stochastic depth
+regularization, and multi-scale feature fusion. Research baseline model.
+
+Architecture:
+  - Conv2D(32) stem + BN + Swish
+  - MBConvBlock(32, expand=1, SE) + StochasticDepth + MaxPool + Dropout(0.1)
+  - MBConvBlock(64, expand=4, SE, Swish) + StochasticDepth + MaxPool + Dropout(0.2)
+  - MBConvBlock(128, expand=4, SE, Swish) + MBConvBlock(128, expand=4, SE, GELU) + Dropout(0.3)
+  - MBConvBlock(256, expand=6, SE, GELU) + Dropout(0.4)
+  - Multi-scale aggregation: GAP + GMP + Spatial 1×1 → Concatenate → Dropout(0.5)
+  - Dense(256) BN GELU + Dropout(0.4)
+  - Dense(128) BN Swish + Dropout(0.3)
+  - Dense(64) GELU → Dense(NB_CLASSES) Softmax
+
+Custom classes:
+  - QATFriendlyGELU / QATFriendlySwish: activations designed for QAT stability
+  - QATSEBlock: SE attention optimised for quantization graph
+  - MBConvBlock: Mobile inverted bottleneck with configurable activation + SE
+  - StochasticDepth: DropPath regularization for deep networks
+
+Notes:
+  - Despite "QAT-friendly" naming, Swish/GELU ops remain NOT TFLite Micro safe
+  - Large model, not suitable for ESP32 deployment
+  - Lightweight v11_light variant also provided
+
+Estimated: ~1M+ parameters → not intended for ESP32 deployment.
+"""
+
 import tensorflow as tf
 import parameters as params
 from tensorflow.keras import layers, Model
 import tensorflow.keras.backend as K
-
-'''
-1. Advanced Activations:
-
-    GELU: Gaussian Error Linear Unit (used in Transformers)
-
-    Swish: x * sigmoid(x) (better than ReLU, used in EfficientNet)
-
-2. Attention Mechanisms:
-
-    Squeeze-and-Excitation (SE): Channel-wise attention
-
-    QAT-optimized: Works with quantization
-
-3. Modern Blocks:
-
-    MBConv: Mobile Inverted Bottleneck (EfficientNet style)
-
-    Stochastic Depth: Randomly skip layers during training
-
-4. Regularization:
-
-    Stochastic Depth: Better than Dropout for deep networks
-
-    Multi-scale features: GAP + GMP + spatial attention
-
-🎯 Expected Improvements:
-Component	Benefit	QAT Compatible
-GELU	Smoother gradients, better convergence	✅
-Swish	Non-monotonic, better than ReLU	✅
-SE Blocks	Channel attention, +1-2% accuracy	✅
-MBConv	Better efficiency/accuracy trade-off	✅
-Stochastic Depth	Regularization like Dropout	✅
-'''
 
 class QATFriendlyGELU(layers.Layer):
     """GELU activation that's quantization-friendly using approximation"""

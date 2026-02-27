@@ -1,20 +1,38 @@
 # models/digit_recognizer_v9.py
+"""
+digit_recognizer_v9 – EfficientNet-Style Mobile Inverted Bottleneck
+====================================================================
+Design goal: Optimal efficiency/accuracy balance using EfficientNet-inspired
+MBConv blocks with optional Squeeze-and-Excitation attention, targeting
+competitive accuracy with fewer parameters than v8.
+
+Architecture:
+  - Conv2D(32) stem + BN + Swish
+  - MBConv(16, stride=1, expand=1)          → compact initial block
+  - MBConv(24, stride=2, expand=4, SE=0.25) → spatial /2, SE attention
+  - MBConv(32, stride=1, expand=4, SE=0.25) → feature deepening
+  - MBConv(48, stride=1, expand=4, SE=0.25)
+  - Conv2D(128) head + BN + Swish
+  - GlobalAveragePooling2D + Dropout(0.3)
+  - Dense(96) Swish + BN + Dropout(0.2) → Dense(NB_CLASSES) Softmax
+
+Custom classes:
+  - SwishLayer: FP-safe Swish activation as a Keras layer
+  - SEBlock: Squeeze-and-Excitation (channel-wise attention)
+
+Notes:
+  - Swish activation is NOT TFLite Micro / ESP-DL safe
+  - SE blocks involve reshape ops that break QAT
+  - Simplified variant (v9_simple, no SE) provided for less complex ops
+  - Use v15–v17 for IoT-safe equivalents
+
+Estimated: ~150–200K parameters → not intended for ESP32 deployment.
+"""
+
 import tensorflow as tf
 import parameters as params
 from tensorflow.keras import layers, Model
 import tensorflow.keras.backend as K
-
-'''
-V9 (EfficientNet-style):
-
-    Mobile inverted bottleneck blocks
-
-    Depthwise separable convolutions
-
-    Squeeze-and-Excitation in each block
-
-    Optimized for efficiency/accuracy balance
-'''
 
 class SwishLayer(layers.Layer):
     """Custom layer for Swish activation"""

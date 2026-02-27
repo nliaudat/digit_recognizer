@@ -1,8 +1,33 @@
 # models/digit_recognizer_v12.py
+"""
+digit_recognizer_v12 – Residual CNN with Optimized Capacity Balancing
+======================================================================
+Design goal: Introduce proper skip connections (ResNet-style) to improve
+gradient flow and accuracy compared to v4's plain linear stack, while
+maintaining QAT compatibility via a provided create_qat_model() wrapper.
+
+Architecture:
+  - Conv2D(32) entry + BN + ReLU + MaxPool
+  - ResidualBlock(48) × 2 + MaxPool     → better gradient flow than plain conv
+  - ResidualBlock(96) × 2               → deep feature extraction
+  - GlobalAveragePooling2D
+  - Dropout(0.3)
+  - Dense(64) + ReLU + Dropout(0.2) → Dense(NB_CLASSES) Softmax
+
+Residual block: Conv2D + BN + ReLU → Conv2D + BN + Add(shortcut) + ReLU
+  Shortcut uses 1×1 Conv + BN when channel count changes.
+
+Notes:
+  - Standard ReLU (TFLite Micro and ESP-DL safe)
+  - BatchNormalization folds into Conv during quantization
+  - QAT wrapper provided via create_qat_model()
+  - Capacity reduced vs original (64→48, 128→96) to prevent overfitting
+
+Estimated: ~200K parameters → ~200 KB after INT8 quantization.
+"""
+
 import tensorflow as tf
 import parameters as params
-
-# Check for QAT compatibility
 try:
     import tensorflow_model_optimization as tfmot
     QAT_AVAILABLE = True

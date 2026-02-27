@@ -1,22 +1,37 @@
 # models/digit_recognizer_v10.py
+"""
+digit_recognizer_v10 – Hybrid Transformer-Style CNN with Multi-Scale Fusion
+============================================================================
+Design goal: Approximate Transformer-level global context reasoning using
+only standard CNN ops (no self-attention), keeping QAT compatibility via
+residual-like patterns and multi-scale pooling.
+
+Architecture:
+  - Conv2D(32) + BN + ReLU + MaxPool
+  - Conv2D(64) + BN + ReLU + SimplifiedAttention (CNN-based SE) + MaxPool + Dropout(0.1)
+  - Conv2D(128) × 2 + BN + ReLU + SimplifiedAttention + Dropout(0.2)
+  - Conv2D(256) × 2 + BN + ReLU + Dropout(0.3)
+  - Multi-scale aggregation:
+      GAP → Dense(128) + GMP → Dense(128) + Spatial 1×1 Conv → GAP(128)
+      Concatenated (384-d) → Dropout(0.4)
+  - Dense(256) BN ReLU + Dropout(0.3)
+  - Dense(128) BN ReLU + Dropout(0.2) → Dense(NB_CLASSES) Softmax
+
+Custom class:
+  - SimplifiedAttention: CNN-based channel attention (QAT-compatible SE variant)
+
+Notes:
+  - Multi-scale fusion (GAP + GMP + spatial conv) provides global context
+    without Transformer self-attention ops
+  - Large model; intended for accuracy benchmarking, not IoT deployment
+  - Light version (v10_light) also available for comparison
+
+Estimated: ~700K+ parameters → not intended for ESP32 deployment.
+"""
+
 import tensorflow as tf
 import parameters as params
 from tensorflow.keras import layers, Model
-
-
-'''
-V10 (Hybrid Transformer):
-
-    CNN-based attention instead of transformers
-
-    Global context through multiple pooling strategies
-
-    Stable gradients through residual-like connections
-
-    Proven CNN patterns that work well for digit recognition
-
-
-'''
 
 class SimplifiedAttention(layers.Layer):
     """CNN-based attention mechanism that's QAT compatible"""

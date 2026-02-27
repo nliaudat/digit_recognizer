@@ -28,8 +28,14 @@ This script performs mass sweeps across the `exported_models/` folder. For each 
 - Total model size (KB) and Parameter counting.
 
 ### Usage
+To run a full benchmark testing across all available models:
 ```bash
 python bench_predict.py
+```
+
+You can exclude specific models from the benchmark (by default, the large `high_accuracy_validator` is excluded):
+```bash
+python bench_predict.py --exclude_model some_other_model_name
 ```
 
 It outputs a highly detailed Summary Table directly in your terminal comparing all architectures.

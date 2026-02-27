@@ -234,13 +234,15 @@ def is_quantized_model(model_path):
     except:
         return False
 
-def get_all_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT_DIR):
+def get_all_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None, debug=False):
     """Get all available models with parameters count - with error handling
     
     Args:
         quantized_only: If True, only return quantized models
         subfolder: If specified, only look in this specific subfolder
         input_dir: Base directory to search for models
+        exclude_model: Model name to exclude from testing
+        debug: Enable debug output
     """
     # Look for training directories - exclude test_results and other non-training dirs
     all_dirs = [d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))]
@@ -277,6 +279,11 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT
         tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
         
         for model_file in tflite_files:
+            # Skip excluded model if specified
+            if exclude_model and (exclude_model in model_file or exclude_model in training_dir):
+                if debug:
+                    print(f"Skipping excluded model: {training_dir}/{model_file}")
+                continue
             model_path = os.path.join(training_path, model_file)
             
             # Skip if file doesn't exist or is empty
@@ -361,14 +368,46 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     
     return test_data
 
+def configure_parameters_for_model(model_name_or_dir):
+    """Automatically adjust globals in parameters.py for the specific model type"""
+    name_upper = model_name_or_dir.upper()
+    changed = False
+    
+    if '100CLS' in name_upper and params.NB_CLASSES != 100:
+        params.NB_CLASSES = 100
+        changed = True
+    elif '10CLS' in name_upper and params.NB_CLASSES != 10:
+        params.NB_CLASSES = 10
+        changed = True
+        
+    if 'GRAY' in name_upper and not params.USE_GRAYSCALE:
+        params.USE_GRAYSCALE = True
+        changed = True
+    elif 'RGB' in name_upper and params.USE_GRAYSCALE:
+        params.USE_GRAYSCALE = False
+        changed = True
+        
+    if changed:
+        # Update labels file in data sources based on new NB_CLASSES
+        for source in params.DATA_SOURCES:
+            if 'labels' in source or source.get('type') == 'label_file':
+                source['labels'] = f'labels_{params.NB_CLASSES}_shuffle.txt'
+        
+        # Clear the dataset cache so it reloads with new parameters
+        from utils.multi_source_loader import clear_cache
+        clear_cache()
+        print(f"🔄 Reconfigured test environment for {params.NB_CLASSES} classes in {'Grayscale' if params.USE_GRAYSCALE else 'RGB'}")
+
 def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_datasets=True, 
                          collect_failed=False, model_name=None):
     """Test a model on random images from dataset and return accuracy and performance metrics"""
+    
     predictor = TFLiteDigitPredictor(model_path)
     correct_predictions = 0
     total_tested = 0
     total_inference_time = 0.0
     failed_predictions = []
+    all_predictions_lite = []
     
     # Load test data with proper labels
     test_data = load_test_dataset_with_labels(num_test_images, use_all_datasets)
@@ -427,6 +466,12 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
                     'image_source': 'dataset'
                 })
             
+            all_predictions_lite.append({
+                'true_label': true_label,
+                'predicted_label': prediction,
+                'model': model_name or os.path.basename(model_path)
+            })
+            
             total_tested += 1
             
         except Exception as e:
@@ -453,7 +498,95 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
         print(f"Average inference time: {avg_inference_time:.2f} ms")
         print(f"Inferences per second: {inferences_per_second:.0f}")
     
-    return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions
+    return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions, all_predictions_lite
+
+def generate_confusion_matrix(all_results, output_dir=params.OUTPUT_DIR):
+    """Generate a confusion matrix heatmap and per-class accuracy CSV from all predictions.
+
+    Args:
+        all_results: list of dicts with keys 'true_label', 'predicted_label', 'model'
+        output_dir: directory where test_results/ will be written
+    """
+    if not all_results:
+        return {}
+
+    graphs_dir = os.path.join(output_dir, "test_results", "graphs")
+    os.makedirs(graphs_dir, exist_ok=True)
+    results_dir = os.path.join(output_dir, "test_results")
+
+    # Group by model
+    model_results = {}
+    for r in all_results:
+        m = r.get('model', 'unknown')
+        if m not in model_results:
+            model_results[m] = []
+        model_results[m].append(r)
+
+    generated_files = {}
+
+    for model_name, m_results in model_results.items():
+        y_true = [r['true_label'] for r in m_results]
+        y_pred = [r['predicted_label'] for r in m_results]
+
+        classes = sorted(set(y_true) | set(y_pred))
+        n = len(classes)
+        idx = {c: i for i, c in enumerate(classes)}
+
+        # Build confusion matrix
+        cm = np.zeros((n, n), dtype=int)
+        for yt, yp in zip(y_true, y_pred):
+            cm[idx[yt], idx[yp]] += 1
+
+        # ── Plot heatmap ────────────────────────────────────────────────────────────
+        fig_size = max(10, n // 2)
+        plt.figure(figsize=(fig_size, fig_size))
+        # Normalize per row so each cell shows the fraction of that true class
+        row_sums = cm.sum(axis=1, keepdims=True).clip(1)
+        cm_norm = cm.astype(float) / row_sums
+
+        plt.imshow(cm_norm, interpolation='nearest', cmap='Blues', vmin=0, vmax=1)
+        plt.colorbar(label='Fraction of true class')
+        tick_labels = [str(c) for c in classes]
+        plt.xticks(range(n), tick_labels, rotation=90, fontsize=max(6, 10 - n // 15))
+        plt.yticks(range(n), tick_labels, fontsize=max(6, 10 - n // 15))
+        plt.xlabel('Predicted label', fontsize=12)
+        plt.ylabel('True label', fontsize=12)
+        plt.title(f'Confusion Matrix - {model_name}', fontsize=14, fontweight='bold')
+        plt.tight_layout()
+
+        safe_model_name = "".join(c for c in model_name if c.isalnum() or c in ('_', '-')).rstrip().replace('.tflite', '')
+        cm_filename = f"confusion_matrix_{safe_model_name}.png"
+        cm_path = os.path.join(graphs_dir, cm_filename)
+        plt.savefig(cm_path, dpi=200, bbox_inches='tight')
+        plt.close()
+
+        # ── Per-class accuracy CSV ───────────────────────────────────────────────────
+        per_class_dir = os.path.join(results_dir, "per_class_accuracy")
+        os.makedirs(per_class_dir, exist_ok=True)
+        per_class_rows = []
+        for c in classes:
+            ci = idx[c]
+            total = cm[ci].sum()
+            correct = cm[ci, ci]
+            per_class_rows.append({
+                'Class': c,
+                'Total': int(total),
+                'Correct': int(correct),
+                'Accuracy': f"{correct / total:.4f}" if total > 0 else 'N/A'
+            })
+
+        csv_filename = f"per_class_accuracy_{safe_model_name}.csv"
+        per_class_csv = os.path.join(per_class_dir, csv_filename)
+        with open(per_class_csv, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=['Class', 'Total', 'Correct', 'Accuracy'])
+            writer.writeheader()
+            writer.writerows(per_class_rows)
+            
+        generated_files[model_name] = (cm_path, per_class_csv)
+
+    print(f"   🔢 Generated confusion matrices and CSVs for {len(generated_files)} models")
+
+    return generated_files
 
 def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=True, output_dir=params.OUTPUT_DIR):
     """Generate separate comparison graphs for the benchmark results"""
@@ -464,37 +597,47 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
     quant_suffix = "quantized" if quantized_only else "all"
     dataset_suffix = "full" if use_all_datasets else "sampled"
     
-    # Prepare data for plotting
-    labels = []  # Combined directory + model name for labels
-    directories = []
-    accuracies = []
-    inferences_per_second = []
-    sizes_kb = []
-    parameters = []
-    model_names = []
-    
+    # Prepare data for plotting - filter out models with zero accuracy or speed for cleaner graphs
+    plot_data = []
     for result in results:
-        dir_name = result['Directory']
-        model_name = result['Model']
-        # Create unique label combining directory and model
-        label = f"{dir_name}\n{model_name.replace('.tflite', '')}"
-        labels.append(label)
+        accuracy = float(result['Accuracy'])
+        inferences_per_second = float(result['Inf/s'])
         
-        directories.append(dir_name)
-        accuracies.append(float(result['Accuracy']) * 100)  # Convert to percentage
-        inferences_per_second.append(float(result['Inf/s']))
-        sizes_kb.append(float(result['Size (KB)']))
-        model_names.append(model_name)
-        
-        # Convert parameters string to numeric
-        params_str = result['Params']
-        if 'M' in params_str:
-            params_val = float(params_str.replace('M', '')) * 1_000_000
-        elif 'K' in params_str:
-            params_val = float(params_str.replace('K', '')) * 1_000
-        else:
-            params_val = float(params_str)
-        parameters.append(params_val / 1_000_000)  # Convert to millions
+        # Filter out models with 0 accuracy or 0 inferences per second from graphs
+        if accuracy > 0 and inferences_per_second > 0:
+            dir_name = result['Directory']
+            model_name = result['Model']
+            label = f"{dir_name}\n{model_name.replace('.tflite', '')}"
+            
+            params_str = result['Params']
+            if 'M' in params_str:
+                params_val = float(params_str.replace('M', '')) * 1_000_000
+            elif 'K' in params_str:
+                params_val = float(params_str.replace('K', '')) * 1_000
+            else:
+                params_val = float(params_str)
+            
+            plot_data.append({
+                'label': label,
+                'directory': dir_name,
+                'model_name': model_name,
+                'accuracy': accuracy * 100,  # Convert to percentage
+                'inferences_per_second': inferences_per_second,
+                'size_kb': float(result['Size (KB)']),
+                'parameters_million': params_val / 1_000_000
+            })
+    
+    if not plot_data:
+        print("⚠️  No valid data points to generate comparison graphs (all models had 0 accuracy or 0 inf/s).")
+        return []
+
+    # Extract filtered data into lists
+    labels = [d['label'] for d in plot_data]
+    accuracies = [d['accuracy'] for d in plot_data]
+    inferences_per_second = [d['inferences_per_second'] for d in plot_data]
+    sizes_kb = [d['size_kb'] for d in plot_data]
+    parameters = [d['parameters_million'] for d in plot_data]
+    model_names = [d['model_name'] for d in plot_data]
     
     graph_paths = []
     
@@ -638,21 +781,23 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
     
     return graph_paths
 
-def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all_datasets=True,
-                   list_failed=False, save_failed=False, subfolder=None, input_dir=params.OUTPUT_DIR):
-    """Test all available models and print summary table
+def test_all_models(num_test_images=0, quantized_only=False, debug=False, 
+                    use_all_datasets=True, list_failed=False, save_failed=False,
+                    subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None):
+    """Test all valid models with optional subfolder filtering and model exclusion
     
     Args:
+        num_test_images: Number of random images to test
         quantized_only: If True, only test quantized models
-        num_test_images: Number of test images to use (0 = all)
-        debug: Enable debug output
-        use_all_datasets: Use all available datasets
-        list_failed: Generate CSV of failed predictions
+        debug: Print detailed output
+        use_all_datasets: Use images from all datasets, not just the test set
+        list_failed: Print a summary of failed predictions per class label
         save_failed: Save failed prediction images
         subfolder: Only test models from this specific subfolder
         input_dir: Directory containing models to test
+        exclude_model: Model name to exclude from testing
     """
-    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, input_dir=input_dir)
+    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, input_dir=input_dir, exclude_model=exclude_model, debug=debug)
     
     if not models:
         if subfolder:
@@ -660,6 +805,10 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
         else:
             print("No models found to test.")
         return
+    
+    # Auto-configure dataset params based on the first model before loading test_data
+    if models:
+        configure_parameters_for_model(models[0]['directory'])
     
     # Determine test configuration
     subfolder_info = f" in subfolder '{subfolder}'" if subfolder else ""
@@ -672,6 +821,7 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
     
     results = []
     all_failed_predictions = []  # Collect all failed predictions across models
+    all_predictions = []
     
     # Test all models (with or without progress bar based on debug mode)
     if debug:
@@ -689,7 +839,7 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
         # Pass collect_failed=True if either list_failed or save_failed is enabled
         collect_failed = list_failed or save_failed
         
-        accuracy, tested_count, avg_inference_time, inferences_per_second, failed_predictions = test_model_on_dataset(
+        accuracy, tested_count, avg_inference_time, inferences_per_second, failed_predictions, all_predictions_lite = test_model_on_dataset(
             model_info['path'], 
             num_test_images=num_test_images,
             debug=debug,
@@ -697,6 +847,8 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
             collect_failed=collect_failed,
             model_name=model_info['name']
         )
+        
+        all_predictions.extend(all_predictions_lite)
         
         # Add model info to failed predictions
         for failure in failed_predictions:
@@ -755,6 +907,8 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
     else:
         print(f"DATASETS: {num_test_images} sampled images")
     print(f"MODELS: {'Quantized only' if quantized_only else 'All models'}")
+    if exclude_model:
+        print(f"EXCLUDED MODEL: '{exclude_model}'")
     if list_failed or save_failed:
         print(f"FAILED PREDICTIONS: {len(all_failed_predictions)} total across all models")
     print(f"{'='*80}")
@@ -818,6 +972,11 @@ def test_all_models(quantized_only=True, num_test_images=0, debug=False, use_all
         )
         print(f"📄 Comprehensive markdown report generated: {markdown_path}")
     
+    # Generate confusion matrix across all predictions
+    if all_predictions:
+        print(f"\n🔢 Generating confusion matrix from {len(all_predictions)} predictions...")
+        generate_confusion_matrix(all_predictions, output_dir=input_dir)
+    
     return results, all_failed_predictions
 
 def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_images_count=0, output_dir=params.OUTPUT_DIR):
@@ -826,10 +985,7 @@ def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_
     results_dir = os.path.join(output_dir, "test_results")
     os.makedirs(results_dir, exist_ok=True)
     
-    quant_suffix = "quantized" if quantized_only else "all"
-    dataset_suffix = "full" if use_all_images else f"{test_images_count}images"
-    
-    filename = f"model_comparison_{quant_suffix}_{dataset_suffix}.csv"
+    filename = "model_comparison.csv"
     csv_path = os.path.join(results_dir, filename)
     
     # Prepare FULL data for CSV (all information)
@@ -884,6 +1040,23 @@ def calculate_best_iot_model(df, accuracy_weight=0.5, size_weight=0.3, speed_wei
     # Normalize the metrics
     df = df.copy()
     
+    # Filter out models with 0 accuracy or 0 inferences per second to avoid division by zero or misleading scores
+    df = df[(df['Accuracy'] > 0) & (df['Inferences_per_second'] > 0) & (df['Size_KB'] > 0)].copy()
+
+    if df.empty:
+        return {
+            'best_overall': None,
+            'best_accuracy_small': None,
+            'best_speed_small': None,
+            'smallest_adequate': None,
+            'all_scores': pd.DataFrame(columns=['Model', 'Accuracy', 'Size_KB', 'Inferences_per_second', 'iot_score', 'accuracy_per_kb']),
+            'weights_used': {
+                'accuracy': accuracy_weight,
+                'size': size_weight, 
+                'speed': speed_weight
+            }
+        }
+
     # Higher accuracy is better
     df['accuracy_norm'] = df['Accuracy'] / df['Accuracy'].max()
     
@@ -962,12 +1135,13 @@ def generate_iot_recommendation_section(f, df):
     
     # Use the provided DataFrame which should already have iot_score
     # If it doesn't have iot_score, calculate it
-    if 'iot_score' not in df.columns:
-        analysis = calculate_best_iot_model(df)
-        df_with_scores = analysis['all_scores']
-    else:
-        df_with_scores = df
-        analysis = calculate_best_iot_model(df_with_scores)
+    analysis = calculate_best_iot_model(df)
+    df_with_scores = analysis['all_scores']
+
+    if df_with_scores.empty:
+        f.write("## 💡 IoT-Specific Recommendations\n\n")
+        f.write("*No models with valid metrics for comparative IoT analysis after filtering.*\n\n")
+        return
     
     best_model = analysis['best_overall']
     best_accuracy_small = analysis['best_accuracy_small']
@@ -999,16 +1173,15 @@ def generate_iot_recommendation_section(f, df):
         f.write("| *No models under 100KB* | - | - | - | - | - |\n")
     else:
         for _, model in small_models.iterrows():
-            if model['Model'] == best_model['Model']:
+            use_case = "Alternative"
+            if best_model is not None and model['Model'] == best_model['Model']:
                 use_case = "🏆 **BEST BALANCED**"
-            elif model['Model'] == best_accuracy_small['Model']:
+            elif best_accuracy_small is not None and model['Model'] == best_accuracy_small['Model']:
                 use_case = "🎯 Best Accuracy"
-            elif model['Model'] == best_speed_small['Model']:
+            elif best_speed_small is not None and model['Model'] == best_speed_small['Model']:
                 use_case = "⚡ Fastest"
-            elif model['Model'] == smallest_adequate['Model']:
+            elif smallest_adequate is not None and model['Model'] == smallest_adequate['Model']:
                 use_case = "💾 Smallest Adequate"
-            else:
-                use_case = "Alternative"
                 
             f.write(f"| {model['Model']} | {model['Accuracy']:.3f} | {model['Size_KB']:.1f}KB | {model['Inferences_per_second']:.0f}/s | {model['iot_score']:.3f} | {use_case} |\n")
     
@@ -1016,20 +1189,29 @@ def generate_iot_recommendation_section(f, df):
     
     f.write("#### 🔧 Alternative IoT Scenarios\n\n")
     
-    f.write("**For Accuracy-Critical IoT:**\n")
-    f.write(f"- **Choice**: {best_accuracy_small['Model']}\n")
-    f.write(f"- **Accuracy**: {best_accuracy_small['Accuracy']:.3f} (best under 100KB)\n")
-    f.write(f"- **Trade-off**: {best_accuracy_small['Size_KB']:.1f}KB size\n\n")
-    
-    f.write("**For Speed-Critical IoT:**\n")
-    f.write(f"- **Choice**: {best_speed_small['Model']}\n")
-    f.write(f"- **Speed**: {best_speed_small['Inferences_per_second']:.0f} inf/s (fastest under 100KB)\n")
-    f.write(f"- **Trade-off**: {best_speed_small['Accuracy']:.3f} accuracy\n\n")
-    
-    f.write("**For Memory-Constrained IoT:**\n")
-    f.write(f"- **Choice**: {smallest_adequate['Model']}\n")
-    f.write(f"- **Size**: {smallest_adequate['Size_KB']:.1f}KB (smallest with ≥85% accuracy)\n")
-    f.write(f"- **Trade-off**: {smallest_adequate['Accuracy']:.3f} accuracy\n\n")
+    if best_accuracy_small is not None:
+        f.write("**For Accuracy-Critical IoT:**\n")
+        f.write(f"- **Choice**: {best_accuracy_small['Model']}\n")
+        f.write(f"- **Accuracy**: {best_accuracy_small['Accuracy']:.3f} (best under 100KB)\n")
+        f.write(f"- **Trade-off**: {best_accuracy_small['Size_KB']:.1f}KB size\n\n")
+    else:
+        f.write("**For Accuracy-Critical IoT:** *No suitable models found.*\n\n")
+
+    if best_speed_small is not None:
+        f.write("**For Speed-Critical IoT:**\n")
+        f.write(f"- **Choice**: {best_speed_small['Model']}\n")
+        f.write(f"- **Speed**: {best_speed_small['Inferences_per_second']:.0f} inf/s (fastest under 100KB)\n")
+        f.write(f"- **Trade-off**: {best_speed_small['Accuracy']:.3f} accuracy\n\n")
+    else:
+        f.write("**For Speed-Critical IoT:** *No suitable models found.*\n\n")
+
+    if smallest_adequate is not None:
+        f.write("**For Memory-Constrained IoT:**\n")
+        f.write(f"- **Choice**: {smallest_adequate['Model']}\n")
+        f.write(f"- **Size**: {smallest_adequate['Size_KB']:.1f}KB (smallest with ≥85% accuracy)\n")
+        f.write(f"- **Trade-off**: {smallest_adequate['Accuracy']:.3f} accuracy\n\n")
+    else:
+        f.write("**For Memory-Constrained IoT:** *No suitable models found.*\n\n")
     
     f.write("#### 📈 Efficiency Analysis\n")
     f.write("| Model | Acc/KB | Acc/Param | Parameters | Verdict |\n")
@@ -1040,19 +1222,18 @@ def generate_iot_recommendation_section(f, df):
         acc_per_kb = model['Accuracy'] / model['Size_KB']
         
         # Handle Parameters column safely
-        if 'Parameters' in model:
-            parameters = model['Parameters']
-            acc_per_param = model['Accuracy'] / parameters * 1000000 if parameters > 0 else 0
+        parameters = model.get('Parameters')
+        if parameters is not None and parameters > 0:
+            acc_per_param = model['Accuracy'] / parameters * 1000000
         else:
             parameters = 'N/A'
             acc_per_param = 'N/A'
         
-        if model['Model'] == best_model['Model']:
+        verdict = "⚖️ Good"
+        if best_model is not None and model['Model'] == best_model['Model']:
             verdict = "🎯 **OPTIMAL**"
         elif model['Size_KB'] > 100:
             verdict = "❌ Too large"
-        else:
-            verdict = "⚖️ Good"
             
         f.write(f"| {model['Model']} | {acc_per_kb:.4f} | {acc_per_param if acc_per_param != 'N/A' else 'N/A'} | {parameters} | {verdict} |\n")
     
@@ -1064,12 +1245,12 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
     # Read the CSV data
     df = pd.read_csv(csv_path)
     
-    # Create report directory
-    reports_dir = os.path.join(output_dir, "test_results", "reports")
+    # Create report directory (now root test_results)
+    reports_dir = os.path.join(output_dir, "test_results")
     os.makedirs(reports_dir, exist_ok=True)
     
     # Generate report filename without timestamp
-    report_filename = "benchmark_report.md"
+    report_filename = "readme.md"
     report_path = os.path.join(reports_dir, report_filename)
     
     # Generate markdown content
@@ -1081,17 +1262,28 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
         
         # Calculate best models dynamically
         iot_analysis = calculate_best_iot_model(df)
-        best_iot = iot_analysis['best_overall']
-        best_accuracy = df.loc[df['Accuracy'].idxmax()]
-        fastest = df.loc[df['Inferences_per_second'].idxmax()]
-        smallest = df.loc[df['Size_KB'].idxmin()]
         
-        f.write(f"- **Test Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"- **Models Tested**: {len(df)} {'quantized' if quantized_only else 'all'} models\n")
-        f.write(f"- **Best IoT Model**: **{best_iot['Model']}** ({best_iot['Size_KB']:.1f}KB, {best_iot['Accuracy']:.3f} acc, {best_iot['Inferences_per_second']:.0f} inf/s)\n")
-        f.write(f"- **Best Accuracy**: **{best_accuracy['Model']}** ({best_accuracy['Accuracy']:.3f})\n")
-        f.write(f"- **Fastest Model**: **{fastest['Model']}** ({fastest['Inferences_per_second']:.0f} inf/s)\n")
-        f.write(f"- **Smallest Model**: **{smallest['Model']}** ({smallest['Size_KB']:.1f} KB)\n\n")
+        if iot_analysis['best_overall'] is not None:
+            best_iot = iot_analysis['best_overall']
+            best_accuracy = df.loc[df['Accuracy'].idxmax()]
+            fastest = df.loc[df['Inferences_per_second'].idxmax()]
+            smallest = df.loc[df['Size_KB'].idxmin()]
+            
+            f.write(f"- **Test Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"- **Models Tested**: {len(df)} {'quantized' if quantized_only else 'all'} models\n")
+            f.write(f"- **Best IoT Model**: **{best_iot['Model']}** ({best_iot['Size_KB']:.1f}KB, {best_iot['Accuracy']:.3f} acc, {best_iot['Inferences_per_second']:.0f} inf/s)\n")
+            f.write(f"- **Best Accuracy**: **{best_accuracy['Model']}** ({best_accuracy['Accuracy']:.3f})\n")
+            f.write(f"- **Fastest Model**: **{fastest['Model']}** ({fastest['Inferences_per_second']:.0f} inf/s)\n")
+            f.write(f"- **Smallest Model**: **{smallest['Model']}** ({smallest['Size_KB']:.1f} KB)\n\n")
+        else:
+            f.write(f"- **Test Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"- **Models Tested**: {len(df)} {'quantized' if quantized_only else 'all'} models\n")
+            f.write("- *No models with valid metrics for comparative analysis.*\n\n")
+            
+        f.write("## 📈 Performance vs Size\n\n")
+        quant_suffix = "quantized" if quantized_only else "all"
+        dataset_suffix = "full" if use_all_datasets else "sampled"
+        f.write(f"![Accuracy vs Size](graphs/accuracy_vs_size_{quant_suffix}_{dataset_suffix}.png)\n\n")
         
         # Results table
         f.write("## 📋 Detailed Results\n\n")
@@ -1117,9 +1309,9 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
     return report_path
 
 
-def list_available_models(quantized_only=True, subfolder=None, input_dir=params.OUTPUT_DIR):
-    """List all available models in training directories"""
-    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, input_dir=input_dir)
+def list_available_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None):
+    """List all available models found in the training directories"""
+    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, input_dir=input_dir, exclude_model=exclude_model)
     
     if not models:
         if subfolder:
@@ -1224,9 +1416,12 @@ def generate_failed_predictions_csv(failed_predictions, output_dir):
     return csv_path
 
 def test_single_model(model_path, num_test_images=0, debug=False, use_all_datasets=True, 
-                     list_failed=False, save_failed=False):
+                     list_failed=False, save_failed=False, output_dir=params.OUTPUT_DIR):
     """Test a single model and optionally collect failed predictions"""
     predictor = TFLiteDigitPredictor(model_path)
+    
+    # Auto-configure dataset params
+    configure_parameters_for_model(os.path.basename(model_path))
     
     # Load test data with proper labels
     test_data = load_test_dataset_with_labels(num_test_images, use_all_datasets)
@@ -1243,6 +1438,7 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
     total_tested = 0
     total_inference_time = 0.0
     failed_predictions = []
+    all_predictions_lite = []
     
     # Warm-up run
     if len(test_data) > 0:
@@ -1285,6 +1481,12 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
                     'index': i
                 })
             
+            all_predictions_lite.append({
+                'true_label': true_label,
+                'predicted_label': prediction,
+                'model': os.path.basename(model_path)
+            })
+            
             total_tested += 1
             
         except Exception as e:
@@ -1323,10 +1525,10 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
     
     # Handle failed predictions export if requested
     if list_failed and failed_predictions:
-        generate_failed_predictions_csv(failed_predictions, params.OUTPUT_DIR)
+        generate_failed_predictions_csv(failed_predictions, output_dir)
     
     if save_failed and failed_predictions:
-        save_failed_images(failed_predictions, params.OUTPUT_DIR)
+        save_failed_images(failed_predictions, output_dir)
     
     # Print failed predictions summary (only if counts match)
     if failed_predictions and len(failed_predictions) == expected_failed:
@@ -1347,14 +1549,21 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
             for pred_label, count in sorted(failed_by_true_label[true_label].items()):
                 percentage = (count / total_for_label) * 100
                 print(f"    → as {pred_label}: {count} times ({percentage:.1f}%)")
+                
+    # Generate confusion matrix for single model
+    if all_predictions_lite:
+        generate_confusion_matrix(all_predictions_lite, output_dir=params.OUTPUT_DIR)
     
-    return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions
+    return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions, all_predictions_lite
 
 def main():
     """Main function with command line arguments"""
     parser = argparse.ArgumentParser(description='Digit Recognition Benchmarking')
     parser.add_argument('--model', type=str, help='Model name to use for prediction')
-    parser.add_argument('--input_dir', type=str, default=params.OUTPUT_DIR, help='Directory containing models to test (default: params.OUTPUT_DIR)')
+    parser.add_argument('--exclude_model', type=str, default=None,
+                        help='Model string name to automatically exclude from evaluation')
+    parser.add_argument('--input_dir', type=str, default=params.OUTPUT_DIR,
+                        help=f'Directory containing trained models (default: {params.OUTPUT_DIR})')
     parser.add_argument('--quantized', action='store_true', default=True, help='Use only quantized models (default: True)')
     parser.add_argument('--no-quantized', action='store_false', dest='quantized', help='Include non-quantized models')
     parser.add_argument('--test_all', action='store_true', help='Test all available models and print accuracy summary')
@@ -1375,7 +1584,7 @@ def main():
     args = parser.parse_args()
     
     if args.list:
-        list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, input_dir=args.input_dir)
+        list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, input_dir=args.input_dir, exclude_model=args.exclude_model)
         return
     
     # Handle single model prediction (highest priority)
@@ -1384,7 +1593,7 @@ def main():
         if model_path is None:
             print(f"❌ Model '{args.model}' not found in {args.input_dir}!")
             print("Available models:")
-            list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, input_dir=args.input_dir)
+            list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, input_dir=args.input_dir, exclude_model=args.exclude_model)
             return
         
         test_single_model(
@@ -1399,16 +1608,17 @@ def main():
         return
     
     # Handle test_all mode
-    if args.test_all:
+    elif args.test_all:
         test_all_models(
+            num_test_images=args.test_images, 
             quantized_only=args.quantized, 
-            num_test_images=args.test_images,
             debug=args.debug,
             use_all_datasets=args.all_datasets,
             list_failed=args.list_failed,
             save_failed=args.save_failed,
             subfolder=args.subfolder,
-            input_dir=args.input_dir
+            input_dir=args.input_dir,
+            exclude_model=args.exclude_model
         )
         return
     
@@ -1439,3 +1649,4 @@ if __name__ == "__main__":
 # py bench_predict.py --test_all
 
 # py bench_predict.py --model digit_recognizer_v4.tflite --list-failed --save-failed
+# py bench_predict.py --test_all --input_dir exported_models\100cls_RGB

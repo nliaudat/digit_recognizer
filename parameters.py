@@ -3,6 +3,13 @@ Global parameters for Digit Recognition
 Comprehensive hyperparameter configuration for neural network training
 """
 
+import os
+import sys
+
+# Force UTF-8 output on Windows to support emojis
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 import tensorflow as tf
 
 # ==============================================================================
@@ -26,31 +33,60 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v10",
     "digit_recognizer_v11",
     "digit_recognizer_v12", #406.7	0.9925
-    "digit_recognizer_v13",
-    "digit_recognizer_v14",
+    "digit_recognizer_v15",   # IoT residual model — beats v4 accuracy at <100KB
+    "digit_recognizer_v16",   # IoT MobileNetV2 inverted residual — ESP-NN optimised
+    "digit_recognizer_v17",   # IoT GhostNet-inspired — ultra-efficient ~50KB
     "esp_quantization_ready",
     "high_accuracy_validator", # strictly for PC validation (not for ESP32)
+    "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
     "mnist_quantization", #63.6kB	0.9848
     "original_haverland", #203.3	0.9822 & baseline
 ]
 
-MODEL_ARCHITECTURE = "high_accuracy_validator" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "digit_recognizer_v17" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
 # GENERAL PARAMETERS
 # ==============================================================================
 
-NB_CLASSES = 100  # 10 for [0-9], 100 for [0-99]
+# ==============================================================================
+# GENERAL PARAMETERS
+# ==============================================================================
+
+
+
+_nb_classes_env = os.environ.get("DIGIT_NB_CLASSES")
+if _nb_classes_env is not None:
+    NB_CLASSES = int(_nb_classes_env)
+else:
+    # Not set via environment – ask the user to avoid silently using a wrong default
+    if sys.stdin.isatty():
+        while True:
+            _user_input = input("Enter number of classes [10 or 100]: ").strip()
+            if _user_input in ("10", "100"):
+                NB_CLASSES = int(_user_input)
+                break
+            print("  Please enter 10 or 100.")
+    else:
+        # Non-interactive context (subprocess, CI, etc.) – keep a safe default and warn
+        NB_CLASSES = 10
+        print("WARNING: DIGIT_NB_CLASSES not set and no interactive terminal – defaulting to 10. "
+              "Set the env var explicitly to avoid this.")
+del _nb_classes_env
 
 # ==============================================================================
 # INPUT IMAGES 
 # ==============================================================================
+### for testing
+# NB_CLASSES   = 100
+# INPUT_SHAPE  = (32, 20, 3)   # H × W × C
+# USE_GRAYSCALE = False
 
 # Image Parameters
 INPUT_WIDTH = 20
 INPUT_HEIGHT = 32
-INPUT_CHANNELS = 3  # 1 for grayscale, 3 for RGB
+INPUT_CHANNELS = int(os.environ.get("DIGIT_INPUT_CHANNELS", 3))  # 1 for grayscale, 3 for RGB
 INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
 USE_GRAYSCALE = (INPUT_CHANNELS == 1) 
 
@@ -133,8 +169,9 @@ USE_QAT = True  # Enable Quantization Aware Training
 QAT_QUANTIZE_ALL = True  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
 
-# Automatically disable quantization flags for high_accuracy_validator
-if MODEL_ARCHITECTURE == "high_accuracy_validator":
+# Automatically disable quantization flags for PC-only validator models
+PC_ONLY_MODELS = {"high_accuracy_validator", "super_high_accuracy_validator"}
+if MODEL_ARCHITECTURE in PC_ONLY_MODELS:
     QUANTIZE_MODEL = False
     ESP_DL_QUANTIZE = False
     USE_QAT = False
@@ -146,8 +183,12 @@ TF_DATA_SHUFFLE_BUFFER = 1000
 TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
 
 # File Paths
-# MODEL_FILENAME = MODEL_ARCHITECTURE
-OUTPUT_DIR = "exported_models"
+# Output directory is automatically derived from NB_CLASSES and color space.
+# Override by setting OUTPUT_DIR manually below if needed.
+_color_suffix = "GRAY" if USE_GRAYSCALE else "RGB"
+OUTPUT_DIR = f"exported_models/{NB_CLASSES}cls_{_color_suffix}"
+# Manual overrides (uncomment one to force a specific directory):
+# OUTPUT_DIR = "exported_models"
 # OUTPUT_DIR = "exported_models/10cls_GRAY"
 # OUTPUT_DIR = "exported_models/10cls_RGB"
 # OUTPUT_DIR = "exported_models/100cls_GRAY"
@@ -472,17 +513,17 @@ def validate_quantization_parameters():
     
     # Rule 1: ESP_DL_QUANTIZE requires QUANTIZE_MODEL
     if ESP_DL_QUANTIZE and not QUANTIZE_MODEL:
-        messages.append("❌ ESP_DL_QUANTIZE=True requires QUANTIZE_MODEL=True")
-        # Auto-correct: Enable quantization
-        corrected_params['QUANTIZE_MODEL'] = True
-        messages.append("✅ Auto-corrected: Set QUANTIZE_MODEL=True")
+            messages.append("❌ ESP_DL_QUANTIZE=True requires QUANTIZE_MODEL=True")
+            # Auto-correct: Enable quantization
+            corrected_params['QUANTIZE_MODEL'] = True
+            messages.append("✅ Auto-corrected: Set QUANTIZE_MODEL=True")
     
     # Rule 2: USE_QAT requires QUANTIZE_MODEL  
     if USE_QAT and not QUANTIZE_MODEL:
-        messages.append("❌ USE_QAT=True requires QUANTIZE_MODEL=True")
-        # Auto-correct: Enable quantization
-        corrected_params['QUANTIZE_MODEL'] = True
-        messages.append("✅ Auto-corrected: Set QUANTIZE_MODEL=True")
+            messages.append("❌ USE_QAT=True requires QUANTIZE_MODEL=True")
+            # Auto-correct: Enable quantization
+            corrected_params['QUANTIZE_MODEL'] = True
+            messages.append("✅ Auto-corrected: Set QUANTIZE_MODEL=True")
     
     # Rule 3: QAT + ESP-DL is valid but needs special handling
     if USE_QAT and ESP_DL_QUANTIZE:

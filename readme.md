@@ -72,6 +72,18 @@ Even on the harder dataset, `v4` maintains its sheer edge over `original_haverla
 3.  **Faster Inference**: `v4` processes **8003 inferences/second**, beating the original's **6220 inferences/second**.
 4.  **Fewer Parameters**: `v4` utilizes nearly 3 times fewer parameters (85k vs 257k).
 
+## Benchmarking
+
+To run the benchmarking suite across all available models (excluding large PC-only validators by default):
+```bash
+python bench_predict.py --test_all
+```
+
+You can exclude specific models from the benchmark:
+```bash
+python bench_predict.py --exclude_model some_other_model_name
+```
+
 ## Documentation
 
 For detailed guides analyzing how to train, benchmark, and debug the models within this repository, refer to the guides in the [`documentations/`](documentations/) folder:

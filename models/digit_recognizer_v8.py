@@ -1,21 +1,37 @@
 # models/digit_recognizer_v8.py
+"""
+digit_recognizer_v8 – SOTA Residual CNN with Squeeze-and-Excitation
+====================================================================
+Design goal: Maximize accuracy via modern architectural patterns —
+residual connections, SE channel attention, multi-scale feature fusion,
+and Swish activation. Not aimed at size/speed; suited for research baselines.
+
+Architecture:
+  - Conv2D(32) stem + BN + ReLU
+  - ResidualUnit(32) + AttentionModule(SE) + MaxPool + Dropout(0.1)
+  - ResidualUnit(64) + AttentionModule(SE) + MaxPool + Dropout(0.2)
+  - ResidualUnit(128) + AttentionModule(SE) + Dropout(0.3)
+  - Multi-scale fusion: GAP branch Dense(64) + GMP branch Dense(64)
+    concatenated → Dense(128) BN Swish + Dense(64) BN Swish
+  - Dense(NB_CLASSES) Softmax
+
+Custom classes:
+  - AttentionModule: Squeeze-and-Excitation channel recalibration
+  - ResidualUnit: Pre-activation residual block
+  - SwishLayer: Custom Swish activation (compatible Keras layer)
+
+Notes:
+  - Swish activation and SE blocks are NOT TFLite Micro safe as-is
+  - SE uses Lambda-style ops internally → not QAT-compatible
+  - Use v15–v17 for IoT-deployable equivalents
+
+Estimated: ~300K+ parameters → not intended for ESP32.
+"""
+
 import tensorflow as tf
 import parameters as params
 from tensorflow.keras import layers, Model
 import tensorflow.keras.backend as K
-
-'''    
-
-V8 (SOTA Residual):
-
-    Residual connections with pre-activation
-
-    Squeeze-and-Excitation attention modules
-
-    Multi-scale feature fusion
-
-    Swish activation + BatchNorm
-'''
 
 class AttentionModule(layers.Layer):
     """Squeeze-and-Excitation Attention for channel-wise feature recalibration"""
