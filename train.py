@@ -267,6 +267,18 @@ def parse_arguments():
              "E.g., Mixed precision, gradient accumulation, or learning rate cyclers."
     )
     
+    # --- Hyperparameter Overrides (from legacy train_super_validator) ---
+    parser.add_argument("--epochs", type=int, default=None, help="Override maximum number of training epochs.")
+    parser.add_argument("--batch", type=int, default=None, help="Override batch size.")
+    parser.add_argument("--lr", type=float, default=None, help="Override initial learning rate.")
+    parser.add_argument("--warmup-epochs", type=int, default=None, help="Override learning rate warmup epochs.")
+    parser.add_argument("--weight-decay", type=float, default=None, help="Override weight decay parameter.")
+    parser.add_argument("--label-smoothing", type=float, default=None, help="Override label smoothing factor.")
+    parser.add_argument("--focal-gamma", type=float, default=None, help="Override Focal Loss Gamma.")
+    parser.add_argument("--rotation-range", type=float, default=None, help="Override maximum rotation augmentation in degrees.")
+    parser.add_argument("--no-mixup", action="store_true", help="Disable Mixup augmentation.")
+    parser.add_argument("--no-mixed-precision", action="store_true", help="Disable mixed precision.")
+    
     # --- Post-Training Options ---
     parser.add_argument(
         "--no_cleanup",
@@ -484,6 +496,27 @@ def train_specific_models(models_to_train, debug: bool = False, no_cleanup: bool
 # --------------------------------------------------------------------------- #
 def main():
     args = parse_arguments()
+
+    # Apply hyperparameter overrides to parameters.py dynamically
+    if args.epochs is not None:
+        params.EPOCHS = args.epochs
+    if args.batch is not None:
+        params.BATCH_SIZE = args.batch
+    if args.lr is not None:
+        params.LEARNING_RATE = args.lr
+        # Also assume they want to use a scheduler if they provided an LR override
+        params.USE_LEARNING_RATE_SCHEDULER = True
+    if args.focal_gamma is not None:
+        params.USE_FOCAL_LOSS = True
+        params.FOCAL_GAMMA = args.focal_gamma
+    if args.label_smoothing is not None:
+        params.LABEL_SMOOTHING = args.label_smoothing
+    if args.rotation_range is not None:
+        params.AUGMENTATION_ROTATION_RANGE = args.rotation_range
+    if args.no_mixup:
+        params.USE_MIXUP = False
+    if args.no_mixed_precision:
+        params.USE_MIXED_PRECISION = False
 
     # -----------------------------------------------------------------
     #  Hyper parameter tuning mode
