@@ -28,10 +28,10 @@ AVAILABLE_MODELS = [
     # "digit_recognizer_v5",
     "digit_recognizer_v6",
     "digit_recognizer_v7",
-    "digit_recognizer_v8",
-    "digit_recognizer_v9",
+    # "digit_recognizer_v8",
+    # "digit_recognizer_v9",
     # "digit_recognizer_v10",
-    "digit_recognizer_v11",
+    # "digit_recognizer_v11",
     "digit_recognizer_v12", #406.7	0.9925
     "digit_recognizer_v15",   # IoT residual model — beats v4 accuracy at <100KB
     "digit_recognizer_v16",   # IoT MobileNetV2 inverted residual — ESP-NN optimised
