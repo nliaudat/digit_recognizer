@@ -60,19 +60,7 @@ _nb_classes_env = os.environ.get("DIGIT_NB_CLASSES")
 if _nb_classes_env is not None:
     NB_CLASSES = int(_nb_classes_env)
 else:
-    # Not set via environment – ask the user to avoid silently using a wrong default
-    if sys.stdin.isatty():
-        while True:
-            _user_input = input("Enter number of classes [10 or 100]: ").strip()
-            if _user_input in ("10", "100"):
-                NB_CLASSES = int(_user_input)
-                break
-            print("  Please enter 10 or 100.")
-    else:
-        # Non-interactive context (subprocess, CI, etc.) – keep a safe default and warn
-        NB_CLASSES = 10
-        print("WARNING: DIGIT_NB_CLASSES not set and no interactive terminal – defaulting to 10. "
-              "Set the env var explicitly to avoid this.")
+    NB_CLASSES = 10
 del _nb_classes_env
 
 # ==============================================================================
@@ -268,6 +256,14 @@ ADAMW_EPSILON = 1e-07
 
 LOSS_TYPE = "sparse_categorical_crossentropy"  # Options: "sparse_categorical_crossentropy", "categorical_crossentropy"
 LABEL_SMOOTHING = 0.0  # Apply label smoothing if > 0
+
+# Focal Loss Parameters
+USE_FOCAL_LOSS = True  # Set to True to use Focal Loss instead of CrossEntropy
+FOCAL_GAMMA = 2.0      # Focus parameter for Focal Loss (0 = CrossEntropy)
+
+# Dynamic Class Weighting
+USE_DYNAMIC_WEIGHTS = True  # Update loss weights based on validation accuracy
+DYNAMIC_WEIGHTS_EPOCHS = 5   # Frequency of dynamic weight updates (in epochs)
 
 # ==============================================================================
 # TRAINING HYPERPARAMETERS

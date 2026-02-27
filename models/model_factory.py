@@ -91,8 +91,9 @@ def get_model_info(model_name=None):
             all_info[model_name] = get_model_info(model_name)
         return all_info
 
-def compile_model(model, loss_type='sparse'):
+def compile_model(model, loss_type='sparse', class_weights=None):
     """Compile model with comprehensive hyperparameter support"""
+    from utils.dynamic_weighting import FocalLoss
     
     # Validate hyperparameters first
     params.validate_hyperparameters()
@@ -216,6 +217,17 @@ def compile_model(model, loss_type='sparse'):
             loss = tf.keras.losses.CategoricalCrossentropy()
         elif loss == "sparse_categorical_crossentropy":
             loss = tf.keras.losses.SparseCategoricalCrossentropy()
+    
+    # --- Advanced Loss: Focal Loss ---
+    if params.USE_FOCAL_LOSS:
+        print(f"🔧 Using Focal Loss (gamma={params.FOCAL_GAMMA}, nb_classes={params.NB_CLASSES})")
+        loss = FocalLoss(
+            gamma=params.FOCAL_GAMMA,
+            label_smoothing=params.LABEL_SMOOTHING,
+            class_weights=class_weights,
+            nb_classes=params.NB_CLASSES,
+            name='focal_loss'
+        )
     
     # ==========================================================================
     # METRICS CONFIGURATION

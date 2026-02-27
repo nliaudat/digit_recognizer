@@ -607,18 +607,18 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     
     # Create output directory
     color_mode = "GRAY" if params.USE_GRAYSCALE else "RGB"
-    quantization_mode = ""
-    if params.USE_QAT:
-        quantization_mode = "_QAT"
-    if params.ESP_DL_QUANTIZE:
-        quantization_mode += "_ESP-DL"
-    elif params.QUANTIZE_MODEL:
-        quantization_mode += "_QUANT"
     
     training_dir = os.path.join(
         params.OUTPUT_DIR, 
-        f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls{quantization_mode}_{color_mode}_{datetime.now().strftime('%m%d_%H%M')}"
+        f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls_{color_mode}"
     )
+    if os.path.exists(training_dir):
+        import shutil
+        try:
+            shutil.rmtree(training_dir)
+        except PermissionError as e:
+            print(f"⚠️  Warning: Could not fully delete existing directory (file in use): {e}")
+            print("   Training will proceed with existing files in the directory.")
     os.makedirs(training_dir, exist_ok=True)
     print(f"📁 Output directory: {training_dir}")
     
@@ -640,6 +640,27 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         y_train_final = y_train_raw.copy()
         y_val_final = y_val_raw.copy()
         y_test_final = y_test_raw.copy()
+
+    # Compute initial class weights (useful for Focal Loss or CrossEntropy imbalance)
+    class_weights = None
+    try:
+        from sklearn.utils.class_weight import compute_class_weight
+        unique_classes = np.unique(y_train_final)
+        # Handle one-hot if necessary for compute_class_weight
+        y_for_weights = y_train_final
+        if len(y_train_final.shape) > 1:
+            y_for_weights = np.argmax(y_train_final, axis=1)
+            unique_classes = np.unique(y_for_weights)
+
+        cw_values = compute_class_weight(
+            class_weight='balanced',
+            classes=unique_classes,
+            y=y_for_weights
+        )
+        class_weights = dict(zip(unique_classes, cw_values))
+        print(f"⚖️  Initial class weights computed (max/min ratio: {max(cw_values)/min(cw_values):.2f}x)")
+    except Exception as e:
+        print(f"⚠️ Could not compute initial class weights: {e}")
     
     # Create model with QAT if enabled
     use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
@@ -656,7 +677,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     else:
         loss_type = "sparse"
 
-    model = compile_model(model, loss_type=loss_type) 
+    model = compile_model(model, loss_type=loss_type, class_weights=class_weights) 
     
     # Build model with explicit input shape (required for TF2.x eager mode)
     print("🔧 Building model with explicit input shape...")
@@ -699,19 +720,23 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             params.USE_QAT = False
             model = create_model()
 
-    # Force recompilation with correct loss
-    if params.MODEL_ARCHITECTURE == "original_haverland":
-        model.compile(
-            optimizer=model.optimizer,
-            loss=tf.keras.losses.CategoricalCrossentropy(),
-            metrics=['accuracy']
-        )
+    # Force recompilation with correct parameters if NOT using experimental Focal Loss
+    # If using Focal Loss, we want to keep the configuration from compile_model
+    if not params.USE_FOCAL_LOSS:
+        if params.MODEL_ARCHITECTURE == "original_haverland":
+            model.compile(
+                optimizer=model.optimizer,
+                loss=tf.keras.losses.CategoricalCrossentropy(),
+                metrics=['accuracy']
+            )
+        else:
+            model.compile(
+                optimizer=model.optimizer, 
+                loss=tf.keras.losses.SparseCategoricalCrossentropy(),
+                metrics=['accuracy']
+            )
     else:
-        model.compile(
-            optimizer=model.optimizer, 
-            loss=tf.keras.losses.SparseCategoricalCrossentropy(),
-            metrics=['accuracy']
-        )
+        print("🎯 Keeping Focal Loss configuration for training")
         
     # Validate QAT data flow if using QAT
     if use_qat:
@@ -817,22 +842,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             callbacks=callbacks,
             verbose=0
         )
-    else:
-        # Compute class weights to handle imbalanced datasets
-        try:
-            from sklearn.utils.class_weight import compute_class_weight
-            unique_classes = np.unique(y_train_final)
-            weights = compute_class_weight(
-                class_weight='balanced',
-                classes=unique_classes,
-                y=y_train_final
-            )
-            class_weight_dict = dict(zip(unique_classes, weights))
-            print(f"⚖️  Using class weights for {len(unique_classes)} classes (max ratio: {max(weights)/min(weights):.2f}x)")
-        except Exception as e:
-            print(f"⚠️  Could not compute class weights: {e}. Training without class weighting.")
-            class_weight_dict = None
-
+    if not params.USE_DATA_AUGMENTATION:
         history = model.fit(
             x_train, y_train_final,
             batch_size=params.BATCH_SIZE,
@@ -841,7 +851,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             callbacks=callbacks,
             verbose=0,
             shuffle=True,
-            class_weight=class_weight_dict
+            class_weight=class_weights if not params.USE_FOCAL_LOSS else None
         )
     
     training_time = datetime.now() - start_time

@@ -333,8 +333,11 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
         num_trials = total_combinations
     
     # Create output directory
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(params.OUTPUT_DIR, f"guaranteed_tune_{params.MODEL_ARCHITECTURE}_{timestamp}")
+    color_mode = "GRAY" if params.USE_GRAYSCALE else "RGB"
+    output_dir = os.path.join(params.OUTPUT_DIR, f"guaranteed_tune_{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls_{color_mode}")
+    if os.path.exists(output_dir):
+        import shutil
+        shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
     
     print("🚀 Starting Simple Guaranteed Hyperparameter Optimization")
@@ -526,8 +529,11 @@ def manual_hyperparameter_search(x_train, y_train, x_val, y_val, num_trials=10, 
     print("=" * 50)
     
     # Create output directory for manual search results
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(params.OUTPUT_DIR, f"manual_tune_{params.MODEL_ARCHITECTURE}_{timestamp}")
+    color_mode = "GRAY" if params.USE_GRAYSCALE else "RGB"
+    output_dir = os.path.join(params.OUTPUT_DIR, f"manual_tune_{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls_{color_mode}")
+    if os.path.exists(output_dir):
+        import shutil
+        shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
     
     # Create best parameters dictionary

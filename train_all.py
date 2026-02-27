@@ -10,8 +10,17 @@ sys.stderr.reconfigure(encoding='utf-8')
 def main():
     parser = argparse.ArgumentParser(description="Launch training for all active models in parameters.py across all 4 combinations (10/100 classes, Grayscale/RGB) sequentially or concurrently.")
     parser.add_argument("--concurrent", action="store_true", help="Launch all trainings at once in separate CMD windows (WARNING: Requires massive RAM/GPU resources). If not set, trains sequentially in this window.")
+    parser.add_argument("--classes", type=str, choices=["10", "100", "all"], default="all", help="Limit training to specific number of classes (10 or 100). Default is all.")
+    parser.add_argument("--color", type=str, choices=["rgb", "gray", "all"], default="all", help="Limit training to specific color space (rgb or gray). Default is all.")
     args = parser.parse_args()
     
+    # Set default environment variables strictly before importing parameters.py
+    # This prevents parameters.py from triggering the interactive input prompt
+    if "DIGIT_NB_CLASSES" not in os.environ:
+        os.environ["DIGIT_NB_CLASSES"] = "10"
+    if "DIGIT_INPUT_CHANNELS" not in os.environ:
+        os.environ["DIGIT_INPUT_CHANNELS"] = "1"
+        
     # Import params to get the list of active models
     import parameters as params
     
@@ -21,13 +30,23 @@ def main():
         print("Error: No models found in params.AVAILABLE_MODELS. Please uncomment models in parameters.py.")
         sys.exit(1)
         
-    combinations = [
-        # (nb_classes, channels, title)
-        (10, 1, "10-class Grayscale"),
-        (10, 3, "10-class RGB"),
-        (100, 1, "100-class Grayscale"),
-        (100, 3, "100-class RGB")
-    ]
+    # Build combinations based on user arguments
+    combinations = []
+    
+    classes_to_test = [10, 100] if args.classes == "all" else [int(args.classes)]
+    colors_to_test = [(1, "Grayscale"), (3, "RGB")]
+    if args.color == "gray":
+        colors_to_test = [(1, "Grayscale")]
+    elif args.color == "rgb":
+        colors_to_test = [(3, "RGB")]
+        
+    for nb_classes in classes_to_test:
+        for channels, color_desc in colors_to_test:
+            combinations.append((nb_classes, channels, f"{nb_classes}-class {color_desc}"))
+            
+    if not combinations:
+        print("Error: No combinations to run based on provided filters.")
+        sys.exit(1)
     
     total_trainings = len(active_models) * len(combinations)
     

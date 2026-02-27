@@ -109,7 +109,20 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         update_freq='epoch'
     )
     callbacks.append(tensorboard_callback)
-    
+
+    # Dynamic Weighting & Per-Class Accuracy Callback
+    if params.USE_DYNAMIC_WEIGHTS and validation_data is not None:
+        from utils.dynamic_weighting import PerClassAccuracyCallback
+        callbacks.append(
+            PerClassAccuracyCallback(
+                val_ds=validation_data,
+                every_n_epochs=params.DYNAMIC_WEIGHTS_EPOCHS,
+                nb_classes=params.NB_CLASSES
+            )
+        )
+        if debug:
+            print(f"📊 PerClassAccuracyCallback added (every {params.DYNAMIC_WEIGHTS_EPOCHS} epochs)")
+
     # Create checkpoints directory
     os.makedirs(os.path.join(output_dir, "checkpoints"), exist_ok=True)
     
