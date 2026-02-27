@@ -1560,7 +1560,7 @@ def main():
     """Main function with command line arguments"""
     parser = argparse.ArgumentParser(description='Digit Recognition Benchmarking')
     parser.add_argument('--model', type=str, help='Model name to use for prediction')
-    parser.add_argument('--exclude_model', type=str, default='high_accuracy_validator',
+    parser.add_argument('--exclude_model', type=str, default=None,
                         help='Model string name to automatically exclude from evaluation')
     parser.add_argument('--input_dir', type=str, default=params.OUTPUT_DIR,
                         help=f'Directory containing trained models (default: {params.OUTPUT_DIR})')
