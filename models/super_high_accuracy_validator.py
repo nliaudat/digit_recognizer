@@ -37,7 +37,7 @@ Estimated: ~15–25M parameters → GPU float32/float16 only.
 Hard classes addressed (from benchmark data):
   class 1  (80.2%), class 22 (78.8%), class 31 (79.2%)
   class 41 (82.8%), class 50 (81.6%), class 69 (83.3%)
-  → Handled via per-class focal-loss weights in train_super_validator.py
+  → Handled via per-class focal-loss weights in train.py
 """
 
 import os

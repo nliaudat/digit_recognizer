@@ -605,6 +605,11 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     # Setup hardware
     strategy = setup_gpu()
     
+    if hasattr(params, 'USE_MIXED_PRECISION') and params.USE_MIXED_PRECISION:
+        policy = tf.keras.mixed_precision.Policy('mixed_float16')
+        tf.keras.mixed_precision.set_global_policy(policy)
+        print("✅ Mixed precision enabled: float16 compute / float32 weights")
+        
     # Create output directory
     color_mode = "GRAY" if params.USE_GRAYSCALE else "RGB"
     
@@ -982,20 +987,20 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         if no_cleanup:
             print("🚫 Cleanup disabled - keeping checkpoints")
         
-        if MLFLOW_AVAILABLE:
-            mlflow.log_metric("test_accuracy", test_accuracy)
-            mlflow.log_metric("tflite_accuracy", tflite_accuracy)
-            
-            # Log the optimized TFLite model as an artifact
-            for root, dirs, files in os.walk(training_dir):
-                for file in files:
-                    if file.endswith(".tflite"):
-                        mlflow.log_artifact(os.path.join(root, file))
-            
-            if active_run:
-                mlflow.end_run()
+    if MLFLOW_AVAILABLE:
+        mlflow.log_metric("test_accuracy", test_accuracy)
+        mlflow.log_metric("tflite_accuracy", tflite_accuracy)
+        
+        # Log the optimized TFLite model as an artifact
+        for root, dirs, files in os.walk(training_dir):
+            for file in files:
+                if file.endswith(".tflite"):
+                    mlflow.log_artifact(os.path.join(root, file))
+        
+        if active_run:
+            mlflow.end_run()
 
-        return model, history, training_dir
+    return model, history, training_dir
 
 if __name__ == "__main__":
     main()

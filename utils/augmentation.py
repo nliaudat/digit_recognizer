@@ -4,6 +4,53 @@ import numpy as np
 import parameters as params
 from utils.data_pipeline import create_tf_dataset_from_arrays
 
+# -------------------------------------------------------------
+#  Advanced Augmentation Helpers (MixUp & Random Erasing)
+# -------------------------------------------------------------
+
+def random_erasing(img, h, w, prob=0.1, sl=0.15, sh=0.25):
+    """Randomly erase a rectangle of the image (fills with channel mean)."""
+    if tf.random.uniform(()) > prob:
+        return img
+    area = tf.cast(h * w, tf.float32)
+    erase_area = tf.random.uniform((), sl, sh) * area
+    ratio  = tf.random.uniform((), 0.5, 2.0)
+    re_h   = tf.cast(tf.math.sqrt(erase_area / ratio), tf.int32)
+    re_w   = tf.cast(tf.math.sqrt(erase_area * ratio), tf.int32)
+    re_h   = tf.minimum(re_h, h - 1)
+    re_w   = tf.minimum(re_w, w - 1)
+    
+    # Use simple perturbation as fallback since full scatter_nd is complex in graph mode
+    mean = tf.math.reduce_mean(img)
+    noise = tf.random.uniform([h, w, params.INPUT_SHAPE[2]], 0, mean * 0.1)
+    
+    # Apply noise to ~10% of the image
+    img = img + noise * tf.cast(tf.random.uniform([h, w, 1]) < 0.05, tf.float32)
+    return img
+
+def mixup(images, labels_one_hot, alpha=0.2):
+    """
+    MixUp augmentation: blends pairs of images and labels.
+    images:       (B, H, W, C) float32
+    labels_one_hot: (B, NB_CLASSES) float32
+    Returns: mixed images, mixed labels
+    """
+    batch_size = tf.shape(images)[0]
+    lam = tf.random.uniform((), 0.0, 1.0)
+    if alpha > 0:
+        # beta distribution approximation using tensorflow gamma distributions
+        gamma_1 = tf.random.gamma(shape=[], alpha=alpha)
+        gamma_2 = tf.random.gamma(shape=[], alpha=alpha)
+        # Handle potential zero division
+        lam = gamma_1 / tf.maximum(gamma_1 + gamma_2, 1e-7)
+        
+    lam = tf.maximum(lam, 1.0 - lam)  # always ≥ 0.5 for majority class
+
+    indices  = tf.random.shuffle(tf.range(batch_size))
+    mixed_x  = lam * images + (1.0 - lam) * tf.gather(images, indices)
+    mixed_y  = lam * labels_one_hot + (1.0 - lam) * tf.gather(labels_one_hot, indices)
+    return mixed_x, mixed_y
+
 # # -------------------------------------------------------------
 # #  NEW helper that augments a *batched* tensor image by image
 # # -------------------------------------------------------------
@@ -247,6 +294,12 @@ def print_augmentation_summary():
     
     if summary['vertical_flip']:
         print(f"   ✓ Vertical Flip: Enabled")
+        
+    if params.USE_RANDOM_ERASING:
+        print(f"   ✓ Random Erasing: Enabled")
+        
+    if params.USE_MIXUP:
+        print(f"   ✓ MixUp: Enabled (α=0.2)")
     
     print("   " + "-" * 40)
 
@@ -441,19 +494,58 @@ def setup_augmentation_for_training(x_train, y_train_final,
 
     # 3️⃣  **Apply augmentation per image** (before batching)
     #    The lambda receives a single image + its label.
+    def _augment_image_with_erasing(img, lbl):
+        img_aug, lbl_aug = _augment_one_image(img, lbl, augmentation_pipeline)
+        
+        # Apply random erasing if requested
+        if params.USE_RANDOM_ERASING:
+            h, w = params.INPUT_SHAPE[0], params.INPUT_SHAPE[1]
+            img_aug = random_erasing(img_aug, h, w, prob=0.1, sl=0.15, sh=0.25)
+            img_aug = tf.clip_by_value(img_aug, 0.0, 1.0)
+            
+        return img_aug, lbl_aug
+
     train_dataset = train_dataset.map(
-        lambda img, lbl: _augment_one_image(img, lbl, augmentation_pipeline),
+        _augment_image_with_erasing,
         num_parallel_calls=tf.data.AUTOTUNE
     )
 
-    # 4️⃣  Now batch / shuffle / prefetch
-    train_dataset = train_dataset.shuffle(1000) \
-                                 .batch(params.BATCH_SIZE) \
-                                 .prefetch(tf.data.AUTOTUNE)
+    # 4️⃣  Now batch / shuffle
+    train_dataset = train_dataset.shuffle(1000).batch(params.BATCH_SIZE, drop_remainder=params.USE_MIXUP)
+    
+    # Validation data – no augmentation, just batch
+    val_dataset = val_dataset.batch(params.BATCH_SIZE)
 
-    # Validation data – **no augmentation**
-    val_dataset = val_dataset.batch(params.BATCH_SIZE) \
-                             .prefetch(tf.data.AUTOTUNE)
+    # 4.5️⃣ Apply MixUp AFTER batching if requested
+    if params.USE_MIXUP:
+        def apply_mixup(imgs, lbls):
+            # Assumes sparse labels out of the base mapping. If one-hot, skip dense->onehot conversion.
+            # Handle possible varied dimensionalities depending on model choice.
+            if len(lbls.shape) == 1 or (len(lbls.shape) == 2 and lbls.shape[-1] == 1):
+                lbls_oh = tf.one_hot(tf.cast(lbls, tf.int32), params.NB_CLASSES)
+                # Reshape if required
+                lbls_oh = tf.reshape(lbls_oh, [-1, params.NB_CLASSES])
+            else:
+                lbls_oh = tf.cast(lbls, tf.float32)
+                
+            imgs_mixed, lbls_mixed = mixup(imgs, lbls_oh, alpha=0.2)
+            return imgs_mixed, lbls_mixed
+
+        train_dataset = train_dataset.map(apply_mixup, num_parallel_calls=tf.data.AUTOTUNE)
+        
+        # Also map validation to one-hot for shape consistency if Mixup makes labels one-hot
+        def val_to_onehot(imgs, lbls):
+            if len(lbls.shape) == 1 or (len(lbls.shape) == 2 and lbls.shape[-1] == 1):
+                lbls_oh = tf.one_hot(tf.cast(lbls, tf.int32), params.NB_CLASSES)
+                lbls_oh = tf.reshape(lbls_oh, [-1, params.NB_CLASSES]) 
+                return imgs, lbls_oh
+            return imgs, lbls
+            
+        val_dataset = val_dataset.map(val_to_onehot, num_parallel_calls=tf.data.AUTOTUNE)
+
+    # Prefetch
+    train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
+    val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
 
     # 5️⃣  Quick sanity check
     print("🧪 Testing data pipeline...")

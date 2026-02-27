@@ -418,11 +418,14 @@ def fine_tune_model(
     setup_tensorflow_logging(debug)
     
     # Create output directory
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    color_mode = "GRAY" if params.USE_GRAYSCALE else "RGB"
     fine_tune_dir = os.path.join(
         params.OUTPUT_DIR, 
-        f"fine_tune_{params.MODEL_ARCHITECTURE}_{timestamp}"
+        f"fine_tune_{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls_{color_mode}"
     )
+    if os.path.exists(fine_tune_dir):
+        import shutil
+        shutil.rmtree(fine_tune_dir)
     os.makedirs(fine_tune_dir, exist_ok=True)
     
     print("🚀 Starting Model Fine-Tuning")

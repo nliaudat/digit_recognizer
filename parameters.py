@@ -37,8 +37,8 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v16",   # IoT MobileNetV2 inverted residual — ESP-NN optimised
     "digit_recognizer_v17",   # IoT GhostNet-inspired — ultra-efficient ~50KB
     # "esp_quantization_ready",
-    # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
-    # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
+    "high_accuracy_validator", # strictly for PC validation (not for ESP32)
+    "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
     "mnist_quantization", #63.6kB	0.9848
     "original_haverland", #203.3	0.9822 & baseline
 ]
@@ -367,6 +367,11 @@ AUGMENTATION_WIDTH_SHIFT_RANGE = 0.0
 AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.0
 AUGMENTATION_HORIZONTAL_FLIP = False
 AUGMENTATION_VERTICAL_FLIP = False
+
+# Advanced Augmentations (used by super_high_accuracy_validator)
+USE_MIXUP = True
+USE_RANDOM_ERASING = True
+USE_MIXED_PRECISION = True
 
 # not implemented yet
 

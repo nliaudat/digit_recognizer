@@ -150,16 +150,36 @@ def compile_model(model, loss_type='sparse', class_weights=None):
         
     elif params.OPTIMIZER_TYPE == "adamw":
         # Note: AdamW might require tensorflow-addons or newer TF version
+        # Or tensorflow > 2.10 supports it natively via tf.keras.optimizers.AdamW
         try:
-            import tensorflow_addons as tfa
-            optimizer = tfa.optimizers.AdamW(
+            # Try native Keras first (TF >= 2.11)
+            optimizer = tf.keras.optimizers.AdamW(
                 learning_rate=params.LEARNING_RATE,
                 weight_decay=params.ADAMW_WEIGHT_DECAY,
                 beta_1=params.ADAMW_BETA_1,
                 beta_2=params.ADAMW_BETA_2,
                 epsilon=params.ADAMW_EPSILON
             )
-            print(f"🔧 Using AdamW optimizer (weight_decay={params.ADAMW_WEIGHT_DECAY})")
+            print(f"🔧 Using native AdamW optimizer (weight_decay={params.ADAMW_WEIGHT_DECAY})")
+        except AttributeError:
+            try:
+                import tensorflow_addons as tfa
+                optimizer = tfa.optimizers.AdamW(
+                    learning_rate=params.LEARNING_RATE,
+                    weight_decay=params.ADAMW_WEIGHT_DECAY,
+                    beta_1=params.ADAMW_BETA_1,
+                    beta_2=params.ADAMW_BETA_2,
+                    epsilon=params.ADAMW_EPSILON
+                )
+                print(f"🔧 Using TFA AdamW optimizer (weight_decay={params.ADAMW_WEIGHT_DECAY})")
+            except ImportError:
+                print("⚠️  TF < 2.11 and tensorflow-addons not available, falling back to Adam")
+                optimizer = tf.keras.optimizers.Adam(
+                    learning_rate=params.LEARNING_RATE,
+                    beta_1=params.ADAM_BETA_1,
+                    beta_2=params.ADAM_BETA_2,
+                    epsilon=params.ADAM_EPSILON
+                )
         except ImportError:
             print("⚠️  tensorflow-addons not available, falling back to Adam")
             optimizer = tf.keras.optimizers.Adam(

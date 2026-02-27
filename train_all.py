@@ -12,6 +12,12 @@ def main():
     parser.add_argument("--concurrent", action="store_true", help="Launch all trainings at once in separate CMD windows (WARNING: Requires massive RAM/GPU resources). If not set, trains sequentially in this window.")
     parser.add_argument("--classes", type=str, choices=["10", "100", "all"], default="all", help="Limit training to specific number of classes (10 or 100). Default is all.")
     parser.add_argument("--color", type=str, choices=["rgb", "gray", "all"], default="all", help="Limit training to specific color space (rgb or gray). Default is all.")
+    parser.add_argument("--epochs", type=int, default=None, help="Override training epochs.")
+    parser.add_argument("--batch", type=int, default=None, help="Override batch size.")
+    parser.add_argument("--lr", type=float, default=None, help="Override learning rate.")
+    parser.add_argument("--focal-gamma", type=float, default=None, help="Override Focal Loss Gamma.")
+    parser.add_argument("--no-mixup", action="store_true", help="Disable Mixup augmentation.")
+    parser.add_argument("--no-mixed-precision", action="store_true", help="Disable mixed precision.")
     args = parser.parse_args()
     
     # Set default environment variables strictly before importing parameters.py
@@ -59,13 +65,23 @@ def main():
     print(f"{'='*80}\n")
     
     if args.concurrent:
+        # Build extra arguments string
+        extra_args = []
+        if args.epochs is not None: extra_args.extend(["--epochs", str(args.epochs)])
+        if args.batch is not None: extra_args.extend(["--batch", str(args.batch)])
+        if args.lr is not None: extra_args.extend(["--lr", str(args.lr)])
+        if args.focal_gamma is not None: extra_args.extend(["--focal-gamma", str(args.focal_gamma)])
+        if args.no_mixup: extra_args.append("--no-mixup")
+        if args.no_mixed_precision: extra_args.append("--no-mixed-precision")
+        extra_args_str = " ".join(extra_args)
+
         # Launching everything concurrently (Caution: High Resource usage)
         for model_name in active_models:
             for nb_classes, channels, desc in combinations:
                 print(f"Launching {model_name} - {desc}...")
                 
                 window_title = f"{model_name} - {desc}"
-                cmd_string = f'set DIGIT_NB_CLASSES={nb_classes}&& set DIGIT_INPUT_CHANNELS={channels}&& title {window_title}&& python train.py --train {model_name}'
+                cmd_string = f'set DIGIT_NB_CLASSES={nb_classes}&& set DIGIT_INPUT_CHANNELS={channels}&& title {window_title}&& python train.py --train {model_name} {extra_args_str}'
                 
                 # Use Windows 'start' to pop open a new command processor
                 subprocess.Popen(f'start "{window_title}" cmd /c "{cmd_string}"', shell=True)
@@ -91,6 +107,12 @@ def main():
                 env["DIGIT_INPUT_CHANNELS"] = str(channels)
                 
                 cmd = [sys.executable, "train.py", "--train", model_name]
+                if args.epochs is not None: cmd.extend(["--epochs", str(args.epochs)])
+                if args.batch is not None: cmd.extend(["--batch", str(args.batch)])
+                if args.lr is not None: cmd.extend(["--lr", str(args.lr)])
+                if args.focal_gamma is not None: cmd.extend(["--focal-gamma", str(args.focal_gamma)])
+                if args.no_mixup: cmd.append("--no-mixup")
+                if args.no_mixed_precision: cmd.append("--no-mixed-precision")
                 
                 try:
                     # Run the process sequentially and pipe output to original console
