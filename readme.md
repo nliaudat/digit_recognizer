@@ -30,22 +30,24 @@ The primary use case is 10-class recognition. The models perform exceptionally w
 
 | Model                          | Parameters | Size (KB) | Accuracy | Inferences/sec |
 | ------------------------------ | ---------- | --------- | -------- | -------------- |
-| digit_recognizer_v12_10cls_GRAY| 490000     | 406.7     | 0.996    | 1917           |
-| digit_recognizer_v9_10cls_GRAY | 902500     | 148.6     | 0.993    | 3079           |
-| digit_recognizer_v4_10cls_GRAY | 79700      | 61.4      | 0.990    | 7617           |
-| original_haverland_10cls_GRAY  | 234500     | 203.3     | 0.987    | 5873           |
-| digit_recognizer_v3_10cls_GRAY | 118400     | 69.4      | 0.985    | 8420           |
-| mnist_quantization_10cls_GRAY  | 98700      | 63.6      | 0.977    | 6045           |
-| digit_recognizer_v7_10cls_GRAY | 75600      | 46.7      | 0.974    | 8884           |
-| digit_recognizer_v6_10cls_GRAY | 61500      | 36.5      | 0.971    | 6643           |
+| digit_recognizer_v12_10cls_GRAY| 490000     | 406.7     | 0.993    | 1570           |
+| original_haverland_10cls_GRAY  | 234500     | 203.3     | 0.982    | 4513           |
+| digit_recognizer_v16_10cls_GRAY| 244000     | 128.6     | 0.992    | 3690           |
+| digit_recognizer_v15_10cls_GRAY| 109100     | 79.3      | 0.991    | 5184           |
+| digit_recognizer_v17_10cls_GRAY| 172900     | 70.7      | 0.990    | 4971           |
+| digit_recognizer_v3_10cls_GRAY | 118400     | 69.4      | 0.980    | 6359           |
+| mnist_quantization_10cls_GRAY  | 98700      | 63.6      | 0.970    | 4719           |
+| digit_recognizer_v4_10cls_GRAY | 79700      | 61.4      | 0.985    | 5834           |
+| digit_recognizer_v7_10cls_GRAY | 75600      | 46.7      | 0.966    | 6485           |
+| digit_recognizer_v6_10cls_GRAY | 61500      | 36.5      | 0.965    | 5167           |
 
 ### Pareto-Optimal Choice: `v4` vs `original_haverland`
 
 When comparing the `original_haverland` baseline to `digit_recognizer_v4` on the 10-class dataset, `v4` demonstrates strict superiority across all key edge-deployment metrics:
 
-1.  **Higher Accuracy**: `v4` achieves **99.0%** accuracy compared to the original's **98.7%**.
+1.  **Higher Accuracy**: `v4` achieves **98.5%** accuracy compared to the original's **98.2%**.
 2.  **Dramatically Smaller Memory Footprint**: `v4` is only **61.4 KB**, making it roughly **3.3x smaller** than the original's **203.3 KB**, saving critical flash memory on ESP32 devices.
-3.  **Faster Inference**: `v4` processes **7617 inferences/second**, making it nearly **30% faster** than the original's **5873 inferences/second**.
+3.  **Faster Inference**: `v4` processes **5834 inferences/second**, making it nearly **30% faster** than the original's **4513 inferences/second**.
 4.  **Fewer Parameters**: `v4` utilizes nearly 3 times fewer parameters (79k vs 234k), directly reducing the required RAM tensor arena size.
 
 ## Benchmark on 24351 real images (100 Classes [0-99])
@@ -54,22 +56,24 @@ To ensure a fair and comprehensive comparison between architectures under stress
 
 | Model                          | Parameters | Size (KB) | Accuracy | Inferences/sec |
 | ------------------------------ | ---------- | --------- | -------- | -------------- |
-| digit_recognizer_v12_100cls_GRAY| 496100     | 414.8     | 0.9149   | 2039           |
-| digit_recognizer_v9_100cls_GRAY | 911500     | 159.5     | 0.8734   | 3145           |
-| digit_recognizer_v6_100cls_GRAY | 171800     | 132.5     | 0.8622   | 3343           |
-| digit_recognizer_v4_100cls_GRAY | 85800      | 69.5      | 0.8558   | 8003           |
-| original_haverland_100cls_GRAY  | 257899     | 228.2     | 0.8435   | 6220           |
-| mnist_quantization_100cls_GRAY  | 104800     | 71.7      | 0.8159   | 6400           |
-| digit_recognizer_v3_100cls_GRAY | 121600     | 74.6      | 0.7873   | 8331           |
-| digit_recognizer_v7_100cls_GRAY | 82400      | 55.5      | 0.7807   | 9270           |
+| digit_recognizer_v12_100cls_GRAY| 496100     | 414.8     | 0.892    | 1459           |
+| original_haverland_100cls_GRAY  | 257899     | 228.2     | 0.817    | 4395           |
+| digit_recognizer_v16_100cls_GRAY| 253000     | 139.5     | 0.884    | 3507           |
+| digit_recognizer_v6_100cls_GRAY | 171800     | 132.5     | 0.840    | 2437           |
+| digit_recognizer_v15_100cls_GRAY| 113700     | 86.0      | 0.854    | 4595           |
+| digit_recognizer_v17_100cls_GRAY| 180400     | 80.2      | 0.826    | 4730           |
+| digit_recognizer_v3_100cls_GRAY | 121600     | 74.6      | 0.765    | 6215           |
+| mnist_quantization_100cls_GRAY  | 104800     | 71.7      | 0.792    | 4497           |
+| digit_recognizer_v4_100cls_GRAY | 85800      | 69.5      | 0.829    | 5759           |
+| digit_recognizer_v7_100cls_GRAY | 82400      | 55.5      | 0.754    | 6692           |
 
 ### Performance under Stress: `v4` vs `original_haverland` (100-Class)
 
 Even on the harder dataset, `v4` maintains its sheer edge over `original_haverland`:
 
-1.  **Higher Accuracy**: `v4` achieves **85.58%** accuracy compared to the original's **84.35%**.
+1.  **Higher Accuracy**: `v4` achieves **82.9%** accuracy compared to the original's **81.7%**.
 2.  **Dramatically Smaller Memory Footprint**: `v4` drops to **69.5 KB** while the original is **228.2 KB**.
-3.  **Faster Inference**: `v4` processes **8003 inferences/second**, beating the original's **6220 inferences/second**.
+3.  **Faster Inference**: `v4` processes **5759 inferences/second**, beating the original's **4395 inferences/second**.
 4.  **Fewer Parameters**: `v4` utilizes nearly 3 times fewer parameters (85k vs 257k).
 
 ## Benchmarking
@@ -121,6 +125,24 @@ The project demonstrates that :
 -   **Conv2D with 32 filters**: Each filter has shape `(3, 3, channels)` and produces 1 output channel
 -   **Output**: `(height, width, 32)` - 32 feature maps, each combining information from all input channels
 
+## Summary of Model Choice and Application
+
+The table below summarizes the trade-offs between accuracy and model size across different classification complexities (10 vs 100 classes) and color spaces (Grayscale vs RGB). It highlights the most notable models to help you choose the best fit for your specific IoT application.
+
+| Model Name | 10 cls Gray | 10 cls RGB | 100 cls Gray | 100 cls RGB | Application / Comment |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **v6** | 96.5% / 36.5KB | 96.1% / 46.9KB | 84.0% / 132.5KB | 85.7% / 160.8KB | Best balanced IoT model for 10cls Gray, extremely small memory footprint. |
+| **v3** | 98.0% / 69.4KB | 97.7% / 38.4KB | 76.5% / 74.6KB | 78.9% / 45.1KB | Fastest overall inference speed and best balanced for 100cls RGB. |
+| **v7** | 96.6% / 46.7KB | 96.7% / 47.2KB | 75.4% / 55.5KB | 75.0% / 56.0KB | Fastest inference speed under 100KB, optimal for speed-critical IoT. |
+| **v4** | 98.5% / 61.4KB | 98.7% / 78.3KB | 82.9% / 69.5KB | 86.1% / 87.1KB | Excellent accuracy while remaining under 100KB, great all-rounder. |
+| **mnist_quantization** | 97.0% / 63.6KB | 97.0% / 64.2KB | 79.2% / 71.7KB | 81.2% / 72.2KB | Standard quantization baseline model. |
+| **v15** | 99.1% / 79.3KB | 99.2% / 100.0KB | 85.4% / 86.0KB | 84.9% / 107.4KB | Best accuracy for models under 100KB in 10-class scenarios. |
+| **v17** | 99.0% / 70.7KB | 98.8% / 71.0KB | 82.6% / 80.2KB | 82.2% / 80.5KB | Ultra-efficient GhostNet-inspired alternative with solid accuracy. |
+| **v16** | 99.2% / 128.6KB | 99.2% / 128.8KB | 88.4% / 139.5KB | 89.5% / 139.7KB | High accuracy MobileNetV2-based model, but larger footprint. |
+| **original_haverland** | 98.2% / 203.3KB | 98.2% / 203.8KB | 81.7% / 228.2KB | 82.0% / 228.8KB | Legacy baseline, superseded by v4 and newer variants. |
+| **v12** | 99.3% / 406.7KB | 99.3% / 407.3KB | 89.2% / 414.8KB | 89.3% / 415.4KB | Best overall absolute accuracy under 1MB. Not suitable for constrained IoT. |
+| **high_accuracy_validator** | N/A | N/A | N/A | 91.9% / 3149.7KB | PC-only large model validator, highest absolute accuracy found. |
+
 ## Related Projects
 
 This work contributes to improved digit recognition research, including the [Tenth-of-step-of-a-meter-digit](https://github.com/haverland/Tenth-of-step-of-a-meter-digit) project for enhanced meter digit analysis.
@@ -130,5 +152,3 @@ Contributions are welcome! Please feel free to submit pull requests or open issu
 
 ## License
 This project is licensed under the Apache-2.0 license
-
-

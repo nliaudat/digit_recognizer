@@ -209,54 +209,78 @@ def set_all_seeds(seed=params.SHUFFLE_SEED):
 #  Argument parsing
 # --------------------------------------------------------------------------- #
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Digit Recognition Training")
+    parser = argparse.ArgumentParser(
+        description="Digit Recognition Training Pipeline",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    
+    # --- Logging & Debugging ---
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Enable verbose TensorFlow logging and extra prints",
+        help="Enable verbose TensorFlow logging and extra debug prints.\n"
+             "Useful for troubleshooting model graph issues or tracking detailed execution flow."
     )
+    
+    # --- Training Modes ---
     parser.add_argument(
-        "--test_all_models",
+        "--train_all",
         action="store_true",
-        help="Run a quick sanity check on every architecture",
+        help="Train every architecture listed in params.AVAILABLE_MODELS sequentially.\n"
+             "Ideal for running large benchmarking sweeps overnight."
     )
     parser.add_argument(
         "--train",
         nargs="+",
         choices=params.AVAILABLE_MODELS,
-        help="Train only the listed architectures",
+        help="Train only the explicitly listed architectures.\n"
+             "Example: --train digit_recognizer_v4 digit_recognizer_v17"
     )
+    parser.add_argument(
+        "--test_all_models",
+        action="store_true",
+        help="Run a rapid sanity check on every architecture.\n"
+             "Compiles each model and trains for exactly 1 epoch using a tiny subset of data "
+             "to ensure there are no syntax errors or shape mismatches."
+    )
+    
+    # --- Hyperparameter Tuning ---
     parser.add_argument(
         "--use_tuner",
         action="store_true",
-        help="Run hyper parameter tuning before training",
-    )
-    parser.add_argument(
-        "--train_all",
-        action="store_true",
-        help="Train every architecture sequentially",
-    )
-    parser.add_argument(
-        "--advanced",
-        action="store_true",
-        help="Enable experimental training features",
+        help="Run Keras Tuner hyperparameter search before training.\n"
+             "Automatically searches for optimal learning rates, batch sizes, and optimizers."
     )
     parser.add_argument(
         "--num_trials",
         type=int,
         default=100,
-        help="Number of tuning trials (default: 100)",
+        help="Maximum number of tuner configurations to test (default: 100).\n"
+             "Higher values explore more combinations but take significantly longer."
     )
+    
+    # --- Training Enhancements ---
+    parser.add_argument(
+        "--advanced",
+        action="store_true",
+        help="Enable experimental training features (if implemented in parameters.py).\n"
+             "E.g., Mixed precision, gradient accumulation, or learning rate cyclers."
+    )
+    
+    # --- Post-Training Options ---
     parser.add_argument(
         "--no_cleanup",
         action="store_true",
-        help="Skip cleanup of checkpoints after training",
+        help="Skip deletion of intermediate checkpoint files after training.\n"
+             "Keeps the saved_model checkpoints on disk (requires more storage space)."
     )
     parser.add_argument(
         "--no_analysis",
         action="store_true",
-        help="Skip comprehensive analysis after training",
+        help="Skip the comprehensive evaluation phase after training completes.\n"
+             "Disables TFLite conversion, confusion matrix generation, and inference timing."
     )
+    
     return parser.parse_args()
 
 
