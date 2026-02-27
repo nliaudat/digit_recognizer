@@ -320,7 +320,7 @@ def create_learning_rate_scheduler():
         from tensorflow.keras.optimizers.schedules import CosineDecayRestarts
         lr_schedule = CosineDecayRestarts(
             initial_learning_rate=params.LEARNING_RATE,
-            first_decay_steps=1000,
+            first_decay_steps=params.LR_WARMUP_EPOCHS,
             alpha=params.COSINE_DECAY_ALPHA
         )
         print(f"🔧 Using CosineDecayRestarts scheduler")

@@ -279,6 +279,13 @@ def parse_arguments():
     parser.add_argument("--no-mixup", action="store_true", help="Disable Mixup augmentation.")
     parser.add_argument("--no-mixed-precision", action="store_true", help="Disable mixed precision.")
     
+    # --- Advanced Features ---
+    parser.add_argument("--cutmix", action="store_true", help="Enable CutMix augmentation.")
+    parser.add_argument("--no-random-erasing", action="store_true", help="Disable Random Erasing augmentation.")
+    parser.add_argument("--optimizer", type=str, default=None, help="Override the optimizer (e.g. adamw).")
+    parser.add_argument("--lr-scheduler", type=str, default=None, help="Override the LR scheduler (e.g. cosine).")
+    parser.add_argument("--no-dynamic-weights", action="store_true", help="Disable dynamic per-class weighting.")
+
     # --- Post-Training Options ---
     parser.add_argument(
         "--no_cleanup",
@@ -517,6 +524,21 @@ def main():
         params.USE_MIXUP = False
     if args.no_mixed_precision:
         params.USE_MIXED_PRECISION = False
+
+    if args.warmup_epochs is not None:
+        params.LR_WARMUP_EPOCHS = args.warmup_epochs
+    if args.weight_decay is not None:
+        params.ADAMW_WEIGHT_DECAY = args.weight_decay
+    if args.cutmix:
+        params.USE_CUTMIX = True
+    if args.no_random_erasing:
+        params.USE_RANDOM_ERASING = False
+    if args.optimizer is not None:
+        params.OPTIMIZER_TYPE = args.optimizer
+    if args.lr_scheduler is not None:
+        params.LR_SCHEDULER_TYPE = args.lr_scheduler
+    if args.no_dynamic_weights:
+        params.USE_DYNAMIC_WEIGHTS = False
 
     # -----------------------------------------------------------------
     #  Hyper parameter tuning mode

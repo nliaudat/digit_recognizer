@@ -51,6 +51,58 @@ def mixup(images, labels_one_hot, alpha=0.2):
     mixed_y  = lam * labels_one_hot + (1.0 - lam) * tf.gather(labels_one_hot, indices)
     return mixed_x, mixed_y
 
+def cutmix(images, labels_one_hot, alpha=1.0):
+    """
+    CutMix augmentation: replaces a patch of an image with a patch from another image.
+    images:         (B, H, W, C) float32
+    labels_one_hot: (B, NB_CLASSES) float32
+    Returns: cutmixed images, cutmixed labels
+    """
+    batch_size = tf.shape(images)[0]
+    input_shape = tf.shape(images)
+    H, W = input_shape[1], input_shape[2]
+    
+    lam = tf.random.uniform((), 0.0, 1.0)
+    if alpha > 0:
+        gamma_1 = tf.random.gamma(shape=[], alpha=alpha)
+        gamma_2 = tf.random.gamma(shape=[], alpha=alpha)
+        lam = gamma_1 / tf.maximum(gamma_1 + gamma_2, 1e-7)
+    
+    lam = tf.maximum(lam, 1.0 - lam)
+    
+    cut_rat = tf.math.sqrt(1.0 - lam)
+    cut_w = tf.cast(tf.cast(W, tf.float32) * cut_rat, tf.int32)
+    cut_h = tf.cast(tf.cast(H, tf.float32) * cut_rat, tf.int32)
+    
+    # center of the cut
+    cx = tf.random.uniform((), 0, W, dtype=tf.int32)
+    cy = tf.random.uniform((), 0, H, dtype=tf.int32)
+    
+    bbx1 = tf.clip_by_value(cx - cut_w // 2, 0, W)
+    bby1 = tf.clip_by_value(cy - cut_h // 2, 0, H)
+    bbx2 = tf.clip_by_value(cx + cut_w // 2, 0, W)
+    bby2 = tf.clip_by_value(cy + cut_h // 2, 0, H)
+    
+    target_a = images
+    indices = tf.random.shuffle(tf.range(batch_size))
+    target_b = tf.gather(images, indices)
+    
+    # create the bounding box mask
+    mask_y = tf.math.logical_and(tf.range(0, H) >= bby1, tf.range(0, H) < bby2)
+    mask_x = tf.math.logical_and(tf.range(0, W) >= bbx1, tf.range(0, W) < bbx2)
+    
+    mask = tf.expand_dims(mask_y, 1) & tf.expand_dims(mask_x, 0)
+    mask = tf.expand_dims(tf.expand_dims(mask, 0), -1)
+    mask = tf.cast(mask, images.dtype)
+    
+    mixed_x = target_a * (1.0 - mask) + target_b * mask
+    
+    # ratio of the actual patch area
+    actual_lam = 1.0 - tf.cast((bbx2 - bbx1) * (bby2 - bby1), tf.float32) / tf.cast(W * H, tf.float32)
+    mixed_y = actual_lam * labels_one_hot + (1.0 - actual_lam) * tf.gather(labels_one_hot, indices)
+    
+    return mixed_x, mixed_y
+
 # # -------------------------------------------------------------
 # #  NEW helper that augments a *batched* tensor image by image
 # # -------------------------------------------------------------
@@ -300,6 +352,9 @@ def print_augmentation_summary():
         
     if params.USE_MIXUP:
         print(f"   ✓ MixUp: Enabled (α=0.2)")
+
+    if params.USE_CUTMIX:
+        print(f"   ✓ CutMix: Enabled (α=1.0)")
     
     print("   " + "-" * 40)
 
@@ -516,24 +571,30 @@ def setup_augmentation_for_training(x_train, y_train_final,
     # Validation data – no augmentation, just batch
     val_dataset = val_dataset.batch(params.BATCH_SIZE)
 
-    # 4.5️⃣ Apply MixUp AFTER batching if requested
-    if params.USE_MIXUP:
-        def apply_mixup(imgs, lbls):
-            # Assumes sparse labels out of the base mapping. If one-hot, skip dense->onehot conversion.
-            # Handle possible varied dimensionalities depending on model choice.
+    # 4.5️⃣ Apply MixUp or CutMix AFTER batching if requested
+    if params.USE_MIXUP or params.USE_CUTMIX:
+        def apply_mixup_cutmix(imgs, lbls):
+            # Convert to one-hot if necessary
             if len(lbls.shape) == 1 or (len(lbls.shape) == 2 and lbls.shape[-1] == 1):
                 lbls_oh = tf.one_hot(tf.cast(lbls, tf.int32), params.NB_CLASSES)
-                # Reshape if required
                 lbls_oh = tf.reshape(lbls_oh, [-1, params.NB_CLASSES])
             else:
                 lbls_oh = tf.cast(lbls, tf.float32)
-                
-            imgs_mixed, lbls_mixed = mixup(imgs, lbls_oh, alpha=0.2)
-            return imgs_mixed, lbls_mixed
+            
+            # Apply randomly either mixup or cutmix if both enabled, otherwise respectively
+            if params.USE_MIXUP and params.USE_CUTMIX:
+                if tf.random.uniform(()) > 0.5:
+                    return mixup(imgs, lbls_oh, alpha=0.2)
+                else:
+                    return cutmix(imgs, lbls_oh, alpha=1.0)
+            elif params.USE_MIXUP:
+                return mixup(imgs, lbls_oh, alpha=0.2)
+            else:
+                return cutmix(imgs, lbls_oh, alpha=1.0)
 
-        train_dataset = train_dataset.map(apply_mixup, num_parallel_calls=tf.data.AUTOTUNE)
+        train_dataset = train_dataset.map(apply_mixup_cutmix, num_parallel_calls=tf.data.AUTOTUNE)
         
-        # Also map validation to one-hot for shape consistency if Mixup makes labels one-hot
+        # Also map validation to one-hot for shape consistency
         def val_to_onehot(imgs, lbls):
             if len(lbls.shape) == 1 or (len(lbls.shape) == 2 and lbls.shape[-1] == 1):
                 lbls_oh = tf.one_hot(tf.cast(lbls, tf.int32), params.NB_CLASSES)

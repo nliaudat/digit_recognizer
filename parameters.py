@@ -262,8 +262,8 @@ USE_FOCAL_LOSS = True  # Set to True to use Focal Loss instead of CrossEntropy
 FOCAL_GAMMA = 2.0      # Focus parameter for Focal Loss (0 = CrossEntropy)
 
 # Dynamic Class Weighting
-USE_DYNAMIC_WEIGHTS = True  # Update loss weights based on validation accuracy
-DYNAMIC_WEIGHTS_EPOCHS = 5   # Frequency of dynamic weight updates (in epochs)
+USE_DYNAMIC_WEIGHTS = True   # Update loss weights based on validation accuracy
+DYNAMIC_WEIGHTS_EPOCHS = 10  # Frequency of dynamic weight updates (in epochs)
 
 # ==============================================================================
 # TRAINING HYPERPARAMETERS
@@ -298,6 +298,7 @@ EXPONENTIAL_DECAY_RATE = 0.96
 
 # Cosine Decay Parameters
 COSINE_DECAY_ALPHA = 0.0  # Minimum learning rate as fraction of initial
+LR_WARMUP_EPOCHS = 10     # Number of warmup epochs for CosineDecayRestarts
 
 # Step Decay Parameters
 STEP_DECAY_STEP_SIZE = 10
@@ -370,6 +371,7 @@ AUGMENTATION_VERTICAL_FLIP = False
 
 # Advanced Augmentations (used by super_high_accuracy_validator)
 USE_MIXUP = True
+USE_CUTMIX = False
 USE_RANDOM_ERASING = True
 USE_MIXED_PRECISION = True
 

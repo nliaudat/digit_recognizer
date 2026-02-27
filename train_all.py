@@ -22,6 +22,14 @@ def main():
     parser.add_argument("--label-smoothing", type=float, default=None, help="Override label smoothing factor.")
     parser.add_argument("--rotation-range", type=float, default=None, help="Override maximum rotation augmentation in degrees.")
     parser.add_argument("--no-mixed-precision", action="store_true", help="Disable mixed precision.")
+    
+    # --- Advanced Features ---
+    parser.add_argument("--cutmix", action="store_true", help="Enable CutMix augmentation.")
+    parser.add_argument("--no-random-erasing", action="store_true", help="Disable Random Erasing augmentation.")
+    parser.add_argument("--optimizer", type=str, default=None, help="Override the optimizer (e.g. adamw).")
+    parser.add_argument("--lr-scheduler", type=str, default=None, help="Override the LR scheduler (e.g. cosine).")
+    parser.add_argument("--no-dynamic-weights", action="store_true", help="Disable dynamic per-class weighting.")
+
     args = parser.parse_args()
     
     # Set default environment variables strictly before importing parameters.py
@@ -79,8 +87,15 @@ def main():
         if args.label_smoothing is not None: extra_args.extend(["--label-smoothing", str(args.label_smoothing)])
         if args.focal_gamma is not None: extra_args.extend(["--focal-gamma", str(args.focal_gamma)])
         if args.rotation_range is not None: extra_args.extend(["--rotation-range", str(args.rotation_range)])
+        if args.optimizer is not None: extra_args.extend(["--optimizer", args.optimizer])
+        if args.lr_scheduler is not None: extra_args.extend(["--lr-scheduler", args.lr_scheduler])
+        
+        if args.cutmix: extra_args.append("--cutmix")
         if args.no_mixup: extra_args.append("--no-mixup")
+        if args.no_random_erasing: extra_args.append("--no-random-erasing")
+        if args.no_dynamic_weights: extra_args.append("--no-dynamic-weights")
         if args.no_mixed_precision: extra_args.append("--no-mixed-precision")
+        
         extra_args_str = " ".join(extra_args)
 
         # Launching everything concurrently (Caution: High Resource usage)
@@ -123,7 +138,12 @@ def main():
                 if args.label_smoothing is not None: cmd.extend(["--label-smoothing", str(args.label_smoothing)])
                 if args.focal_gamma is not None: cmd.extend(["--focal-gamma", str(args.focal_gamma)])
                 if args.rotation_range is not None: cmd.extend(["--rotation-range", str(args.rotation_range)])
+                if args.optimizer is not None: cmd.extend(["--optimizer", args.optimizer])
+                if args.lr_scheduler is not None: cmd.extend(["--lr-scheduler", args.lr_scheduler])
+                if args.cutmix: cmd.append("--cutmix")
                 if args.no_mixup: cmd.append("--no-mixup")
+                if args.no_random_erasing: cmd.append("--no-random-erasing")
+                if args.no_dynamic_weights: cmd.append("--no-dynamic-weights")
                 if args.no_mixed_precision: cmd.append("--no-mixed-precision")
                 
                 try:
