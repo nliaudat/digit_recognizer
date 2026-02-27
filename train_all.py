@@ -15,12 +15,13 @@ def main():
     parser.add_argument("--epochs", type=int, default=None, help="Override training epochs.")
     parser.add_argument("--batch", type=int, default=None, help="Override batch size.")
     parser.add_argument("--lr", type=float, default=None, help="Override learning rate.")
-    parser.add_argument("--focal-gamma", type=float, default=None, help="Override Focal Loss Gamma.")
+    parser.add_argument("--focal-gamma", type=float, default=4, help="Override Focal Loss Gamma.")
     parser.add_argument("--no-mixup", action="store_true", help="Disable Mixup augmentation.")
     parser.add_argument("--warmup-epochs", type=int, default=None, help="Override learning rate warmup epochs.")
     parser.add_argument("--weight-decay", type=float, default=None, help="Override weight decay parameter.")
     parser.add_argument("--label-smoothing", type=float, default=None, help="Override label smoothing factor.")
     parser.add_argument("--rotation-range", type=float, default=None, help="Override maximum rotation augmentation in degrees.")
+    parser.add_argument("--no-mixed-precision", action="store_true", help="Disable mixed precision.")
     args = parser.parse_args()
     
     # Set default environment variables strictly before importing parameters.py
