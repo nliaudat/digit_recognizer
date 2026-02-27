@@ -27,15 +27,11 @@ from .digit_recognizer_v4 import create_digit_recognizer_v4
 from .digit_recognizer_v5 import create_digit_recognizer_v5
 from .digit_recognizer_v6 import create_digit_recognizer_v6
 from .digit_recognizer_v7 import create_digit_recognizer_v7
-from .digit_recognizer_v8 import create_digit_recognizer_v8
-from .digit_recognizer_v9 import create_digit_recognizer_v9
 from .digit_recognizer_v10 import create_digit_recognizer_v10
-from .digit_recognizer_v11 import create_digit_recognizer_v11
 from .digit_recognizer_v12 import create_digit_recognizer_v12
 from .digit_recognizer_v15 import create_digit_recognizer_v15
 from .digit_recognizer_v16 import create_digit_recognizer_v16
 from .digit_recognizer_v17 import create_digit_recognizer_v17
-from .esp_quantization_ready import create_esp_quantization_ready
 from .mnist_quantization import create_mnist_quantization
 from .high_accuracy_validator import create_high_accuracy_validator
 from .super_high_accuracy_validator import create_super_high_accuracy_validator
@@ -64,15 +60,11 @@ __all__ = [
     'create_digit_recognizer_v5',
     'create_digit_recognizer_v6',
     'create_digit_recognizer_v7',
-    'create_digit_recognizer_v8',
-    'create_digit_recognizer_v9',
     'create_digit_recognizer_v10',
-    'create_digit_recognizer_v11',
     'create_digit_recognizer_v12',
     'create_digit_recognizer_v15',
     'create_digit_recognizer_v16',
     'create_digit_recognizer_v17',
-    'create_esp_quantization_ready',
     'create_mnist_quantization',
     'create_high_accuracy_validator',
     'create_super_high_accuracy_validator',

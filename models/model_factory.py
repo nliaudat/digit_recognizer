@@ -192,7 +192,15 @@ def compile_model(model, loss_type='sparse'):
     # Start with the configured loss type
     loss = params.LOSS_TYPE
     
-    # Apply label smoothing if specified
+    # Override with model-specific loss type if provided (backward compatibility)
+    if loss_type == 'categorical':
+        loss = 'categorical_crossentropy'
+        print("🔧 Override: Using categorical crossentropy loss (for Haverland model)")
+    elif loss_type == 'sparse':
+        loss = 'sparse_categorical_crossentropy'
+        print("🔧 Override: Using sparse categorical crossentropy loss (for other models)")
+
+    # Convert string loss to object form to prevent deprecation warnings
     if params.LABEL_SMOOTHING > 0:
         if loss == "categorical_crossentropy":
             loss = tf.keras.losses.CategoricalCrossentropy(
@@ -203,14 +211,11 @@ def compile_model(model, loss_type='sparse'):
                 label_smoothing=params.LABEL_SMOOTHING
             )
         print(f"🔧 Applied label smoothing: {params.LABEL_SMOOTHING}")
-    
-    # Override with model-specific loss type if provided (backward compatibility)
-    if loss_type == 'categorical':
-        loss = 'categorical_crossentropy'
-        print("🔧 Override: Using categorical crossentropy loss (for Haverland model)")
-    elif loss_type == 'sparse':
-        loss = 'sparse_categorical_crossentropy'
-        print("🔧 Override: Using sparse categorical crossentropy loss (for other models)")
+    else:
+        if loss == "categorical_crossentropy":
+            loss = tf.keras.losses.CategoricalCrossentropy()
+        elif loss == "sparse_categorical_crossentropy":
+            loss = tf.keras.losses.SparseCategoricalCrossentropy()
     
     # ==========================================================================
     # METRICS CONFIGURATION

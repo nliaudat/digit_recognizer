@@ -20,25 +20,25 @@ AVAILABLE_MODELS = [
     # "practical_tiny_depthwise",
     # "simple_cnn", 
     # "dig_class100_s2",
-    "cnn32",
-    "digit_recognizer_v1",
-    "digit_recognizer_v2",
+    # "cnn32",
+    # "digit_recognizer_v1",
+    # "digit_recognizer_v2",
     "digit_recognizer_v3",
     "digit_recognizer_v4",
-    "digit_recognizer_v5",
+    # "digit_recognizer_v5",
     "digit_recognizer_v6",
     "digit_recognizer_v7",
     "digit_recognizer_v8",
     "digit_recognizer_v9",
-    "digit_recognizer_v10",
+    # "digit_recognizer_v10",
     "digit_recognizer_v11",
     "digit_recognizer_v12", #406.7	0.9925
     "digit_recognizer_v15",   # IoT residual model — beats v4 accuracy at <100KB
     "digit_recognizer_v16",   # IoT MobileNetV2 inverted residual — ESP-NN optimised
     "digit_recognizer_v17",   # IoT GhostNet-inspired — ultra-efficient ~50KB
-    "esp_quantization_ready",
-    "high_accuracy_validator", # strictly for PC validation (not for ESP32)
-    "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
+    # "esp_quantization_ready",
+    # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
+    # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
     "mnist_quantization", #63.6kB	0.9848
     "original_haverland", #203.3	0.9822 & baseline
 ]

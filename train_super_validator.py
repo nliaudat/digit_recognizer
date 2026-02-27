@@ -35,26 +35,65 @@ if sys.stdout.encoding != 'utf-8':
 # CLI Arguments
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI Arguments and Parameter Explanations
+# ──────────────────────────────────────────────────────────────────────────────
+
 def parse_args():
-    p = argparse.ArgumentParser(description="Train super_high_accuracy_validator")
-    p.add_argument("--epochs", type=int, default=200, help="Max training epochs")
-    p.add_argument("--batch", type=int, default=64, help="Batch size")
-    p.add_argument("--lr", type=float, default=1e-3, help="Initial learning rate")
-    p.add_argument("--weight-decay", type=float, default=1e-4, help="AdamW weight decay")
+    p = argparse.ArgumentParser(
+        description="Train super_high_accuracy_validator",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    
+    # --- Traning Cycle Parameters ---
+    p.add_argument("--epochs", type=int, default=200, 
+                   help="Maximum number of training epochs.\n"
+                        "Higher epochs allow the model to learn more complex patterns, "
+                        "but early stopping prevents over-training if the model converges early.")
+    p.add_argument("--batch", type=int, default=64, 
+                   help="Batch size (number of images processed simultaneously).\n"
+                        "Increase (e.g., 128) for faster training if GPU memory allows.\n"
+                        "Decrease (e.g., 32) if you run out of memory or want slightly better generalization.")
+    
+    # --- Optimizer & Learning Rate ---
+    p.add_argument("--lr", type=float, default=1e-3, 
+                   help="Initial learning rate (speed at which the model learns).\n"
+                        "Uses CosineDecay schedule. Typical ranges: 1e-3 to 5e-4.\n"
+                        "Too high = instability; Too low = very slow learning.")
+    p.add_argument("--warmup-epochs", type=int, default=10,
+                   help="Number of epochs to linearly warm up the learning rate from 0 to --lr.\n"
+                        "Prevents the optimizer from destroying early randomly-initialized weights.")
+    p.add_argument("--weight-decay", type=float, default=1e-4, 
+                   help="AdamW weight decay parameter (L2 regularization).\n"
+                        "Penalizes large weights to prevent overfitting. Typical range: 1e-5 to 1e-2.")
+    
+    # --- Loss Function (Focal Loss) ---
     p.add_argument("--label-smoothing", type=float, default=0.05,
-                   help="Label smoothing for focal loss")
+                   help="Label smoothing factor (0.0 to 1.0).\n"
+                        "Instead of treating labels as 100% correct (1.0), treats them as 95% correct.\n"
+                        "Helps prevent the model from becoming overly confident / overfitting.")
     p.add_argument("--focal-gamma", type=float, default=2.0,
-                   help="Gamma for focal loss (0 = standard CE)")
-    p.add_argument("--no-mixup", action="store_true", help="Disable MixUp augmentation")
+                   help="Focus parameter (Gamma) for Focal Loss.\n"
+                        "0 = Standard Cross Entropy Loss.\n"
+                        "Higher values (e.g., 2.0 to 4.0) force the model to focus exponentially "
+                        "harder on mistakes and examples it struggles with, rather than easy examples.")
+    
+    # --- Setup & Augmentations ---
+    p.add_argument("--rotation-range", type=float, default=15.0,
+                   help="Maximum rotation augmentation in degrees (± degrees).\n"
+                        "Enhances rotation-invariance. Decrease if numbers shouldn't be upside down.")
+    p.add_argument("--no-mixup", action="store_true", 
+                   help="Disable MixUp augmentation.\n"
+                        "MixUp blends two images and their labels together, forcing the model to "
+                        "learn smoother decision boundaries. Can extend training time required.")
     p.add_argument("--no-mixed-precision", action="store_true",
-                   help="Disable float16 mixed precision")
+                   help="Disable float16 mixed precision.\n"
+                        "Mixed precision uses float16 instead of float32 for math, doubling speed "
+                        "on modern GPUs. Disable only if you experience NaN losses.")
     p.add_argument("--output-dir", type=str,
                    default="exported_models/100cls_RGB/super_high_accuracy_validator_100cls_RGB",
-                   help="Where to save model and logs")
-    p.add_argument("--rotation-range", type=float, default=15.0,
-                   help="Max rotation augmentation in degrees (default 15)")
-    p.add_argument("--warmup-epochs", type=int, default=10,
-                   help="Cosine LR warm-up epochs")
+                   help="Directory path where the .keras file and CSV logs will be saved.")
+    
     return p.parse_args()
 
 
@@ -289,12 +328,14 @@ def mixup(images, labels_one_hot, alpha=0.2):
     """
     batch_size = tf.shape(images)[0]
     lam = tf.random.uniform((), 0.0, 1.0)
-    lam = tf.maximum(lam, 1.0 - lam)  # always ≥ 0.5 for majority class
     if alpha > 0:
-        # beta distribution approximation: use fixed lam from Beta(alpha, alpha)
-        # TF doesn't have tfp built-in easily, use uniform approximation
-        lam = tf.cast(
-            np.random.beta(alpha, alpha), tf.float32)
+        # beta distribution approximation using tensorflow gamma distributions
+        gamma_1 = tf.random.gamma(shape=[], alpha=alpha)
+        gamma_2 = tf.random.gamma(shape=[], alpha=alpha)
+        # Handle potential zero division
+        lam = gamma_1 / tf.maximum(gamma_1 + gamma_2, 1e-7)
+        
+    lam = tf.maximum(lam, 1.0 - lam)  # always ≥ 0.5 for majority class
 
     indices  = tf.random.shuffle(tf.range(batch_size))
     mixed_x  = lam * images + (1.0 - lam) * tf.gather(images, indices)
@@ -446,16 +487,20 @@ class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
             current_cw = self.loss_fn.cw.numpy()
             smoothed_weights = 0.5 * current_cw + 0.5 * raw_new_weights
             
-            # 4. Re-normalize to ensure mean is exactly 1.0
+            # 4. Explicit extra boost for the 10 hardest classes
+            for c in worst:
+                smoothed_weights[c] *= 1.2
+            
+            # 5. Re-normalize to ensure mean is exactly 1.0
             smoothed_weights /= smoothed_weights.mean()
             
-            # 5. Apply to Focal Loss
+            # 6. Apply to Focal Loss
             self.loss_fn.update_weights(smoothed_weights)
             
-            # 6. Print top boosted classes
+            # 7. Print top boosted classes (showing 10)
             boosts = smoothed_weights - current_cw
-            top_boosted = np.argsort(boosts)[-5:][::-1]
-            print("\n  🔄 Dynamic weights updated! Top 5 boosted classes:")
+            top_boosted = np.argsort(boosts)[-10:][::-1]
+            print("\n  🔄 Dynamic weights updated! Top 10 boosted classes:")
             for c in top_boosted:
                 print(f"    class {c:3d}: weight {current_cw[c]:.2f} -> {smoothed_weights[c]:.2f} (+{boosts[c]:.2f})")
 
@@ -678,3 +723,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# python train_super_validator.py --output-dir exported_models/100cls_RGB/super_high_accuracy_validator_100cls_RGB_v2 --focal-gamma 4

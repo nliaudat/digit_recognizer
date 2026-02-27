@@ -632,7 +632,7 @@ def check_qat_gradient_flow(model, x_sample, y_sample):
                 y_labels = tf.argmax(y_sample[:2], axis=1)
             else:
                 y_labels = y_sample[:2]
-            loss = tf.keras.losses.sparse_categorical_crossentropy(y_labels, predictions)
+            loss = tf.keras.losses.SparseCategoricalCrossentropy()(y_labels, predictions)
         
         loss = tf.reduce_mean(loss)
     
@@ -696,7 +696,7 @@ def diagnose_qat_output_behavior(model, x_train, y_train):
                 y_labels = tf.argmax(sample_labels, axis=1)
             else:
                 y_labels = sample_labels
-            loss = tf.keras.losses.sparse_categorical_crossentropy(y_labels, predictions)
+            loss = tf.keras.losses.SparseCategoricalCrossentropy()(y_labels, predictions)
             
         loss_value = tf.reduce_mean(loss)
     
@@ -796,7 +796,7 @@ def two_phase_qat_training(x_train, y_train, x_val, y_val):
         
         # Compile with slightly higher learning rate for fine-tuning
         qat_optimizer = tf.keras.optimizers.Adam(learning_rate=params.LEARNING_RATE * 2.0)
-        loss = "sparse_categorical_crossentropy" if params.MODEL_ARCHITECTURE != "original_haverland" else "categorical_crossentropy"
+        loss = tf.keras.losses.SparseCategoricalCrossentropy() if params.MODEL_ARCHITECTURE != "original_haverland" else tf.keras.losses.CategoricalCrossentropy()
         qat_model.compile(optimizer=qat_optimizer, loss=loss, metrics=['accuracy'])
         
         # Fine-tune for a few epochs
