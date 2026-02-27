@@ -628,11 +628,11 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
 
     # Compile – loss depends on the architecture
     if params.MODEL_ARCHITECTURE == "original_haverland":
-        loss = "categorical_crossentropy"
+        loss_type = "categorical"
     else:
-        loss = "sparse_categorical_crossentropy"
+        loss_type = "sparse"
 
-    model = compile_model(model) 
+    model = compile_model(model, loss_type=loss_type) 
     
     # Build model with explicit input shape (required for TF2.x eager mode)
     print("🔧 Building model with explicit input shape...")
@@ -679,13 +679,13 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     if params.MODEL_ARCHITECTURE == "original_haverland":
         model.compile(
             optimizer=model.optimizer,
-            loss="categorical_crossentropy",
+            loss=tf.keras.losses.CategoricalCrossentropy(),
             metrics=['accuracy']
         )
     else:
         model.compile(
             optimizer=model.optimizer, 
-            loss="sparse_categorical_crossentropy",
+            loss=tf.keras.losses.SparseCategoricalCrossentropy(),
             metrics=['accuracy']
         )
         
