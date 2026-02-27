@@ -1,0 +1,32 @@
+TRAINING CONFIGURATION AND RESULTS
+==================================================
+
+📅 Training Information:
+   Timestamp: 2025-11-08 15:09:17
+   Duration: 1:31:28.067301
+
+🔧 Model Configuration:
+   Architecture: digit_recognizer_v8
+   Input shape: (32, 20, 1)
+   Number of classes: 10
+   Total parameters: 355,302
+
+⚙️  Training Parameters:
+   Epochs: 200
+   Batch size: 32
+   Learning rate: 0.001
+   Data augmentation: True
+   Grayscale: True
+
+🎯 Quantization Settings:
+   Quantization enabled: True
+   QAT enabled: True
+   ESP-DL enabled: False
+
+📊 Results:
+   Best validation accuracy: 0.9870
+   Test accuracy (Keras): 0.9865
+   Test accuracy (TFLite): 0.9861
+   Keras model size: 2943.1 KB
+   TFLite model size: 396.4 KB
+   Size reduction: 86.5%

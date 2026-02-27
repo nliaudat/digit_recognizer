@@ -48,7 +48,25 @@ import os
 # GENERAL PARAMETERS
 # ==============================================================================
 
-NB_CLASSES = int(os.environ.get("DIGIT_NB_CLASSES", 100))  # 10 for [0-9], 100 for [0-99]
+_nb_classes_env = os.environ.get("DIGIT_NB_CLASSES")
+if _nb_classes_env is not None:
+    NB_CLASSES = int(_nb_classes_env)
+else:
+    # Not set via environment – ask the user to avoid silently using a wrong default
+    import sys
+    if sys.stdin.isatty():
+        while True:
+            _user_input = input("Enter number of classes [10 or 100]: ").strip()
+            if _user_input in ("10", "100"):
+                NB_CLASSES = int(_user_input)
+                break
+            print("  Please enter 10 or 100.")
+    else:
+        # Non-interactive context (subprocess, CI, etc.) – keep a safe default and warn
+        NB_CLASSES = 10
+        print("WARNING: DIGIT_NB_CLASSES not set and no interactive terminal – defaulting to 10. "
+              "Set the env var explicitly to avoid this.")
+del _nb_classes_env
 
 # ==============================================================================
 # INPUT IMAGES 

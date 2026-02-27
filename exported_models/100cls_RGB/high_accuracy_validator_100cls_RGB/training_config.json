@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-02-25 21:29:29",
+  "training_duration": "2:28:58.010497",
+  "model_architecture": "high_accuracy_validator",
+  "input_shape": [
+    32,
+    20,
+    3
+  ],
+  "num_classes": 100,
+  "epochs": 200,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "quantization_enabled": false,
+  "qat_enabled": false,
+  "esp_dl_enabled": false,
+  "data_augmentation": true,
+  "grayscale": false,
+  "best_validation_accuracy": 0.857121467590332,
+  "test_accuracy_keras": 0.8532615303993225,
+  "test_accuracy_tflite": 0.0,
+  "model_size_keras_kb": 0.0,
+  "model_size_tflite_kb": 0.0,
+  "total_parameters": 3095900
+}

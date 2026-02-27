@@ -1,9 +1,0 @@
-Model,Directory,Type,Parameters,Size_KB,Accuracy,Inference_Time_ms,Inferences_per_second,Tested_Images
-digit_recognizer_v12.tflite,digit_recognizer_v12_100cls_QAT_QUANT_GRAY,quantized,496100,414.8,0.9149,0.49,2039.0,24351
-digit_recognizer_v9.tflite,digit_recognizer_v9_100cls_QAT_QUANT_GRAY,quantized,911500,159.5,0.8734,0.32,3145.0,24351
-digit_recognizer_v6.tflite,digit_recognizer_v6_100cls_QAT_QUANT_GRAY,quantized,171800,132.5,0.8622,0.3,3343.0,24351
-digit_recognizer_v4.tflite,digit_recognizer_v4_100cls_QAT_QUANT_GRAY,quantized,85800,69.5,0.8558,0.12,8003.0,24351
-original_haverland.tflite,original_haverland_100cls_QAT_QUANT_GRAY,quantized,257899,228.2,0.8435,0.16,6220.0,24351
-mnist_quantization.tflite,mnist_quantization_100cls_QAT_QUANT_GRAY,quantized,104800,71.7,0.8159,0.16,6400.0,24351
-digit_recognizer_v3.tflite,digit_recognizer_v3_100cls_QAT_QUANT_GRAY,quantized,121600,74.6,0.7873,0.12,8331.0,24351
-digit_recognizer_v7.tflite,digit_recognizer_v7_100cls_QAT_QUANT_GRAY,quantized,82400,55.5,0.7807,0.11,9270.0,24351
