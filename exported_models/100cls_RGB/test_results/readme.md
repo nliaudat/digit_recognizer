@@ -2,11 +2,11 @@
 
 ## 📊 Executive Summary
 
-- **Test Date**: 2026-02-27 08:34:09
+- **Test Date**: 2026-02-27 14:35:16
 - **Models Tested**: 11 quantized models
-- **Best IoT Model**: **digit_recognizer_v3.tflite** (45.1KB, 0.790 acc, 5187 inf/s)
+- **Best IoT Model**: **digit_recognizer_v3.tflite** (45.1KB, 0.789 acc, 2695 inf/s)
 - **Best Accuracy**: **digit_recognizer_v16.tflite** (0.894)
-- **Fastest Model**: **digit_recognizer_v7.tflite** (6888 inf/s)
+- **Fastest Model**: **digit_recognizer_v4.tflite** (3190 inf/s)
 - **Smallest Model**: **digit_recognizer_v3.tflite** (45.1 KB)
 
 ## 📈 Performance vs Size
@@ -17,17 +17,17 @@
 
 | Model | Size (KB) | Accuracy | Inf/s | Parameters | IoT Score |
 |-------|-----------|----------|-------|------------|-----------|
-| digit_recognizer_v3.tflite | 45.1 | 0.790 | 5187 | 75900 | 0.893 |
-| digit_recognizer_v7.tflite | 56.0 | 0.752 | 6888 | 85500 | 0.862 |
-| digit_recognizer_v4.tflite | 87.1 | 0.861 | 6649 | 111500 | 0.830 |
-| mnist_quantization.tflite | 72.2 | 0.814 | 4635 | 108000 | 0.777 |
-| digit_recognizer_v15.tflite | 107.4 | 0.848 | 3846 | 145400 | 0.712 |
-| digit_recognizer_v16.tflite | 139.7 | 0.894 | 3831 | 255800 | 0.708 |
-| original_haverland.tflite | 228.8 | 0.821 | 4331 | 263600 | 0.644 |
-| digit_recognizer_v9.tflite | 160.0 | 0.863 | 2404 | 914600 | 0.637 |
-| digit_recognizer_v6.tflite | 160.8 | 0.857 | 2093 | 209300 | 0.624 |
-| digit_recognizer_v12.tflite | 415.4 | 0.893 | 1405 | 499300 | 0.573 |
-| digit_recognizer_v17.tflite | 80.5 | 0.071 | 5264 | 183300 | 0.361 |
+| digit_recognizer_v3.tflite | 45.1 | 0.789 | 2695 | 75900 | 0.910 |
+| digit_recognizer_v4.tflite | 87.1 | 0.860 | 3190 | 111500 | 0.836 |
+| digit_recognizer_v17.tflite | 80.5 | 0.823 | 2485 | 183300 | 0.784 |
+| digit_recognizer_v7.tflite | 56.0 | 0.749 | 1939 | 85500 | 0.782 |
+| mnist_quantization.tflite | 72.2 | 0.812 | 1707 | 108000 | 0.749 |
+| digit_recognizer_v15.tflite | 107.4 | 0.849 | 1476 | 145400 | 0.693 |
+| digit_recognizer_v16.tflite | 139.7 | 0.894 | 1297 | 255800 | 0.678 |
+| digit_recognizer_v9.tflite | 160.0 | 0.861 | 823 | 914600 | 0.618 |
+| original_haverland.tflite | 228.8 | 0.820 | 1418 | 263600 | 0.607 |
+| digit_recognizer_v6.tflite | 160.8 | 0.857 | 634 | 209300 | 0.603 |
+| digit_recognizer_v12.tflite | 415.4 | 0.892 | 783 | 499300 | 0.580 |
 
 ## 💡 IoT-Specific Recommendations
 
@@ -35,32 +35,32 @@
 
 #### 🎯 Best Overall for ESP32
 - **Model**: **digit_recognizer_v3.tflite**
-- **IoT Score**: 0.893
-- **Accuracy**: 0.790
+- **IoT Score**: 0.910
+- **Accuracy**: 0.789
 - **Size**: 45.1 KB
-- **Speed**: 5187 inf/s
+- **Speed**: 2695 inf/s
 - **Efficiency**: 0.0175 accuracy per KB
 
 #### 📊 IoT Model Comparison (Under 100KB)
 | Model | Accuracy | Size | Speed | IoT Score | Use Case |
 |-------|----------|------|-------|-----------|----------|
-| digit_recognizer_v3.tflite | 0.790 | 45.1KB | 5187/s | 0.893 | 🏆 **BEST BALANCED** |
-| digit_recognizer_v7.tflite | 0.752 | 56.0KB | 6888/s | 0.862 | ⚡ Fastest |
-| digit_recognizer_v4.tflite | 0.861 | 87.1KB | 6649/s | 0.830 | 🎯 Best Accuracy |
-| mnist_quantization.tflite | 0.814 | 72.2KB | 4635/s | 0.777 | Alternative |
-| digit_recognizer_v17.tflite | 0.071 | 80.5KB | 5264/s | 0.361 | Alternative |
+| digit_recognizer_v3.tflite | 0.789 | 45.1KB | 2695/s | 0.910 | 🏆 **BEST BALANCED** |
+| digit_recognizer_v4.tflite | 0.860 | 87.1KB | 3190/s | 0.836 | 🎯 Best Accuracy |
+| digit_recognizer_v17.tflite | 0.823 | 80.5KB | 2485/s | 0.784 | Alternative |
+| digit_recognizer_v7.tflite | 0.749 | 56.0KB | 1939/s | 0.782 | Alternative |
+| mnist_quantization.tflite | 0.812 | 72.2KB | 1707/s | 0.749 | Alternative |
 
 #### 🔧 Alternative IoT Scenarios
 
 **For Accuracy-Critical IoT:**
 - **Choice**: digit_recognizer_v4.tflite
-- **Accuracy**: 0.861 (best under 100KB)
+- **Accuracy**: 0.860 (best under 100KB)
 - **Trade-off**: 87.1KB size
 
 **For Speed-Critical IoT:**
-- **Choice**: digit_recognizer_v7.tflite
-- **Speed**: 6888 inf/s (fastest under 100KB)
-- **Trade-off**: 0.752 accuracy
+- **Choice**: digit_recognizer_v4.tflite
+- **Speed**: 3190 inf/s (fastest under 100KB)
+- **Trade-off**: 0.860 accuracy
 
 **For Memory-Constrained IoT:**
 - **Choice**: digit_recognizer_v16.tflite
@@ -70,11 +70,11 @@
 #### 📈 Efficiency Analysis
 | Model | Acc/KB | Acc/Param | Parameters | Verdict |
 |-------|--------|-----------|------------|---------|
-| digit_recognizer_v3.tflite | 0.0175 | 10.412384716732543 | 75900 | 🎯 **OPTIMAL** |
-| digit_recognizer_v7.tflite | 0.0134 | 8.790643274853801 | 85500 | ⚖️ Good |
-| digit_recognizer_v4.tflite | 0.0099 | 7.721973094170403 | 111500 | ⚖️ Good |
-| mnist_quantization.tflite | 0.0113 | 7.532407407407407 | 108000 | ⚖️ Good |
-| digit_recognizer_v15.tflite | 0.0079 | 5.834938101788171 | 145400 | ❌ Too large |
+| digit_recognizer_v3.tflite | 0.0175 | 10.393939393939394 | 75900 | 🎯 **OPTIMAL** |
+| digit_recognizer_v4.tflite | 0.0099 | 7.710313901345291 | 111500 | ⚖️ Good |
+| digit_recognizer_v17.tflite | 0.0102 | 4.490452809601747 | 183300 | ⚖️ Good |
+| digit_recognizer_v7.tflite | 0.0134 | 8.761403508771929 | 85500 | ⚖️ Good |
+| mnist_quantization.tflite | 0.0112 | 7.519444444444445 | 108000 | ⚖️ Good |
 
 ---
 *Report generated automatically by Digit Recognition Benchmarking Tool*

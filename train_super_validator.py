@@ -6,9 +6,10 @@ Targets ≥95% accuracy on the 100-class RGB digit dataset.
 
 Key features:
   - Aggressive augmentation w/ rotation ±15°, MixUp, CutMix, Random Erasing
-  - Focal Loss with per-class alpha weights (harder classes down-weighted)
+  - Focal Loss with dynamic per-class weights (updates every 10 epochs)
+    * Tip: Increase --focal-gamma to 3.0 or 4.0 for stronger built-in hard example mining!
   - AdamW optimizer + CosineDecayRestarts LR schedule
-  - Mixed precision float16 (GPU Ampere+ = 2× speed)
+  - Mixed precision float16 (GPU Ampere+ = 2x speed)
   - Per-class accuracy report at end of training
   - Saves Keras model (.keras) + full training history
 
@@ -25,6 +26,10 @@ import argparse
 import numpy as np
 import tensorflow as tf
 from pathlib import Path
+
+# Force UTF-8 output on Windows to support emojis
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CLI Arguments
@@ -133,7 +138,7 @@ def build_file_lists():
         all_paths.extend(p)
         all_labels.extend(l)
         all_weights.extend(w)
-        print(f"  ✔  {src['path']} → {len(p):,} images")
+        print(f"  ✔  {src['path']} -> {len(p):,} images")
     return all_paths, all_labels, all_weights
 
 
@@ -312,11 +317,16 @@ class FocalLoss(tf.keras.losses.Loss):
         self.gamma = gamma
         self.label_smoothing = label_smoothing
         if class_weights is not None:
-            self.cw = tf.constant(
+            self.cw = tf.Variable(
                 [class_weights[i] for i in range(NB_CLASSES)],
-                dtype=tf.float32)
+                trainable=False, dtype=tf.float32)
         else:
             self.cw = None
+
+    def update_weights(self, new_weights):
+        """Update the dynamic class weights based on recent validation accuracy."""
+        if self.cw is not None:
+            self.cw.assign(new_weights)
 
     def call(self, y_true, y_pred):
         # y_true: one-hot (B, C)   y_pred: probs (B, C)
@@ -385,11 +395,12 @@ class WarmupCosineDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
 # ──────────────────────────────────────────────────────────────────────────────
 
 class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
-    """Prints per-class accuracy on validation set every N epochs."""
+    """Prints per-class accuracy on validation set every N epochs and updates dynamic loss weights."""
 
-    def __init__(self, val_ds, every_n_epochs=10):
+    def __init__(self, val_ds, loss_fn, every_n_epochs=5):
         super().__init__()
         self.val_ds      = val_ds
+        self.loss_fn     = loss_fn
         self.every_n     = every_n_epochs
         self.best_acc    = 0.0
 
@@ -421,6 +432,33 @@ class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
         for c in worst:
             print(f"    class {c:3d}: {per_class[c]:.3f}")
 
+        # --- Dynamic Weight Update ---
+        if self.loss_fn is not None and self.loss_fn.cw is not None:
+            # 1. Calculate ideal new weights (inverse accuracy)
+            # Add epsilon to prevent division by zero or huge spikes if acc is 0
+            acc_safe = np.maximum(per_class, 0.01)
+            raw_new_weights = 1.0 / acc_safe
+            
+            # 2. Normalize so mean is 1.0
+            raw_new_weights /= raw_new_weights.mean()
+            
+            # 3. Smooth update (momentum) with current weights
+            current_cw = self.loss_fn.cw.numpy()
+            smoothed_weights = 0.5 * current_cw + 0.5 * raw_new_weights
+            
+            # 4. Re-normalize to ensure mean is exactly 1.0
+            smoothed_weights /= smoothed_weights.mean()
+            
+            # 5. Apply to Focal Loss
+            self.loss_fn.update_weights(smoothed_weights)
+            
+            # 6. Print top boosted classes
+            boosts = smoothed_weights - current_cw
+            top_boosted = np.argsort(boosts)[-5:][::-1]
+            print("\n  🔄 Dynamic weights updated! Top 5 boosted classes:")
+            for c in top_boosted:
+                print(f"    class {c:3d}: weight {current_cw[c]:.2f} -> {smoothed_weights[c]:.2f} (+{boosts[c]:.2f})")
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GPU Setup
@@ -433,7 +471,7 @@ def setup_gpu():
             tf.config.experimental.set_memory_growth(gpu, True)
         print(f"✅ GPU(s) available: {[g.name for g in gpus]}")
     else:
-        print("⚠  No GPU detected — training on CPU (will be slow)")
+        print("⚠  No GPU detected - training on CPU (will be slow)")
     return len(gpus) > 0
 
 
@@ -458,7 +496,7 @@ def main():
     print("\n📂 Loading dataset...")
     all_paths, all_labels, _ = build_file_lists()
     if not all_paths:
-        print("❌ No images loaded — check dataset paths!")
+        print("❌ No images loaded - check dataset paths!")
         sys.exit(1)
 
     all_paths  = np.array(all_paths)
@@ -581,11 +619,11 @@ def main():
         ),
         tf.keras.callbacks.TerminateOnNaN(),
         tf.keras.callbacks.CSVLogger(str(out_dir / "training_log.csv")),
-        PerClassAccuracyCallback(val_ds, every_n_epochs=10),
+        PerClassAccuracyCallback(val_ds, loss_fn, every_n_epochs=5),
     ]
 
     # ──── Train ───────────────────────────────────────────────────────────
-    print(f"\n🚀 Training for up to {args.epochs} epochs "
+    print(f"\n[INFO] Training for up to {args.epochs} epochs "
           f"(batch={args.batch}, lr={args.lr}, "
           f"focal_gamma={args.focal_gamma}, "
           f"mixup={'off' if args.no_mixup else 'on'})...")

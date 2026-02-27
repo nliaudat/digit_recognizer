@@ -1649,4 +1649,4 @@ if __name__ == "__main__":
 # py bench_predict.py --test_all
 
 # py bench_predict.py --model digit_recognizer_v4.tflite --list-failed --save-failed
-# py bench_predict.py --test_all --input_dir exported_models\10cls_GRAY
+# py bench_predict.py --test_all --input_dir exported_models\100cls_RGB

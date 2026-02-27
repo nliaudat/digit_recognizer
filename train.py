@@ -535,13 +535,15 @@ def main():
     #  Default – train the single architecture defined in parameters.py
     # -----------------------------------------------------------------
     print(f"🚀 Training architecture: {params.MODEL_ARCHITECTURE}")
-    model, hist, out_dir = train_model(debug=args.debug, 
+    result = train_model(debug=args.debug, 
                                      no_cleanup=args.no_cleanup,
                                      full_analysis=not args.no_analysis)
-    if model is not None:
-        print(f"\n✅ Training completed – results stored in {out_dir}")
+    
+    if result is not None and len(result) == 3 and result[0] is not None:
+        model, hist, out_dir = result
+        print(f"\n✅ Training completed - results stored in {out_dir}")
     else:
-        print("\n❌ Training failed.")
+        print("\n❌ Training failed or returned early.")
 
 
 def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, full_analysis: bool = True):

@@ -3,6 +3,13 @@ Global parameters for Digit Recognition
 Comprehensive hyperparameter configuration for neural network training
 """
 
+import os
+import sys
+
+# Force UTF-8 output on Windows to support emojis
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 import tensorflow as tf
 
 # ==============================================================================
@@ -43,8 +50,6 @@ MODEL_ARCHITECTURE = "digit_recognizer_v17" # one of the models in AVAILABLE_MOD
 # GENERAL PARAMETERS
 # ==============================================================================
 
-import os
-
 # ==============================================================================
 # GENERAL PARAMETERS
 # ==============================================================================
@@ -56,7 +61,6 @@ if _nb_classes_env is not None:
     NB_CLASSES = int(_nb_classes_env)
 else:
     # Not set via environment – ask the user to avoid silently using a wrong default
-    import sys
     if sys.stdin.isatty():
         while True:
             _user_input = input("Enter number of classes [10 or 100]: ").strip()
@@ -509,17 +513,17 @@ def validate_quantization_parameters():
     
     # Rule 1: ESP_DL_QUANTIZE requires QUANTIZE_MODEL
     if ESP_DL_QUANTIZE and not QUANTIZE_MODEL:
-        messages.append("❌ ESP_DL_QUANTIZE=True requires QUANTIZE_MODEL=True")
-        # Auto-correct: Enable quantization
-        corrected_params['QUANTIZE_MODEL'] = True
-        messages.append("✅ Auto-corrected: Set QUANTIZE_MODEL=True")
+            messages.append("❌ ESP_DL_QUANTIZE=True requires QUANTIZE_MODEL=True")
+            # Auto-correct: Enable quantization
+            corrected_params['QUANTIZE_MODEL'] = True
+            messages.append("✅ Auto-corrected: Set QUANTIZE_MODEL=True")
     
     # Rule 2: USE_QAT requires QUANTIZE_MODEL  
     if USE_QAT and not QUANTIZE_MODEL:
-        messages.append("❌ USE_QAT=True requires QUANTIZE_MODEL=True")
-        # Auto-correct: Enable quantization
-        corrected_params['QUANTIZE_MODEL'] = True
-        messages.append("✅ Auto-corrected: Set QUANTIZE_MODEL=True")
+            messages.append("❌ USE_QAT=True requires QUANTIZE_MODEL=True")
+            # Auto-correct: Enable quantization
+            corrected_params['QUANTIZE_MODEL'] = True
+            messages.append("✅ Auto-corrected: Set QUANTIZE_MODEL=True")
     
     # Rule 3: QAT + ESP-DL is valid but needs special handling
     if USE_QAT and ESP_DL_QUANTIZE:
