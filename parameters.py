@@ -31,6 +31,7 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v17",   # IoT GhostNet-inspired — ultra-efficient ~50KB
     "esp_quantization_ready",
     "high_accuracy_validator", # strictly for PC validation (not for ESP32)
+    "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
     "mnist_quantization", #63.6kB	0.9848
     "original_haverland", #203.3	0.9822 & baseline
 ]
@@ -47,6 +48,8 @@ import os
 # ==============================================================================
 # GENERAL PARAMETERS
 # ==============================================================================
+
+
 
 _nb_classes_env = os.environ.get("DIGIT_NB_CLASSES")
 if _nb_classes_env is not None:
@@ -71,6 +74,10 @@ del _nb_classes_env
 # ==============================================================================
 # INPUT IMAGES 
 # ==============================================================================
+### for testing
+# NB_CLASSES   = 100
+# INPUT_SHAPE  = (32, 20, 3)   # H × W × C
+# USE_GRAYSCALE = False
 
 # Image Parameters
 INPUT_WIDTH = 20
@@ -159,7 +166,7 @@ QAT_QUANTIZE_ALL = True  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
 
 # Automatically disable quantization flags for PC-only validator models
-PC_ONLY_MODELS = {"high_accuracy_validator"}
+PC_ONLY_MODELS = {"high_accuracy_validator", "super_high_accuracy_validator"}
 if MODEL_ARCHITECTURE in PC_ONLY_MODELS:
     QUANTIZE_MODEL = False
     ESP_DL_QUANTIZE = False

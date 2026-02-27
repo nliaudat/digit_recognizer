@@ -38,6 +38,7 @@ from .digit_recognizer_v17 import create_digit_recognizer_v17
 from .esp_quantization_ready import create_esp_quantization_ready
 from .mnist_quantization import create_mnist_quantization
 from .high_accuracy_validator import create_high_accuracy_validator
+from .super_high_accuracy_validator import create_super_high_accuracy_validator
 
 __all__ = [
     'create_model',
@@ -74,4 +75,5 @@ __all__ = [
     'create_esp_quantization_ready',
     'create_mnist_quantization',
     'create_high_accuracy_validator',
+    'create_super_high_accuracy_validator',
 ]
