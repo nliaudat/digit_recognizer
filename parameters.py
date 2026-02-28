@@ -37,13 +37,13 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v16",   # IoT MobileNetV2 inverted residual — ESP-NN optimised
     "digit_recognizer_v17",   # IoT GhostNet-inspired — ultra-efficient ~50KB
     # "esp_quantization_ready",
-    "high_accuracy_validator", # strictly for PC validation (not for ESP32)
-    "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
+    # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
+    # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
     "mnist_quantization", #63.6kB	0.9848
     "original_haverland", #203.3	0.9822 & baseline
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v17" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "super_high_accuracy_validator" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
@@ -164,6 +164,12 @@ if MODEL_ARCHITECTURE in PC_ONLY_MODELS:
     ESP_DL_QUANTIZE = False
     USE_QAT = False
 
+# Dataset disk cache directory.
+# Set to an absolute path or a Docker-volume path.
+# Cache key = MD5(DATA_SOURCES config + NB_CLASSES + USE_GRAYSCALE).
+# To force a full rebuild: delete the .npz file or the whole directory.
+DATASET_CACHE_DIR = os.environ.get("DATASET_CACHE_DIR", ".dataset_cache")
+
 # Data pipeline configuration
 USE_TF_DATA_PIPELINE = False
 TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
@@ -263,7 +269,12 @@ FOCAL_GAMMA = 2.0      # Focus parameter for Focal Loss (0 = CrossEntropy)
 
 # Dynamic Class Weighting
 USE_DYNAMIC_WEIGHTS = True   # Update loss weights based on validation accuracy
-DYNAMIC_WEIGHTS_EPOCHS = 10  # Frequency of dynamic weight updates (in epochs)
+DYNAMIC_WEIGHTS_EPOCHS = 5  # Frequency of dynamic weight updates (in epochs)
+
+# Resume Training Support
+RESUME_MODEL_PATH = ""  # Path to best_model.keras to resume from (empty = start fresh)
+INITIAL_EPOCH = 0       # Epoch to resume from (auto-detected by retrain_all.py)
+
 
 # ==============================================================================
 # TRAINING HYPERPARAMETERS
@@ -271,7 +282,7 @@ DYNAMIC_WEIGHTS_EPOCHS = 10  # Frequency of dynamic weight updates (in epochs)
 
 # Basic Training Parameters
 BATCH_SIZE = 32 # 32
-EPOCHS = 200
+EPOCHS = 250
 LEARNING_RATE = 0.001
 TRAINING_PERCENTAGE = 1.0  # Use 100% of available data
 VALIDATION_SPLIT = 0.2     # 20% of training for validation

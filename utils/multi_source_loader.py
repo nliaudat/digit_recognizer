@@ -1,13 +1,67 @@
 # multi_source_loader.py
 import os
 import cv2
+import hashlib
+import json
+import time
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.model_selection import train_test_split
 import parameters as params
 from utils.logging import log_print
 
-# Global variable to cache loaded data
+# Global variable to cache loaded data (in-memory, single process)
 _loaded_data = None
+
+# ---------------------------------------------------------------------------
+# Disk-level NPZ cache helpers
+# ---------------------------------------------------------------------------
+
+def _cache_key(source_configs: list) -> str:
+    """Deterministic cache key from source paths + label files + nb_classes."""
+    fingerprint = json.dumps(
+        [{k: v for k, v in s.items()} for s in source_configs],
+        sort_keys=True,
+    ) + f"|nb_classes={params.NB_CLASSES}|grayscale={params.USE_GRAYSCALE}"
+    return hashlib.md5(fingerprint.encode()).hexdigest()[:12]
+
+
+def _cache_path(source_configs: list) -> str:
+    """Return the .npz file path for this configuration."""
+    cache_dir = getattr(params, "DATASET_CACHE_DIR", ".dataset_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    return os.path.join(cache_dir, f"dataset_{_cache_key(source_configs)}.npz")
+
+
+def _load_cache(source_configs: list):
+    """Return (images, labels) from disk cache if valid, else None."""
+    path = _cache_path(source_configs)
+    if not os.path.exists(path):
+        return None
+    try:
+        data = np.load(path)
+        images, labels = data["images"], data["labels"]
+        print(f"⚡ Loaded dataset from disk cache: {path} "
+              f"({len(images)} images, {os.path.getsize(path) / 1e6:.1f} MB)")
+        return images, labels
+    except Exception as e:
+        print(f"⚠️  Disk cache corrupted ({e}), rebuilding…")
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return None
+
+
+def _save_cache(source_configs: list, images: np.ndarray, labels: np.ndarray):
+    """Persist images + labels to disk as a compressed NPZ file."""
+    path = _cache_path(source_configs)
+    try:
+        np.savez_compressed(path, images=images, labels=labels)
+        print(f"💾 Dataset cached to disk: {path} "
+              f"({os.path.getsize(path) / 1e6:.1f} MB)")
+    except Exception as e:
+        print(f"⚠️  Could not save disk cache: {e}")
 
 class MultiSourceDataLoader:
     def __init__(self):
@@ -111,158 +165,142 @@ class MultiSourceDataLoader:
             print(f"Unknown builtin dataset: {dataset_name}")
             return np.array([]), np.array([])
     
+    def _decode_image(self, image_path: str, label: int, target_h: int, target_w: int,
+                      grayscale: bool):
+        """Decode and resize a single image. Returns (image, label) or None on error."""
+        flag = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
+        img = cv2.imread(image_path, flag)
+        if img is None or img.size == 0:
+            return None
+        img = cv2.resize(img, (target_w, target_h))
+        if grayscale and img.ndim == 2:
+            img = np.expand_dims(img, axis=-1)
+        elif not grayscale and img.ndim == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        return img, label
+
+    def _parallel_load(self, tasks: list, desc: str = "") -> tuple:
+        """Run _decode_image in parallel. tasks = list of (path, label)."""
+        h, w = params.INPUT_HEIGHT, params.INPUT_WIDTH
+        grayscale = params.USE_GRAYSCALE
+        n_workers = min(8, os.cpu_count() or 4)
+
+        images, labels = [], []
+        errors = 0
+        with ThreadPoolExecutor(max_workers=n_workers) as ex:
+            futures = {
+                ex.submit(self._decode_image, p, lbl, h, w, grayscale): (p, lbl)
+                for p, lbl in tasks
+            }
+            done = 0
+            total = len(futures)
+            report_every = max(1, total // 10)
+            for f in as_completed(futures):
+                result = f.result()
+                done += 1
+                if result is None:
+                    errors += 1
+                else:
+                    images.append(result[0])
+                    labels.append(result[1])
+                if done % report_every == 0:
+                    print(f"  {desc}: {done}/{total} loaded…", flush=True)
+        if errors:
+            print(f"  ⚠️  {errors} images could not be loaded and were skipped.")
+        return images, labels
+
     def load_folder_structure(self, dataset_path):
-        """Load dataset from folder structure"""
+        """Load dataset from folder structure using parallel decoding."""
         if not os.path.exists(dataset_path):
             print(f"  Dataset path not found: {dataset_path}")
             return np.array([]), np.array([])
-        
-        images = []
-        labels = []
-        
+
+        tasks = []
         for class_label in range(params.NB_CLASSES):
             class_dir = os.path.join(dataset_path, str(class_label))
-            
             if not os.path.exists(class_dir):
-                print(f"  Class directory not found: {class_dir}")
                 continue
-                
             for filename in os.listdir(class_dir):
-                if any(filename.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.bmp']):
-                    image_path = os.path.join(class_dir, filename)
-                    
-                    # Load image
-                    image = cv2.imread(image_path)
-                    if image is None:
-                        continue
-                    
-                    images.append(image)
-                    labels.append(class_label)
-        
-        return np.array(images), np.array(labels)
+                if any(filename.lower().endswith(ext) for ext in ('.jpg', '.jpeg', '.png', '.bmp')):
+                    tasks.append((os.path.join(class_dir, filename), class_label))
+
+        if not tasks:
+            return np.array([]), np.array([])
+
+        print(f"  📂 Loading {len(tasks)} images in parallel from {dataset_path}")
+        images, labels = self._parallel_load(tasks, desc=os.path.basename(dataset_path))
+        if not images:
+            return np.array([]), np.array([])
+        return np.array(images, dtype=np.uint8), np.array(labels, dtype=np.int32)
     
     def load_label_file_dataset(self, dataset_path, labels_file='labels.txt'):
-        """Load dataset with label file"""
-        try:
-            label_file_path = os.path.join(dataset_path, labels_file)
-            images_dir = os.path.join(dataset_path, 'images')
-            
-            if not os.path.exists(dataset_path):
-                print(f"❌ Dataset path does not exist: {dataset_path}")
+        """Load dataset from a label file using parallel image decoding."""
+        label_file_path = os.path.join(dataset_path, labels_file)
+        images_dir = os.path.join(dataset_path, 'images')
+
+        for path, desc in [
+            (dataset_path, "Dataset path"),
+            (label_file_path, "Label file"),
+            (images_dir, "Images directory"),
+        ]:
+            if not os.path.exists(path):
+                print(f"❌ {desc} does not exist: {path}")
                 return np.array([]), np.array([])
-            
-            if not os.path.exists(label_file_path):
-                print(f"❌ Label file not found: {label_file_path}")
-                return np.array([]), np.array([])
-                
-            if not os.path.exists(images_dir):
-                print(f"❌ Images directory not found: {images_dir}")
-                return np.array([]), np.array([])
-            
-            images = []
-            labels = []
-            skipped_files = 0
-            valid_files = 0
-            
-            print(f"📁 Loading dataset from: {dataset_path}")
-            print(f"📄 Using label file: {labels_file}")
-            
-            with open(label_file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            if not lines:
-                print("⚠️  Label file is empty")
-                return np.array([]), np.array([])
-            
-            print(f"📄 Found {len(lines)} entries in label file")
-            
-            for line_num, line in enumerate(lines, 1):
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                    
-                parts = line.split('\t')
-                if len(parts) < 2:
-                    parts = line.split()
-                    if len(parts) < 2:
-                        print(f"⚠️  Line {line_num}: Invalid format, got: '{line}'")
-                        skipped_files += 1
-                        continue
-                
-                filename = parts[0]
-                label_str = parts[1]
-                
-                try:
-                    label = int(label_str)
-                    if label < 0 or label >= params.NB_CLASSES:
-                        print(f"⚠️  Line {line_num}: Label {label} out of range [0, {params.NB_CLASSES-1}] for file '{filename}'")
-                        skipped_files += 1
-                        continue
-                except ValueError as e:
-                    print(f"⚠️  Line {line_num}: Invalid label '{label_str}' for file '{filename}'. Error: {e}")
-                    skipped_files += 1
-                    continue
-                
-                image_path = os.path.join(images_dir, filename)
-                
-                if not os.path.exists(image_path):
-                    print(f"⚠️  Line {line_num}: Image file not found: {image_path}")
-                    skipped_files += 1
-                    continue
-                
-                image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE if params.USE_GRAYSCALE else cv2.IMREAD_COLOR)
-                if image is None:
-                    print(f"⚠️  Line {line_num}: Failed to load image: {image_path}")
-                    skipped_files += 1
-                    continue
-                
-                if image.size == 0:
-                    print(f"⚠️  Line {line_num}: Empty image: {image_path}")
-                    skipped_files += 1
-                    continue
-                
-                try:
-                    image = cv2.resize(image, (params.INPUT_WIDTH, params.INPUT_HEIGHT))
-                    
-                    if params.USE_GRAYSCALE and len(image.shape) == 2:
-                        image = np.expand_dims(image, axis=-1)
-                    elif not params.USE_GRAYSCALE and len(image.shape) == 2:
-                        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-                    
-                    images.append(image)
-                    labels.append(label)
-                    valid_files += 1
-                    
-                    if valid_files % 1000 == 0:
-                        print(f"  Loaded {valid_files} images...")
-                        
-                except Exception as resize_error:
-                    print(f"⚠️  Line {line_num}: Failed to resize image {image_path}: {resize_error}")
-                    skipped_files += 1
-                    continue
-            
-            if valid_files == 0:
-                print("❌ No valid images were loaded")
-                return np.array([]), np.array([])
-            
-            try:
-                images_array = np.array(images, dtype=np.uint8)
-                labels_array = np.array(labels, dtype=np.int32)
-                
-                print(f"✅ Successfully loaded {valid_files} images, {skipped_files} files skipped")
-                print(f"📊 Dataset shape: Images {images_array.shape}, Labels {labels_array.shape}")
-                
-                return images_array, labels_array
-                
-            except Exception as array_error:
-                print(f"❌ Failed to create numpy arrays: {array_error}")
-                return np.array([]), np.array([])
-                
-        except Exception as e:
-            print(f"💥 Unexpected error loading dataset: {e}")
-            import traceback
-            traceback.print_exc()
+
+        print(f"📁 Loading dataset from: {dataset_path}")
+        print(f"📄 Using label file: {labels_file}")
+
+        with open(label_file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        if not lines:
+            print("⚠️  Label file is empty")
             return np.array([]), np.array([])
+
+        # Parse the label file first (fast, no I/O)
+        tasks = []
+        skipped = 0
+        for line_num, raw in enumerate(lines, 1):
+            line = raw.strip()
+            if not line or line.startswith('#'):
+                continue
+            parts = line.split('\t') if '\t' in line else line.split()
+            if len(parts) < 2:
+                skipped += 1
+                continue
+            filename, label_str = parts[0], parts[1]
+            try:
+                label = int(label_str)
+            except ValueError:
+                skipped += 1
+                continue
+            if label < 0 or label >= params.NB_CLASSES:
+                skipped += 1
+                continue
+            image_path = os.path.join(images_dir, filename)
+            if not os.path.exists(image_path):
+                skipped += 1
+                continue
+            tasks.append((image_path, label))
+
+        print(f"📄 {len(tasks)} valid entries found ({skipped} skipped in label file)")
+        if not tasks:
+            return np.array([]), np.array([])
+
+        # Parallel decode
+        t0 = time.time()
+        images, labels = self._parallel_load(tasks, desc=os.path.basename(dataset_path))
+        elapsed = time.time() - t0
+
+        if not images:
+            print("❌ No valid images were loaded")
+            return np.array([]), np.array([])
+
+        images_array = np.array(images, dtype=np.uint8)
+        labels_array = np.array(labels, dtype=np.int32)
+        print(f"✅ Loaded {len(images_array)} images in {elapsed:.1f}s "
+              f"(shape: {images_array.shape})")
+        return images_array, labels_array
     
     def load_mnist_fallback(self):
         """Fallback to MNIST if no sources work"""
@@ -309,19 +347,36 @@ def shuffle_dataset(images, labels, seed=params.SHUFFLE_SEED):
     return images[indices], labels[indices]
 
 def load_combined_dataset():
-    """Main function to load all data sources"""
+    """Main function to load all data sources.
+
+    Load order:
+      1. In-memory cache  (same process, e.g. train_all.py loops)
+      2. Disk NPZ cache   (cross-run, survives Docker restarts)
+      3. Full parallel decode from source files
+    """
     global _loaded_data
     if _loaded_data is not None:
         print("📊 Using cached dataset...")
         return _loaded_data
-    
+
+    # Try disk cache
+    cached = _load_cache(params.DATA_SOURCES)
+    if cached is not None:
+        images, labels = cached
+        images, labels = shuffle_dataset(images, labels)
+        _loaded_data = (images, labels)
+        return images, labels
+
+    # Full load
+    t0 = time.time()
     loader = MultiSourceDataLoader()
     images, labels = loader.load_all_sources()
     loader.print_detailed_stats()
-    
-    # Shuffle the combined dataset
+    print(f"⏱  Total source-load time: {time.time() - t0:.1f}s")
+
     images, labels = shuffle_dataset(images, labels)
-    
+    _save_cache(params.DATA_SOURCES, images, labels)
+    _loaded_data = (images, labels)
     return images, labels
 
 def get_data_splits():

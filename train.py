@@ -232,7 +232,9 @@ def parse_arguments():
     parser.add_argument(
         "--train",
         nargs="+",
-        choices=params.AVAILABLE_MODELS,
+        # No choices= restriction here: when --resume is given, any architecture
+        # name is valid (even one commented out of AVAILABLE_MODELS), because the
+        # model is loaded from the checkpoint, not rebuilt.
         help="Train only the explicitly listed architectures.\n"
              "Example: --train digit_recognizer_v4 digit_recognizer_v17"
     )
@@ -285,6 +287,12 @@ def parse_arguments():
     parser.add_argument("--optimizer", type=str, default=None, help="Override the optimizer (e.g. adamw).")
     parser.add_argument("--lr-scheduler", type=str, default=None, help="Override the LR scheduler (e.g. cosine).")
     parser.add_argument("--no-dynamic-weights", action="store_true", help="Disable dynamic per-class weighting.")
+
+    # --- Resume Training ---
+    parser.add_argument("--resume", type=str, default="",
+        help="Path to a best_model.keras file to resume from.")
+    parser.add_argument("--initial-epoch", type=int, default=0,
+        help="Epoch to resume from (auto-filled by retrain_all.py from training_log.csv).")
 
     # --- Post-Training Options ---
     parser.add_argument(
@@ -539,6 +547,10 @@ def main():
         params.LR_SCHEDULER_TYPE = args.lr_scheduler
     if args.no_dynamic_weights:
         params.USE_DYNAMIC_WEIGHTS = False
+    if args.resume:
+        params.RESUME_MODEL_PATH = args.resume
+    if args.initial_epoch:
+        params.INITIAL_EPOCH = args.initial_epoch
 
     # -----------------------------------------------------------------
     #  Hyper parameter tuning mode
@@ -596,6 +608,16 @@ def main():
     #  Train a specific list of architectures
     # -----------------------------------------------------------------
     if args.train:
+        # When resuming, any architecture is valid (loaded from checkpoint).
+        # For fresh training, enforce that it's in AVAILABLE_MODELS.
+        if not args.resume:
+            invalid = [m for m in args.train if m not in params.AVAILABLE_MODELS]
+            if invalid:
+                import sys as _sys
+                _sys.exit(
+                    f"error: argument --train: invalid choice(s): {invalid}\n"
+                    f"Choose from: {params.AVAILABLE_MODELS}"
+                )
         train_specific_models(args.train, debug=args.debug, 
                             no_cleanup=args.no_cleanup, 
                             full_analysis=not args.no_analysis)
@@ -672,14 +694,23 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         params.OUTPUT_DIR, 
         f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls_{color_mode}"
     )
-    if os.path.exists(training_dir):
-        import shutil
-        try:
-            shutil.rmtree(training_dir)
-        except PermissionError as e:
-            print(f"⚠️  Warning: Could not fully delete existing directory (file in use): {e}")
-            print("   Training will proceed with existing files in the directory.")
-    os.makedirs(training_dir, exist_ok=True)
+    # ------------------------------------------------------------------
+    #  Resume path: skip directory wipe, skip build/compile
+    # ------------------------------------------------------------------
+    if params.RESUME_MODEL_PATH:
+        if os.path.exists(training_dir):
+            print(f"♻️  Resuming — keeping existing output directory: {training_dir}")
+        else:
+            os.makedirs(training_dir, exist_ok=True)
+    else:
+        if os.path.exists(training_dir):
+            import shutil
+            try:
+                shutil.rmtree(training_dir)
+            except PermissionError as e:
+                print(f"⚠️  Warning: Could not fully delete existing directory (file in use): {e}")
+                print("   Training will proceed with existing files in the directory.")
+        os.makedirs(training_dir, exist_ok=True)
     print(f"📁 Output directory: {training_dir}")
     
     # Load and preprocess data
@@ -730,63 +761,90 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     except Exception as e:
         print(f"⚠️ Could not compute initial class weights: {e}")
     
-    # Create model with QAT if enabled
+    # ------------------------------------------------------------------
+    #  Build or load model
+    # ------------------------------------------------------------------
     use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
-
-    if use_qat:
-        print("Creating model with Quantization Aware Training...")
-        model = create_qat_model()
+    if params.RESUME_MODEL_PATH:
+        print(f"\n♻️  Loading model from: {params.RESUME_MODEL_PATH}")
+        from utils.dynamic_weighting import FocalLoss
+        resume_custom_objects = {'FocalLoss': FocalLoss}
+        # WarmupCosineDecay is used by super_high_accuracy_validator and similar models
+        try:
+            from train_super_validator_legacy import WarmupCosineDecay
+            resume_custom_objects['WarmupCosineDecay'] = WarmupCosineDecay
+        except ImportError:
+            pass
+        model = tf.keras.models.load_model(
+            params.RESUME_MODEL_PATH, custom_objects=resume_custom_objects)
+        # Restore nb_classes and cw if lost during serialization
+        if params.USE_FOCAL_LOSS and hasattr(model, 'loss') and hasattr(model.loss, 'cw'):
+            model.loss.nb_classes = getattr(model.loss, 'nb_classes', params.NB_CLASSES)
+            if model.loss.cw is None and class_weights is not None:
+                print("  Restoring FocalLoss class weights (lost during serialization)...")
+                model.loss.cw = tf.Variable(
+                    [class_weights[i] for i in range(params.NB_CLASSES)],
+                    trainable=False, dtype=tf.float32)
+        # If labels were converted to one-hot (because params.USE_FOCAL_LOSS=True)
+        # but the loaded model actually uses a sparse loss, convert them back.
+        model_uses_focal = isinstance(getattr(model, 'loss', None), FocalLoss)
+        if not model_uses_focal and len(y_train_final.shape) > 1:
+            y_train_final = np.argmax(y_train_final, axis=1)
+            y_val_final   = np.argmax(y_val_final,   axis=1)
+            y_test_final  = np.argmax(y_test_final,  axis=1)
+            print("  ℹ️  Loaded model uses sparse loss — labels converted back to sparse integers")
+        print(f"  ✅ Resumed from epoch {params.INITIAL_EPOCH} | Parameters: {model.count_params():,}")
     else:
-        model = create_model()
+        # Create model with QAT if enabled
+        use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
 
-    # Compile – loss depends on the architecture
-    if params.MODEL_ARCHITECTURE == "original_haverland":
-        loss_type = "categorical"
-    else:
-        loss_type = "sparse"
-
-    model = compile_model(model, loss_type=loss_type, class_weights=class_weights) 
-    
-    # Build model with explicit input shape (required for TF2.x eager mode)
-    print("🔧 Building model with explicit input shape...")
-    model.build(input_shape=(None,) + params.INPUT_SHAPE)
-    
-    # ✅ MOVE QAT VALIDATION HERE - AFTER MODEL IS CREATED
-    print("🎯 VALIDATING QAT DATA CONSISTENCY...")
-    if params.USE_QAT and params.QUANTIZE_MODEL:
-        qat_consistent, qat_msg = validate_qat_data_consistency()
-        if not qat_consistent:
-            print(f"🚨 CRITICAL: {qat_msg}")
-            print("   QAT training may produce incorrect results!")
+        if use_qat:
+            print("Creating model with Quantization Aware Training...")
+            model = create_qat_model()
         else:
-            print(f"✅ {qat_msg}")
-    
-    # ✅ MOVE COMPREHENSIVE QAT VALIDATION HERE
-    if params.USE_QAT and params.QUANTIZE_MODEL:
-        print("🎯 RUNNING COMPREHENSIVE QAT VALIDATION...")
-        qat_valid, qat_summary = validate_complete_qat_setup(model, debug=debug)
-        
-        if not qat_valid:
-            print("🚨 QAT validation failed - consider reviewing quantization settings")
-        else:
-            print("✅ QAT validation passed - ready for quantization-aware training")
-            
-    # if params.USE_QAT and params.QUANTIZE_MODEL:
-        # gradient_ok = check_qat_gradient_flow(model, x_train, y_train_final)
-        # output_ok = diagnose_qat_output_behavior(model, x_train, y_train_final)
-        # if not gradient_ok:
-            # print("🔄 QAT gradient issue - falling back to standard model")
-            # params.USE_QAT = False
-            # model = create_model()
-            # model = compile_model(model)
-            
-    if params.USE_QAT and params.QUANTIZE_MODEL and params.MODEL_ARCHITECTURE != "original_haverland":
-        gradient_ok = check_qat_gradient_flow(model, x_train, y_train_final)
-        output_ok = diagnose_qat_output_behavior(model, x_train, y_train_final)
-        if not gradient_ok:
-            print("🔄 QAT gradient issue - falling back to standard model")
-            params.USE_QAT = False
             model = create_model()
+
+    if not params.RESUME_MODEL_PATH:
+        # Compile – loss depends on the architecture
+        if params.MODEL_ARCHITECTURE == "original_haverland":
+            loss_type = "categorical"
+        else:
+            loss_type = "sparse"
+
+        model = compile_model(model, loss_type=loss_type, class_weights=class_weights)
+
+        # Build model with explicit input shape (required for TF2.x eager mode)
+        print("🔧 Building model with explicit input shape...")
+        model.build(input_shape=(None,) + params.INPUT_SHAPE)
+    
+    if not params.RESUME_MODEL_PATH:
+        # ✅ QAT VALIDATION - AFTER MODEL IS CREATED
+        print("🎯 VALIDATING QAT DATA CONSISTENCY...")
+        if params.USE_QAT and params.QUANTIZE_MODEL:
+            qat_consistent, qat_msg = validate_qat_data_consistency()
+            if not qat_consistent:
+                print(f"🚨 CRITICAL: {qat_msg}")
+                print("   QAT training may produce incorrect results!")
+            else:
+                print(f"✅ {qat_msg}")
+
+        if params.USE_QAT and params.QUANTIZE_MODEL:
+            print("🎯 RUNNING COMPREHENSIVE QAT VALIDATION...")
+            qat_valid, qat_summary = validate_complete_qat_setup(model, debug=debug)
+            if not qat_valid:
+                print("🚨 QAT validation failed - consider reviewing quantization settings")
+            else:
+                print("✅ QAT validation passed - ready for quantization-aware training")
+
+        if params.USE_QAT and params.QUANTIZE_MODEL and params.MODEL_ARCHITECTURE != "original_haverland":
+            gradient_ok = check_qat_gradient_flow(model, x_train, y_train_final)
+            output_ok = diagnose_qat_output_behavior(model, x_train, y_train_final)
+            if not gradient_ok:
+                print("🔄 QAT gradient issue - falling back to standard model")
+                params.USE_QAT = False
+                model = create_model()
+    # end if not params.RESUME_MODEL_PATH
+
 
     # Force recompilation with correct parameters if NOT using experimental Focal Loss
     # If using Focal Loss, we want to keep the configuration from compile_model
@@ -876,7 +934,8 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         monitor, 
         debug, 
         validation_data=(x_val, y_val_final),
-        x_train_raw=x_train_raw
+        x_train_raw=x_train_raw,
+        append_csv=bool(params.RESUME_MODEL_PATH),
     )
     
     # Start training
@@ -906,6 +965,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         history = model.fit(
             train_dataset,
             epochs=params.EPOCHS,
+            initial_epoch=params.INITIAL_EPOCH,
             validation_data=val_dataset,
             callbacks=callbacks,
             verbose=0
@@ -915,6 +975,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             x_train, y_train_final,
             batch_size=params.BATCH_SIZE,
             epochs=params.EPOCHS,
+            initial_epoch=params.INITIAL_EPOCH,
             validation_data=(x_val, y_val_final),
             callbacks=callbacks,
             verbose=0,

@@ -11,7 +11,7 @@ from utils.train_progressbar import TQDMProgressBar
 
 import parameters as params
 
-def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False, validation_data=None, x_train_raw=None):
+def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False, validation_data=None, x_train_raw=None, append_csv=False):
     """Create comprehensive training callbacks with robust error handling"""
     
     callbacks = []
@@ -97,7 +97,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     csv_logger = tf.keras.callbacks.CSVLogger(
         filename=csv_path,
         separator=',',
-        append=False
+        append=append_csv
     )
     callbacks.append(csv_logger)
     
