@@ -495,12 +495,22 @@ def main():
 
     if args.resume:
         print(f"\n♻️ Resuming training from {args.resume}...")
+        
         custom_objects = {
             'WarmupCosineDecay': WarmupCosineDecay,
             'FocalLoss': FocalLoss,
         }
         model = tf.keras.models.load_model(args.resume, custom_objects=custom_objects)
         loss_fn = model.loss
+        
+        # Explicitly restore non-serialized state manually after loading
+        loss_fn.nb_classes = getattr(loss_fn, 'nb_classes', NB_CLASSES)
+        if getattr(loss_fn, 'cw', None) is None:
+            print("  Restoring Dynamic Focal Loss class weights (lost during serialization)...")
+            loss_fn.cw = tf.Variable(
+                [class_weights[i] for i in range(NB_CLASSES)],
+                trainable=False, dtype=tf.float32)
+        
         print(f"  Loaded model from {args.resume}")
         print(f"  Parameters: {model.count_params():,}")
         model.summary(line_length=90)

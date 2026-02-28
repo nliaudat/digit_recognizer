@@ -21,6 +21,14 @@ class FocalLoss(tf.keras.losses.Loss):
         else:
             self.cw = None
 
+    @classmethod
+    def from_config(cls, config):
+        # Gracefully handle missing instances when reloading
+        if 'nb_classes' not in config:
+            import os
+            config['nb_classes'] = int(os.environ.get('DIGIT_NB_CLASSES', 100))
+        return super().from_config(config)
+
     def update_weights(self, new_weights):
         """Update the dynamic class weights based on recent validation accuracy."""
         if self.cw is not None:
@@ -31,6 +39,7 @@ class FocalLoss(tf.keras.losses.Loss):
         y_pred = tf.cast(y_pred, tf.float32)
         
         # Handle labels of different shapes and convert to one-hot (batch_size, nb_classes)
+        # We compare against self.nb_classes so we don't accidentally expand a tensor that is already properly one-hot
         if len(y_true.shape) <= 1 or (len(y_true.shape) > 1 and y_true.shape[-1] != self.nb_classes):
             # If shape is (batch_size, 1), squeeze it to (batch_size,)
             if len(y_true.shape) == 2 and y_true.shape[-1] == 1:
@@ -38,11 +47,14 @@ class FocalLoss(tf.keras.losses.Loss):
             y_true = tf.one_hot(tf.cast(y_true, tf.int32), self.nb_classes)
              
         y_true = tf.cast(y_true, tf.float32)
+        
+        # Also ensure we use self.nb_classes
+        nb_classes_float = tf.cast(self.nb_classes, tf.float32)
 
         # Label smoothing
         if self.label_smoothing > 0:
             y_true = y_true * (1.0 - self.label_smoothing) + \
-                     self.label_smoothing / self.nb_classes
+                     self.label_smoothing / nb_classes_float
 
         eps = 1e-7
         y_pred = tf.clip_by_value(y_pred, eps, 1.0 - eps)
