@@ -700,6 +700,14 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         y_train_final = y_train_raw.copy()
         y_val_final = y_val_raw.copy()
         y_test_final = y_test_raw.copy()
+    
+    # FocalLoss + CategoricalAccuracy both require one-hot labels.
+    # Convert here so all downstream code (fit, evaluate, callbacks) is consistent.
+    if params.USE_FOCAL_LOSS and params.MODEL_ARCHITECTURE != "original_haverland":
+        y_train_final = tf.keras.utils.to_categorical(y_train_final, params.NB_CLASSES)
+        y_val_final   = tf.keras.utils.to_categorical(y_val_final,   params.NB_CLASSES)
+        y_test_final  = tf.keras.utils.to_categorical(y_test_final,  params.NB_CLASSES)
+        print(f"🎯 Focal Loss: converted labels to one-hot (shape: {y_train_final.shape})")
 
     # Compute initial class weights (useful for Focal Loss or CrossEntropy imbalance)
     class_weights = None
