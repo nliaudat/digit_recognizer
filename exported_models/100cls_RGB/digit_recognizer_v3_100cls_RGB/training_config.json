@@ -1,6 +1,6 @@
 {
-  "timestamp": "2025-11-09 13:02:03",
-  "training_duration": "0:32:48.230089",
+  "timestamp": "2026-02-28 05:29:05",
+  "training_duration": "1:45:36.274321",
   "model_architecture": "digit_recognizer_v3",
   "input_shape": [
     32,
@@ -16,11 +16,11 @@
   "esp_dl_enabled": false,
   "data_augmentation": true,
   "grayscale": false,
-  "best_validation_accuracy": 0.7606223821640015,
-  "test_accuracy_keras": 0.7628964781761169,
-  "test_accuracy_tflite": 0.75344105326152,
-  "model_size_keras_kb": 305.7958984375,
+  "best_validation_accuracy": 0.7579293847084045,
+  "test_accuracy_keras": 0.010173548944294453,
+  "test_accuracy_tflite": 0.7448234590065829,
+  "model_size_keras_kb": 306.005859375,
   "model_size_tflite_kb": 45.09375,
   "total_parameters": 31639,
-  "size_reduction_percent": 85.25364459418462
+  "size_reduction_percent": 85.26376256582097
 }

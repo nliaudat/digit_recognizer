@@ -8,9 +8,9 @@ QUANTIZATION SETTINGS:
   Calibration Samples: 22000
 
 ACCURACY ANALYSIS:
-  Keras Model Accuracy: 0.9747
-  TFLite Model Accuracy: 0.9744
-  Accuracy Drop: 0.0004
+  Keras Model Accuracy: 0.0570
+  TFLite Model Accuracy: 0.9780
+  Accuracy Drop: -0.9210
 
 SIZE ANALYSIS:
   Keras Model Size: 0.0 KB
