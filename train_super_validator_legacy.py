@@ -97,6 +97,10 @@ def parse_args():
     p.add_argument("--output-dir", type=str,
                    default="exported_models/100cls_RGB/super_high_accuracy_validator_100cls_RGB",
                    help="Directory path where the .keras file and CSV logs will be saved.")
+    p.add_argument("--resume", type=str, default="",
+                   help="Path to a .keras file to resume training from.")
+    p.add_argument("--initial-epoch", type=int, default=0,
+                   help="Epoch at which to resume training (useful for correct learning rate schedules).")
     
     return p.parse_args()
 
@@ -484,51 +488,63 @@ def main():
     val_ds = val_ds.prefetch(AUTOTUNE)
 
     # ──── Build Model ─────────────────────────────────────────────────────
-    print("\n🏗️  Building super_high_accuracy_validator...")
+    print("\n🏗️  Building/Loading super_high_accuracy_validator...")
     # Set env vars so model file auto-detects right values
     os.environ['DIGIT_NB_CLASSES']    = str(NB_CLASSES)
     os.environ['DIGIT_INPUT_CHANNELS'] = str(INPUT_SHAPE[2])
 
-    from models.super_high_accuracy_validator import create_super_high_accuracy_validator
-    model = create_super_high_accuracy_validator(
-        nb_classes=NB_CLASSES, input_shape=INPUT_SHAPE)
-    print(f"  Parameters: {model.count_params():,}")
-    model.summary(line_length=90)
+    if args.resume:
+        print(f"\n♻️ Resuming training from {args.resume}...")
+        custom_objects = {
+            'WarmupCosineDecay': WarmupCosineDecay,
+            'FocalLoss': FocalLoss,
+        }
+        model = tf.keras.models.load_model(args.resume, custom_objects=custom_objects)
+        loss_fn = model.loss
+        print(f"  Loaded model from {args.resume}")
+        print(f"  Parameters: {model.count_params():,}")
+        model.summary(line_length=90)
+    else:
+        from models.super_high_accuracy_validator import create_super_high_accuracy_validator
+        model = create_super_high_accuracy_validator(
+            nb_classes=NB_CLASSES, input_shape=INPUT_SHAPE)
+        print(f"  Parameters: {model.count_params():,}")
+        model.summary(line_length=90)
 
-    # ──── LR Schedule & Optimizer ─────────────────────────────────────────
-    steps_per_epoch = math.ceil(len(train_idx) / args.batch)
-    total_steps     = steps_per_epoch * args.epochs
-    warmup_steps    = steps_per_epoch * args.warmup_epochs
+        # ──── LR Schedule & Optimizer ─────────────────────────────────────────
+        steps_per_epoch = math.ceil(len(train_idx) / args.batch)
+        total_steps     = steps_per_epoch * args.epochs
+        warmup_steps    = steps_per_epoch * args.warmup_epochs
 
-    lr_schedule = WarmupCosineDecay(
-        initial_lr=args.lr,
-        warmup_steps=warmup_steps,
-        total_steps=total_steps,
-        min_lr=1e-7,
-    )
+        lr_schedule = WarmupCosineDecay(
+            initial_lr=args.lr,
+            warmup_steps=warmup_steps,
+            total_steps=total_steps,
+            min_lr=1e-7,
+        )
 
-    optimizer = tf.keras.optimizers.AdamW(
-        learning_rate=lr_schedule,
-        weight_decay=args.weight_decay,
-    )
+        optimizer = tf.keras.optimizers.AdamW(
+            learning_rate=lr_schedule,
+            weight_decay=args.weight_decay,
+        )
 
-    # ──── Loss ───────────────────────────────────────────────────────────
-    loss_fn = FocalLoss(
-        gamma=args.focal_gamma,
-        label_smoothing=args.label_smoothing,
-        class_weights=class_weights,
-        nb_classes=NB_CLASSES,
-        name='focal_loss',
-    )
+        # ──── Loss ───────────────────────────────────────────────────────────
+        loss_fn = FocalLoss(
+            gamma=args.focal_gamma,
+            label_smoothing=args.label_smoothing,
+            class_weights=class_weights,
+            nb_classes=NB_CLASSES,
+            name='focal_loss',
+        )
 
-    model.compile(
-        optimizer=optimizer,
-        loss=loss_fn,
-        metrics=[
-            tf.keras.metrics.CategoricalAccuracy(name='accuracy'),
-            tf.keras.metrics.TopKCategoricalAccuracy(k=3, name='top3_acc'),
-        ],
-    )
+        model.compile(
+            optimizer=optimizer,
+            loss=loss_fn,
+            metrics=[
+                tf.keras.metrics.CategoricalAccuracy(name='accuracy'),
+                tf.keras.metrics.TopKCategoricalAccuracy(k=3, name='top3_acc'),
+            ],
+        )
 
     # ──── Callbacks ───────────────────────────────────────────────────────
     model_path = str(out_dir / "super_high_accuracy_validator.keras")
@@ -561,6 +577,7 @@ def main():
         train_ds,
         validation_data=val_ds,
         epochs=args.epochs,
+        initial_epoch=args.initial_epoch,
         callbacks=callbacks,
         verbose=1,
     )
