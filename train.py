@@ -871,24 +871,28 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             print(f"❌ QAT data flow validation failed: {qat_msg}")
             return None, None, None
             
-    # Test if the model behaves like a quantized model
-    print("\n🧪 QUICK QAT VERIFICATION TEST:")
-    test_input = tf.convert_to_tensor(np.random.randint(0, 255, (1,) + params.INPUT_SHAPE, dtype=np.uint8))
-    output = model(test_input)
-    print(f"   Input dtype: {test_input.dtype}")
-    print(f"   Output range: [{output.numpy().min():.3f}, {output.numpy().max():.3f}]")
-    print(f"   Output sum: {np.sum(output.numpy(), axis=1)}")
+    # Test if the model behaves like a quantized model (only relevant when QAT is active)
+    if params.USE_QAT and params.QUANTIZE_MODEL:
+        print("\n🧪 QUICK QAT VERIFICATION TEST:")
+        test_input = tf.convert_to_tensor(np.random.randint(0, 255, (1,) + params.INPUT_SHAPE, dtype=np.uint8))
+        output = model(test_input)
+        print(f"   Input dtype: {test_input.dtype}")
+        print(f"   Output range: [{output.numpy().min():.3f}, {output.numpy().max():.3f}]")
+        print(f"   Output sum: {np.sum(output.numpy(), axis=1)}")
     
     # Continue with the rest of training...
     # Setup training components
     tflite_manager = TFLiteModelManager(training_dir, debug)
 
-    # This will automatically test strategies and use the best one
-    tflite_blob, size = tflite_manager.save_as_tflite_enhanced(
-        model, 
-        params.get_tflite_filename(),
-        quantize=True
-    )
+    # Pre-training TFLite snapshot — only meaningful when quantization is enabled.
+    # Skipped for PC-only models (e.g. super_high_accuracy_validator) where
+    # QUANTIZE_MODEL is False, to avoid a costly dataset reload with no benefit.
+    if params.QUANTIZE_MODEL:
+        tflite_blob, size = tflite_manager.save_as_tflite_enhanced(
+            model,
+            params.get_tflite_filename(),
+            quantize=True
+        )
     
     monitor = TrainingMonitor(training_dir, debug)
     monitor.set_model(model)
