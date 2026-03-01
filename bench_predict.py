@@ -234,7 +234,7 @@ def is_quantized_model(model_path):
     except:
         return False
 
-def get_all_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None, debug=False):
+def get_all_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None, debug=False, model_list=None):
     """Get all available models with parameters count - with error handling
     
     Args:
@@ -243,6 +243,7 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT
         input_dir: Base directory to search for models
         exclude_model: Model name to exclude from testing
         debug: Enable debug output
+        model_list: Optional list of specific models to include (names or directories)
     """
     # Look for training directories - exclude test_results and other non-training dirs
     all_dirs = [d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))]
@@ -284,6 +285,18 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT
                 if debug:
                     print(f"Skipping excluded model: {training_dir}/{model_file}")
                 continue
+                
+            # Filter by model_list if provided
+            if model_list:
+                # Check if either the model filename or the directory matches any item in model_list
+                match_found = False
+                for item in model_list:
+                    if item == model_file or item == training_dir or item in f"{training_dir}/{model_file}":
+                        match_found = True
+                        break
+                if not match_found:
+                    continue
+
             model_path = os.path.join(training_path, model_file)
             
             # Skip if file doesn't exist or is empty
@@ -368,26 +381,43 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     
     return test_data
 
-def configure_parameters_for_model(model_name_or_dir):
-    """Automatically adjust globals in parameters.py for the specific model type"""
-    name_upper = model_name_or_dir.upper()
+def configure_parameters_for_model(model_name_or_dir, override_classes=None, override_color=None):
+    """
+    Adjust globals in parameters.py for the specific model.
+    Manual overrides from CLI take absolute precedence.
+    """
+    name_upper = str(model_name_or_dir).upper()
     changed = False
     
-    if '100CLS' in name_upper and params.NB_CLASSES != 100:
+    # 1. Handle NB_CLASSES
+    if override_classes is not None:
+        if params.NB_CLASSES != override_classes:
+            params.NB_CLASSES = override_classes
+            changed = True
+    elif '100CLS' in name_upper and params.NB_CLASSES != 100:
         params.NB_CLASSES = 100
         changed = True
     elif '10CLS' in name_upper and params.NB_CLASSES != 10:
         params.NB_CLASSES = 10
         changed = True
         
-    if 'GRAY' in name_upper and not params.USE_GRAYSCALE:
-        params.USE_GRAYSCALE = True
-        changed = True
-    elif 'RGB' in name_upper and params.USE_GRAYSCALE:
-        params.USE_GRAYSCALE = False
+    # 2. Handle INPUT_CHANNELS / COLOR
+    new_channels = params.INPUT_CHANNELS
+    if override_color is not None:
+        new_channels = 1 if override_color == 'gray' else 3
+    elif 'GRAY' in name_upper:
+        new_channels = 1
+    elif 'RGB' in name_upper:
+        new_channels = 3
+        
+    if params.INPUT_CHANNELS != new_channels:
+        params.INPUT_CHANNELS = new_channels
         changed = True
         
     if changed:
+        # Refresh derived parameters (INPUT_SHAPE, USE_GRAYSCALE, etc.)
+        params.update_derived_parameters()
+        
         # Update labels file in data sources based on new NB_CLASSES
         for source in params.DATA_SOURCES:
             if 'labels' in source or source.get('type') == 'label_file':
@@ -783,7 +813,8 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
 
 def test_all_models(num_test_images=0, quantized_only=False, debug=False, 
                     use_all_datasets=True, list_failed=False, save_failed=False,
-                    subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None):
+                    subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None,
+                    override_classes=None, override_color=None, model_list=None):
     """Test all valid models with optional subfolder filtering and model exclusion
     
     Args:
@@ -796,8 +827,13 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
         subfolder: Only test models from this specific subfolder
         input_dir: Directory containing models to test
         exclude_model: Model name to exclude from testing
+        override_classes: Manual override for NB_CLASSES
+        override_color: Manual override for color mode ('rgb' or 'gray')
+        model_list: Optional list of specific model names or directories to test
     """
-    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, input_dir=input_dir, exclude_model=exclude_model, debug=debug)
+    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, 
+                            input_dir=input_dir, exclude_model=exclude_model, 
+                            debug=debug, model_list=model_list)
     
     if not models:
         if subfolder:
@@ -808,7 +844,7 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
     
     # Auto-configure dataset params based on the first model before loading test_data
     if models:
-        configure_parameters_for_model(models[0]['directory'])
+        configure_parameters_for_model(models[0]['directory'], override_classes=override_classes, override_color=override_color)
     
     # Determine test configuration
     subfolder_info = f" in subfolder '{subfolder}'" if subfolder else ""
@@ -1309,9 +1345,9 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
     return report_path
 
 
-def list_available_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None):
+def list_available_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None, model_list=None):
     """List all available models found in the training directories"""
-    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, input_dir=input_dir, exclude_model=exclude_model)
+    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, input_dir=input_dir, exclude_model=exclude_model, model_list=model_list)
     
     if not models:
         if subfolder:
@@ -1416,12 +1452,13 @@ def generate_failed_predictions_csv(failed_predictions, output_dir):
     return csv_path
 
 def test_single_model(model_path, num_test_images=0, debug=False, use_all_datasets=True, 
-                     list_failed=False, save_failed=False, output_dir=params.OUTPUT_DIR):
+                     list_failed=False, save_failed=False, output_dir=params.OUTPUT_DIR,
+                     override_classes=None, override_color=None):
     """Test a single model and optionally collect failed predictions"""
     predictor = TFLiteDigitPredictor(model_path)
     
     # Auto-configure dataset params
-    configure_parameters_for_model(os.path.basename(model_path))
+    configure_parameters_for_model(os.path.basename(model_path), override_classes=override_classes, override_color=override_color)
     
     # Load test data with proper labels
     test_data = load_test_dataset_with_labels(num_test_images, use_all_datasets)
@@ -1558,33 +1595,58 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
 
 def main():
     """Main function with command line arguments"""
-    parser = argparse.ArgumentParser(description='Digit Recognition Benchmarking')
-    parser.add_argument('--model', type=str, help='Model name to use for prediction')
-    parser.add_argument('--exclude_model', type=str, default=None,
-                        help='Model string name to automatically exclude from evaluation')
+    parser = argparse.ArgumentParser(description='Digit Recognition Benchmarking System')
+    
+    # Mode selection
+    parser.add_argument('--test_all', action='store_true', 
+                        help='Perform a full benchmark of all available models in the input directory.')
+    parser.add_argument('--model', type=str, 
+                        help='Test a single specific model by its filename (e.g., digit_recognizer_v15.tflite).')
+    parser.add_argument('--model_list', type=str, nargs='+', 
+                        help='Compare a specific subset of models. Provide one or more model names OR directory names.')
+    parser.add_argument('--list', action='store_true', 
+                        help='List all compatible models found and exit without benchmarking.')
+
+    # Filtering and Path Configuration
     parser.add_argument('--input_dir', type=str, default=params.OUTPUT_DIR,
-                        help=f'Directory containing trained models (default: {params.OUTPUT_DIR})')
-    parser.add_argument('--quantized', action='store_true', default=True, help='Use only quantized models (default: True)')
-    parser.add_argument('--no-quantized', action='store_false', dest='quantized', help='Include non-quantized models')
-    parser.add_argument('--test_all', action='store_true', help='Test all available models and print accuracy summary')
-    parser.add_argument('--no-test_all', action='store_false', dest='test_all', help='Do not run automatic benchmark')
-    parser.add_argument('--test_images', type=int, default=0, help='Number of test images per model. 0 means use all images (default: 0)')
-    parser.add_argument('--all_datasets', action='store_true', default=True, help='Use all available images from dataset (default: True)')
-    parser.add_argument('--no-all_datasets', action='store_false', dest='all_datasets', help='Limit to --test_images number of samples')
-    parser.add_argument('--debug', action='store_true', help='Debug model output interpretation')
-    parser.add_argument('--list', action='store_true', help='List all available models')
+                        help=f'Base directory to search for models (default: {params.OUTPUT_DIR})')
+    parser.add_argument('--subfolder', type=str, 
+                        help='Restrict search to a specific subfolder within the input directory.')
+    parser.add_argument('--exclude_model', type=str, default=None,
+                        help='Exclude models containing this string from the benchmark.')
+    parser.add_argument('--quantized', action='store_true', default=True, 
+                        help='Only include quantized models (True by default).')
+    parser.add_argument('--no-quantized', action='store_false', dest='quantized', 
+                        help='Include all models, including floating-point versions.')
     
-    # New arguments for failed predictions
-    parser.add_argument('--list-failed', action='store_true', help='Generate CSV with details of failed predictions')
-    parser.add_argument('--save-failed', action='store_true', help='Save failed prediction images to directory')
+    # Dataset and Testing Configuration
+    parser.add_argument('--test_images', type=int, default=0, 
+                        help='Number of images to test per model. 0 means use the entire dataset (default: 0).')
+    parser.add_argument('--all_datasets', action='store_true', default=True, 
+                        help='Use images from all available data sources (True by default).')
+    parser.add_argument('--no-all_datasets', action='store_false', dest='all_datasets', 
+                        help='Restrict testing to the standard test set only.')
     
-    # New argument for subfolder
-    parser.add_argument('--subfolder', type=str, help='Only test/list models from this specific subfolder')
+    # Output and Debugging
+    parser.add_argument('--list-failed', action='store_true', 
+                        help='Generate a detailed CSV file containing information on all misclassifications.')
+    parser.add_argument('--save-failed', action='store_true', 
+                        help='Save images that were misclassified into a "failed-predictions" folder.')
+    parser.add_argument('--debug', action='store_true', 
+                        help='Enable verbose output for debugging model predictions and data loading.')
+    
+    # Optional overrides for dataset configuration (auto-detected if omitted)
+    parser.add_argument('--classes', type=int, choices=[10, 100], 
+                        help='Force the number of classes (10 or 100). Auto-detected from folder name if omitted (e.g., 10cls).')
+    parser.add_argument('--color', type=str, choices=['rgb', 'gray'], 
+                        help='Force a specific color mode. Auto-detected from folder name if omitted (e.g., GRAY).')
     
     args = parser.parse_args()
     
     if args.list:
-        list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, input_dir=args.input_dir, exclude_model=args.exclude_model)
+        list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, 
+                              input_dir=args.input_dir, exclude_model=args.exclude_model,
+                              model_list=args.model_list)
         return
     
     # Handle single model prediction (highest priority)
@@ -1603,12 +1665,14 @@ def main():
             use_all_datasets=args.all_datasets,
             list_failed=args.list_failed,
             save_failed=args.save_failed,
-            output_dir=args.input_dir
+            output_dir=args.input_dir,
+            override_classes=args.classes,
+            override_color=args.color
         )
         return
     
-    # Handle test_all mode
-    elif args.test_all:
+    # Handle test_all or model_list mode
+    elif args.test_all or args.model_list:
         test_all_models(
             num_test_images=args.test_images, 
             quantized_only=args.quantized, 
@@ -1618,7 +1682,10 @@ def main():
             save_failed=args.save_failed,
             subfolder=args.subfolder,
             input_dir=args.input_dir,
-            exclude_model=args.exclude_model
+            exclude_model=args.exclude_model,
+            override_classes=args.classes,
+            override_color=args.color,
+            model_list=args.model_list
         )
         return
     
@@ -1640,7 +1707,10 @@ def main():
         list_failed=args.list_failed,
         save_failed=args.save_failed,
         subfolder=args.subfolder,
-        input_dir=args.input_dir
+        input_dir=args.input_dir,
+        override_classes=args.classes,
+        override_color=args.color,
+        model_list=args.model_list
     )
 
 if __name__ == "__main__":
