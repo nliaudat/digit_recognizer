@@ -50,24 +50,30 @@ MODEL_ARCHITECTURE = "digit_recognizer_v17" # one of the models in AVAILABLE_MOD
 # GENERAL PARAMETERS
 # ==============================================================================
 
-# ==============================================================================
-# GENERAL PARAMETERS
-# ==============================================================================
+### MANUAL OVERRIDES (Set to None to use Environment Variables or Defaults)
+# If set, these will supersede environment variables.
+MANUAL_NB_CLASSES = None # 10 or 100
+MANUAL_INPUT_CHANNELS = None # 1 (Gray) or 3 (RGB)
 
-
-
+# --- NB_CLASSES Logic ---
 _nb_classes_env = os.environ.get("DIGIT_NB_CLASSES")
-if _nb_classes_env is not None:
+if MANUAL_NB_CLASSES is not None:
+    NB_CLASSES = MANUAL_NB_CLASSES
+elif _nb_classes_env is not None:
     NB_CLASSES = int(_nb_classes_env)
 else:
     # Not set via environment – ask the user to avoid silently using a wrong default
     if sys.stdin.isatty():
         while True:
-            _user_input = input("Enter number of classes [10 or 100]: ").strip()
-            if _user_input in ("10", "100"):
-                NB_CLASSES = int(_user_input)
+            try:
+                _user_input = input("Enter number of classes [10 or 100]: ").strip()
+                if _user_input in ("10", "100"):
+                    NB_CLASSES = int(_user_input)
+                    break
+                print("  Please enter 10 or 100.")
+            except EOFError:
+                NB_CLASSES = 10
                 break
-            print("  Please enter 10 or 100.")
     else:
         # Non-interactive context (subprocess, CI, etc.) – keep a safe default and warn
         NB_CLASSES = 10
@@ -75,20 +81,34 @@ else:
               "Set the env var explicitly to avoid this.")
 del _nb_classes_env
 
+# --- INPUT_CHANNELS Logic ---
+_input_channels_env = os.environ.get("DIGIT_INPUT_CHANNELS")
+if MANUAL_INPUT_CHANNELS is not None:
+    INPUT_CHANNELS = MANUAL_INPUT_CHANNELS
+elif _input_channels_env is not None:
+    INPUT_CHANNELS = int(_input_channels_env)
+else:
+    INPUT_CHANNELS = 1 # Project default (Grayscale)
+
 # ==============================================================================
 # INPUT IMAGES 
 # ==============================================================================
-### for testing
-# NB_CLASSES   = 100
-# INPUT_SHAPE  = (32, 20, 3)   # H × W × C
-# USE_GRAYSCALE = False
+
 
 # Image Parameters
 INPUT_WIDTH = 20
 INPUT_HEIGHT = 32
-INPUT_CHANNELS = int(os.environ.get("DIGIT_INPUT_CHANNELS", 3))  # 1 for grayscale, 3 for RGB
-INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
-USE_GRAYSCALE = (INPUT_CHANNELS == 1) 
+
+def update_derived_parameters():
+    """Refresh parameters that depend on NB_CLASSES or INPUT_CHANNELS"""
+    global INPUT_SHAPE, USE_GRAYSCALE, OUTPUT_DIR
+    INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
+    USE_GRAYSCALE = (INPUT_CHANNELS == 1)
+    _color_suffix = "GRAY" if USE_GRAYSCALE else "RGB"
+    OUTPUT_DIR = f"exported_models/{NB_CLASSES}cls_{_color_suffix}"
+
+# Initial call to set defaults
+update_derived_parameters()
 
 # ==============================================================================
 # DATA SOURCES
@@ -176,23 +196,14 @@ if MODEL_ARCHITECTURE in PC_ONLY_MODELS:
     ESP_DL_QUANTIZE = False
     USE_QAT = False
 
+# Dataset disk cache directory
+DATASET_CACHE_DIR = os.environ.get("DATASET_CACHE_DIR", ".dataset_cache")
+
 # Data pipeline configuration
 USE_TF_DATA_PIPELINE = False
 TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
 TF_DATA_SHUFFLE_BUFFER = 1000
 TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
-
-# File Paths
-# Output directory is automatically derived from NB_CLASSES and color space.
-# Override by setting OUTPUT_DIR manually below if needed.
-_color_suffix = "GRAY" if USE_GRAYSCALE else "RGB"
-OUTPUT_DIR = f"exported_models/{NB_CLASSES}cls_{_color_suffix}"
-# Manual overrides (uncomment one to force a specific directory):
-# OUTPUT_DIR = "exported_models"
-# OUTPUT_DIR = "exported_models/10cls_GRAY"
-# OUTPUT_DIR = "exported_models/10cls_RGB"
-# OUTPUT_DIR = "exported_models/100cls_GRAY"
-# OUTPUT_DIR = "exported_models/100cls_RGB"
 QUANTIZE_NUM_SAMPLES = 22000
 # TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
 # FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
@@ -269,13 +280,25 @@ ADAMW_EPSILON = 1e-07
 LOSS_TYPE = "sparse_categorical_crossentropy"  # Options: "sparse_categorical_crossentropy", "categorical_crossentropy"
 LABEL_SMOOTHING = 0.0  # Apply label smoothing if > 0
 
+# Focal Loss Parameters
+USE_FOCAL_LOSS = False  # Set to True to use Focal Loss instead of CrossEntropy. Primarily used for retrain/fine-tuning.
+FOCAL_GAMMA = 2.0      # Focus parameter for Focal Loss (0 = CrossEntropy)
+
+# Dynamic Class Weighting
+USE_DYNAMIC_WEIGHTS = True   # Update loss weights based on validation accuracy
+DYNAMIC_WEIGHTS_EPOCHS = 5  # Frequency of dynamic weight updates (in epochs)
+
+# Resume Training Support
+RESUME_MODEL_PATH = ""  # Path to best_model.keras to resume from (empty = start fresh)
+INITIAL_EPOCH = 0       # Epoch to resume from (auto-detected by retrain_all.py)
+
 # ==============================================================================
 # TRAINING HYPERPARAMETERS
 # ==============================================================================
 
 # Basic Training Parameters
 BATCH_SIZE = 32 # 32
-EPOCHS = 200
+EPOCHS = 250
 LEARNING_RATE = 0.001
 TRAINING_PERCENTAGE = 1.0  # Use 100% of available data
 VALIDATION_SPLIT = 0.2     # 20% of training for validation
@@ -302,6 +325,7 @@ EXPONENTIAL_DECAY_RATE = 0.96
 
 # Cosine Decay Parameters
 COSINE_DECAY_ALPHA = 0.0  # Minimum learning rate as fraction of initial
+LR_WARMUP_EPOCHS = 10     # Number of warmup epochs for CosineDecayRestarts
 
 # Step Decay Parameters
 STEP_DECAY_STEP_SIZE = 10
@@ -371,6 +395,11 @@ AUGMENTATION_WIDTH_SHIFT_RANGE = 0.0
 AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.0
 AUGMENTATION_HORIZONTAL_FLIP = False
 AUGMENTATION_VERTICAL_FLIP = False
+
+# Advanced Augmentations (used by super_high_accuracy_validator)
+USE_MIXUP = False           # Disabled by default for stability (destructive on small images)
+USE_CUTMIX = False
+USE_RANDOM_ERASING = False # Disabled by default for benchmark stability
 
 # not implemented yet
 

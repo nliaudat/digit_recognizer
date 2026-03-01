@@ -21,11 +21,19 @@ Features
 """
 
 # --------------------------------------------------------------------------- #
-#  Standard library imports
+# Standard library imports
 # --------------------------------------------------------------------------- #
-import argparse
 import os
 import sys
+
+# Set default environment variables strictly before importing parameters.py
+# This prevents parameters.py from triggering the interactive input prompt
+if "DIGIT_NB_CLASSES" not in os.environ:
+    os.environ["DIGIT_NB_CLASSES"] = "10"
+if "DIGIT_INPUT_CHANNELS" not in os.environ:
+    os.environ["DIGIT_INPUT_CHANNELS"] = "1"
+
+import argparse
 import logging
 import warnings
 import random
@@ -243,6 +251,13 @@ def parse_arguments():
              "Compiles each model and trains for exactly 1 epoch using a tiny subset of data "
              "to ensure there are no syntax errors or shape mismatches."
     )
+    parser.add_argument(
+        "--model",
+        type=str,
+        choices=params.AVAILABLE_MODELS,
+        help="Specify a single architecture to train (overrides parameters.py).\n"
+             "Example: --model digit_recognizer_v17"
+    )
     
     # --- Hyperparameter Tuning ---
     parser.add_argument(
@@ -281,6 +296,37 @@ def parse_arguments():
              "Disables TFLite conversion, confusion matrix generation, and inference timing."
     )
     
+    # --- Hyperparameter Overrides (from legacy train_super_validator) ---
+    parser.add_argument("--epochs", type=int, default=None, help="Override maximum number of training epochs.")
+    parser.add_argument("--batch", type=int, default=None, help="Override batch size.")
+    parser.add_argument("--lr", type=float, default=None, help="Override initial learning rate.")
+    parser.add_argument("--warmup-epochs", type=int, default=None, help="Override learning rate warmup epochs.")
+    parser.add_argument("--weight-decay", type=float, default=None, help="Override weight decay parameter.")
+    parser.add_argument("--label-smoothing", type=float, default=None, help="Override label smoothing factor.")
+    parser.add_argument("--focal-gamma", type=float, default=None, help="Override Focal Loss Gamma.")
+    parser.add_argument("--rotation-range", type=float, default=None, help="Override maximum rotation augmentation in degrees.")
+    parser.add_argument("--no-mixup", action="store_true", help="Disable Mixup augmentation.")
+    parser.add_argument("--no-mixed-precision", action="store_true", help="Disable mixed precision.")
+    parser.add_argument("--focal-loss", action="store_true", help="Explicitly enable Focal Loss.")
+    parser.add_argument("--no-focal-loss", action="store_true", help="Explicitly disable Focal Loss.")
+    
+    # --- Advanced Features ---
+    parser.add_argument("--cutmix", action="store_true", help="Enable CutMix augmentation.")
+    parser.add_argument("--no-random-erasing", action="store_true", help="Disable Random Erasing augmentation.")
+    parser.add_argument("--optimizer", type=str, default=None, help="Override the optimizer (e.g. adamw).")
+    parser.add_argument("--lr-scheduler", type=str, default=None, help="Override the LR scheduler (e.g. cosine).")
+    parser.add_argument("--no-dynamic-weights", action="store_true", help="Disable dynamic per-class weighting.")
+
+    # --- Resume Training ---
+    parser.add_argument("--resume", type=str, default="",
+        help="Path to a best_model.keras file to resume from.")
+    parser.add_argument("--initial-epoch", type=int, default=0,
+        help="Epoch to resume from (auto-filled by retrain_all.py from training_log.csv).")
+
+    # --- Dataset Configuration Overrides ---
+    parser.add_argument("--classes", type=int, choices=[10, 100], help="Number of classes (10 or 100).")
+    parser.add_argument("--color", type=str, choices=["rgb", "gray"], help="Color mode (rgb or gray).")
+
     return parser.parse_args()
 
 
@@ -483,7 +529,59 @@ def train_specific_models(models_to_train, debug: bool = False, no_cleanup: bool
 #  Entry point – parse arguments and dispatch to the appropriate mode
 # --------------------------------------------------------------------------- #
 def main():
+    # Now parse arguments
     args = parse_arguments()
+
+    # Apply overrides to params module
+    if args.model is not None:
+        params.MODEL_ARCHITECTURE = args.model
+    if args.epochs is not None:
+        params.EPOCHS = args.epochs
+    if args.batch is not None:
+        params.BATCH_SIZE = args.batch
+    if args.lr is not None:
+        params.LEARNING_RATE = args.lr
+    if args.focal_gamma is not None:
+        params.FOCAL_GAMMA = args.focal_gamma
+    if args.rotation_range is not None:
+        params.AUGMENTATION_ROTATION_RANGE = args.rotation_range
+    
+    if args.no_mixup:
+        params.USE_MIXUP = False
+    if args.no_mixed_precision:
+        params.USE_MIXED_PRECISION = False
+    if args.focal_loss:
+        params.USE_FOCAL_LOSS = True
+    if args.no_focal_loss:
+        params.USE_FOCAL_LOSS = False
+
+    if args.classes is not None:
+        params.NB_CLASSES = args.classes
+    if args.color is not None:
+        params.INPUT_CHANNELS = 1 if args.color == "gray" else 3
+    
+    # Update derived parameters after potential CLI overrides
+    if args.classes is not None or args.color is not None:
+        params.update_derived_parameters()
+
+    if args.warmup_epochs is not None:
+        params.LR_WARMUP_EPOCHS = args.warmup_epochs
+    if args.weight_decay is not None:
+        params.ADAMW_WEIGHT_DECAY = args.weight_decay
+    if args.cutmix:
+        params.USE_CUTMIX = True
+    if args.no_random_erasing:
+        params.USE_RANDOM_ERASING = False
+    if args.optimizer is not None:
+        params.OPTIMIZER_TYPE = args.optimizer
+    if args.lr_scheduler is not None:
+        params.LR_SCHEDULER_TYPE = args.lr_scheduler
+    if args.no_dynamic_weights:
+        params.USE_DYNAMIC_WEIGHTS = False
+    if args.resume:
+        params.RESUME_MODEL_PATH = args.resume
+    if args.initial_epoch:
+        params.INITIAL_EPOCH = args.initial_epoch
 
     # -----------------------------------------------------------------
     #  Hyper parameter tuning mode
