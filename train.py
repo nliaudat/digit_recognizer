@@ -48,8 +48,8 @@ from pathlib import Path
 # --------------------------------------------------------------------------- #
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
+import matplotlib.pyplot as plt
 
 # --------------------------------------------------------------------------- #
 #  Project imports (core utilities)
@@ -551,9 +551,9 @@ def main():
     if args.no_mixed_precision:
         params.USE_MIXED_PRECISION = False
     if args.focal_loss:
-        params.USE_FOCAL_LOSS = True
+        params.LOSS_TYPE = "focal_loss"
     if args.no_focal_loss:
-        params.USE_FOCAL_LOSS = False
+        params.LOSS_TYPE = "sparse_categorical_crossentropy"
 
     if args.classes is not None:
         params.NB_CLASSES = args.classes
@@ -595,12 +595,16 @@ def main():
         x_train = preprocess_for_training(x_train_raw)
         x_val   = preprocess_for_training(x_val_raw)
 
-        if params.MODEL_ARCHITECTURE == "original_haverland":
+        # Only one-hot encode if specifically using categorical_crossentropy
+        # (original_haverland default or manual setting)
+        if params.LOSS_TYPE == "categorical_crossentropy":
             y_train = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
             y_val   = tf.keras.utils.to_categorical(y_val_raw,   params.NB_CLASSES)
+            print("🔧 One-hot encoding labels (for categorical_crossentropy)")
         else:
             y_train = y_train_raw
             y_val   = y_val_raw
+            print(f"🔧 Using sparse labels (for {params.LOSS_TYPE})")
 
         tuning_res = run_architecture_tuning(
             x_train=x_train,
@@ -756,6 +760,18 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
 
     model = compile_model(model, loss_type=loss_type) 
     
+    # -----------------------------------------------------------------
+    #  Resume Training Logic
+    # -----------------------------------------------------------------
+    if hasattr(params, 'RESUME_MODEL_PATH') and params.RESUME_MODEL_PATH:
+        print(f"🔄 Resuming from checkpoint: {params.RESUME_MODEL_PATH}")
+        try:
+            model.load_weights(params.RESUME_MODEL_PATH)
+            print("   ✅ Weights loaded successfully")
+        except Exception as e:
+            print(f"   ❌ Failed to load weights: {e}")
+            print("   ⚠️  Starting training from scratch instead.")
+    
     # Build model with explicit input shape (required for TF2.x eager mode)
     print("🔧 Building model with explicit input shape...")
     model.build(input_shape=(None,) + params.INPUT_SHAPE)
@@ -797,19 +813,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             params.USE_QAT = False
             model = create_model()
 
-    # Force recompilation with correct loss
-    if params.MODEL_ARCHITECTURE == "original_haverland":
-        model.compile(
-            optimizer=model.optimizer,
-            loss=tf.keras.losses.CategoricalCrossentropy(),
-            metrics=['accuracy']
-        )
-    else:
-        model.compile(
-            optimizer=model.optimizer, 
-            loss=tf.keras.losses.SparseCategoricalCrossentropy(),
-            metrics=['accuracy']
-        )
+    # (Model already compiled via compile_model factory call higher up)
         
     # Validate QAT data flow if using QAT
     if use_qat:
@@ -831,11 +835,14 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     tflite_manager = TFLiteModelManager(training_dir, debug)
 
     # This will automatically test strategies and use the best one
-    tflite_blob, size = tflite_manager.save_as_tflite_enhanced(
-        model, 
-        params.get_tflite_filename(),
-        quantize=True
-    )
+    print("📦 Generating optimized TFLite model for initial verification...")
+    with tqdm(total=1, desc="TFLite Conversion", leave=False) as pbar:
+        tflite_blob, size = tflite_manager.save_as_tflite_enhanced(
+            model, 
+            params.get_tflite_filename(),
+            quantize=True
+        )
+        pbar.update(1)
     
     monitor = TrainingMonitor(training_dir, debug)
     monitor.set_model(model)
@@ -869,8 +876,11 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         print("🎯 QAT model: No representative dataset needed (fake quant layers provide scales)")
     else:
         # PTQ needs calibration data
-        representative_data = create_qat_representative_dataset(x_train_raw)
-        print("🎯 PTQ: Representative dataset created for calibration")
+        print("🎯 PTQ: Creating representative dataset for calibration...")
+        with tqdm(total=1, desc="Calibration Data", leave=False) as pbar:
+            representative_data = create_qat_representative_dataset(x_train_raw)
+            pbar.update(1)
+        print("   ✅ Representative dataset ready")
     
     # Create callbacks
     callbacks = create_callbacks(
@@ -911,6 +921,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         history = model.fit(
             train_dataset,
             epochs=params.EPOCHS,
+            initial_epoch=params.INITIAL_EPOCH if hasattr(params, 'INITIAL_EPOCH') else 0,
             validation_data=val_dataset,
             callbacks=callbacks,
             verbose=0
@@ -935,6 +946,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             x_train, y_train_final,
             batch_size=params.BATCH_SIZE,
             epochs=params.EPOCHS,
+            initial_epoch=params.INITIAL_EPOCH if hasattr(params, 'INITIAL_EPOCH') else 0,
             validation_data=(x_val, y_val_final),
             callbacks=callbacks,
             verbose=0,

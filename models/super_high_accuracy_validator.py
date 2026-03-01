@@ -45,19 +45,17 @@ import tensorflow as tf
 import numpy as np
 
 # ---------------------------------------------------------------------------
-# Optional: environment-based config (compatible with parameters.py env vars)
+# Parameter Fetching (Lazy)
 # ---------------------------------------------------------------------------
-_NB_CLASSES = int(os.environ.get("DIGIT_NB_CLASSES", 100))
-_INPUT_CHANNELS = int(os.environ.get("DIGIT_INPUT_CHANNELS", 3))
-_INPUT_SHAPE = (32, 20, _INPUT_CHANNELS)  # H × W × C  (32, 20, 3) for RGB
-
-# Try to use parameters.py if available (for train.py integration)
-try:
-    import parameters as _params
-    _NB_CLASSES = _params.NB_CLASSES
-    _INPUT_SHAPE = _params.INPUT_SHAPE
-except Exception:
-    pass
+def _get_default_params():
+    """Fetch current parameters from the project configuration or environment."""
+    try:
+        import parameters as params
+        return params.NB_CLASSES, params.INPUT_SHAPE
+    except ImportError:
+        nb_classes = int(os.environ.get("DIGIT_NB_CLASSES", 100))
+        channels = int(os.environ.get("DIGIT_INPUT_CHANNELS", 3))
+        return nb_classes, (32, 20, channels)
 
 # ---------------------------------------------------------------------------
 # Mixed Precision Helper
@@ -204,10 +202,11 @@ def create_super_high_accuracy_validator(
     Returns:
         tf.keras.Model
     """
-    if nb_classes is None:
-        nb_classes = _NB_CLASSES
-    if input_shape is None:
-        input_shape = _INPUT_SHAPE
+    # Lazy-fetch defaults if not provided explicitly
+    if nb_classes is None or input_shape is None:
+        def_nb, def_shape = _get_default_params()
+        nb_classes = nb_classes if nb_classes is not None else def_nb
+        input_shape = input_shape if input_shape is not None else def_shape
 
     inputs = tf.keras.Input(shape=input_shape, name='input')
 
@@ -364,8 +363,9 @@ if __name__ == "__main__":
     print(f"\n{'='*62}")
     print("  super_high_accuracy_validator — self-test")
     print(f"{'='*62}")
-    print(f"  Input shape  : {_INPUT_SHAPE}")
-    print(f"  Classes      : {_NB_CLASSES}")
+    def_nb, def_shape = _get_default_params()
+    print(f"  Input shape  : {def_shape}")
+    print(f"  Classes      : {def_nb}")
 
     m = create_super_high_accuracy_validator()
     m.summary(line_length=90)

@@ -76,17 +76,40 @@ Even on the harder dataset, `v4` maintains its sheer edge over `original_haverla
 3.  **Faster Inference**: `v4` processes **5759 inferences/second**, beating the original's **4395 inferences/second**.
 4.  **Fewer Parameters**: `v4` utilizes nearly 3 times fewer parameters (85k vs 257k).
 
+## Usage
+
+### Training
+To train a model, run:
+```bash
+python train.py --model digit_recognizer_v4 --classes 10 --color gray
+```
+
+#### Configuration Overrides
+The training pipeline supports multiple ways to configure hyperparameters without interactive prompts:
+
+1.  **CLI Arguments**: (Highest priority)
+    - `--classes {10,100}`: Number of classification classes.
+    - `--color {rgb,gray}`: Input image color mode.
+    - `--model {architecture}`: Choose from `AVAILABLE_MODELS` in `parameters.py`.
+    - `--focal-loss`: Enables Intelligent Focal Loss.
+
+2.  **Environment Variables**:
+    - `DIGIT_NB_CLASSES`: Sets the number of classes.
+    - `DIGIT_INPUT_CHANNELS`: Sets to `1` (Gray) or `3` (RGB).
+    - `DATASET_CACHE_DIR`: Directory for image caching.
+
+3.  **Manual Overrides (parameters.py)**:
+    - Set `MANUAL_NB_CLASSES` or `MANUAL_INPUT_CHANNELS` to a fixed value.
+
+#### Non-Interactive Mode
+If no configuration is provided and the terminal is detected as non-interactive (e.g., in a CI/CD pipeline or some IDEs), the script will automatically default to **10 classes** and **Grayscale** to avoid blocking.
+
+## Advanced Training Features
+- **Intelligent Focal Loss**: Replaces standard Cross-Entropy once the model masters the basics (default: >0.80 accuracy). Controlled via `LOSS_TYPE = "IntelligentFocalLossController"`.
+- **Dynamic Alpha Scaling**: Scaling factor $\alpha$ for Focal Loss is automatically calculated based on class count to maintain class balance.
+- **Adaptive Per-Class Weighting**: Dynamically adjusts importance of specific difficult digits during training.
+
 ## Benchmarking
-
-To run the benchmarking suite across all available models (excluding large PC-only validators by default):
-```bash
-python bench_predict.py --test_all
-```
-
-You can exclude specific models from the benchmark:
-```bash
-python bench_predict.py --exclude_model some_other_model_name
-```
 
 ## Documentation
 
@@ -95,13 +118,12 @@ For detailed guides analyzing how to train, benchmark, and debug the models with
 - [Benchmarking & Prediction](documentations/benchmarking_and_prediction.md)
 - [Analysis & Debugging](documentations/analysis_and_debugging.md)
 
-## Features
-
-- Multiple neural network architectures
-- Model size vs accuracy analysis
-- Training and evaluation pipelines
-- Visualization tools
 - Pre-trained models
+- **Advanced Training Features**:
+    - **Intelligent Focal Loss**: Automatically switches from Cross-Entropy to Focal Loss based on validation performance.
+    - **Dynamic Alpha Scaling**: Automatically adjusts class balancing based on dataset complexity (`NB_CLASSES`).
+    - **Adaptive Per-Class Balancing**: Dynamically re-weights classes during training to focus on difficult samples.
+    - **Quantization Aware Training (QAT)**: Integrated support for 8-bit quantization with ESP-DL compatibility.
 
 ## Results
 
@@ -113,6 +135,7 @@ The project demonstrates that :
  - Model size "double" the tensor arena needed in memory
  - CPU operations must be also taken into parameters for IOT
  - RGB or grayscale has very same benchmark results, but the processing is not the same as in parameters needed. It also needs a lot of more cpu and memory to process
+ - **Adaptive Loss Strategies**: Using `IntelligentFocalLossController` allows the model to master basic features with Cross-Entropy before focusing on hard-to-distinguish digits using Focal Loss.
  
  ## RGB vs Grayscale Model Comparison
 

@@ -197,11 +197,31 @@ def compile_model(model, loss_type='sparse'):
         loss = 'categorical_crossentropy'
         print("🔧 Override: Using categorical crossentropy loss (for Haverland model)")
     elif loss_type == 'sparse':
-        loss = 'sparse_categorical_crossentropy'
-        print("🔧 Override: Using sparse categorical crossentropy loss (for other models)")
+        # Don't override if it's already a specialized loss like focal_loss
+        if loss not in ["focal_loss", "IntelligentFocalLossController"]:
+            loss = 'sparse_categorical_crossentropy'
+            print("🔧 Override: Using sparse categorical crossentropy loss")
 
-    # Convert string loss to object form to prevent deprecation warnings
-    if params.LABEL_SMOOTHING > 0:
+    # Handle Focal Loss
+    if loss in ["focal_loss", "IntelligentFocalLossController"]:
+        # If using IntelligentFocalLossController, we start with standard CE 
+        # and let the controller switch to Focal Loss at the first threshold.
+        # This prevents starting with gamma=2.0 and "switching" back to 1.0.
+        if loss == "IntelligentFocalLossController":
+             print("🔧 IntelligentFocalLossController active: Starting with standard CrossEntropy")
+             # Fall through to standard CE logic below
+             loss = 'categorical_crossentropy' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse_categorical_crossentropy'
+        else:
+            from utils.losses import sparse_focal_loss, focal_loss
+            if params.MODEL_ARCHITECTURE == "original_haverland":
+                loss = focal_loss(gamma=params.FOCAL_GAMMA, alpha=params.FOCAL_ALPHA)
+                print(f"🔧 Using focal_loss (one-hot) with gamma={params.FOCAL_GAMMA}")
+            else:
+                loss = sparse_focal_loss(gamma=params.FOCAL_GAMMA, alpha=params.FOCAL_ALPHA)
+                print(f"🔧 Using sparse_focal_loss with gamma={params.FOCAL_GAMMA}")
+    
+    # Handle standard crossentropy with label smoothing
+    elif params.LABEL_SMOOTHING > 0:
         if loss == "categorical_crossentropy":
             loss = tf.keras.losses.CategoricalCrossentropy(
                 label_smoothing=params.LABEL_SMOOTHING

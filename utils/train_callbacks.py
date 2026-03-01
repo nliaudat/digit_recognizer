@@ -101,6 +101,36 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     )
     callbacks.append(csv_logger)
     
+    # Intelligent Focal Loss Controller
+    if params.LOSS_TYPE in ["focal_loss", "IntelligentFocalLossController"]:
+        from utils.train_helpers import IntelligentFocalLossController
+        callbacks.append(
+            IntelligentFocalLossController(
+                accuracy_thresholds=params.FOCAL_ACCURACY_THRESHOLDS,
+                gamma_values=params.FOCAL_GAMMA_VALUES,
+                alpha=params.FOCAL_ALPHA,
+                plateau_patience=params.FOCAL_PLATEAU_PATIENCE,
+                plateau_min_delta=params.FOCAL_PLATEAU_MIN_DELTA,
+                val_ds=validation_data,
+                debug=debug
+            )
+        )
+        if debug:
+            print("🎯 IntelligentFocalLossController callback added")
+
+    # Per-Class Accuracy Callback
+    if validation_data is not None:
+        from utils.train_helpers import PerClassAccuracyCallback
+        callbacks.append(
+            PerClassAccuracyCallback(
+                val_ds=validation_data,
+                every_n_epochs=5,
+                debug=debug
+            )
+        )
+        if debug:
+            print("📊 PerClassAccuracyCallback callback added")
+
     # TensorBoard Logger
     tb_log_dir = os.path.join(output_dir, 'tensorboard_logs')
     tensorboard_callback = tf.keras.callbacks.TensorBoard(
