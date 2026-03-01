@@ -61,6 +61,9 @@ if MANUAL_NB_CLASSES is not None:
     NB_CLASSES = MANUAL_NB_CLASSES
 elif _nb_classes_env is not None:
     NB_CLASSES = int(_nb_classes_env)
+elif "-h" in sys.argv or "--help" in sys.argv:
+    # Avoid interactive prompt when just showing help
+    NB_CLASSES = 10
 else:
     # Not set via environment – ask the user to avoid silently using a wrong default
     if sys.stdin.isatty():
@@ -87,8 +90,31 @@ if MANUAL_INPUT_CHANNELS is not None:
     INPUT_CHANNELS = MANUAL_INPUT_CHANNELS
 elif _input_channels_env is not None:
     INPUT_CHANNELS = int(_input_channels_env)
+elif "-h" in sys.argv or "--help" in sys.argv:
+    # Avoid interactive prompt when just showing help
+    INPUT_CHANNELS = 1
 else:
-    INPUT_CHANNELS = 1 # Project default (Grayscale)
+    # Not set via environment – ask the user to avoid silently using a wrong default
+    if sys.stdin.isatty():
+        while True:
+            try:
+                _user_input = input("Enter color mode [gray or rgb]: ").strip().lower()
+                if _user_input == "gray":
+                    INPUT_CHANNELS = 1
+                    break
+                elif _user_input == "rgb":
+                    INPUT_CHANNELS = 3
+                    break
+                print("  Please enter 'gray' or 'rgb'.")
+            except EOFError:
+                INPUT_CHANNELS = 1
+                break
+    else:
+        # Non-interactive context (subprocess, CI, etc.) – keep a safe default and warn
+        INPUT_CHANNELS = 1
+        print("WARNING: DIGIT_INPUT_CHANNELS not set and no interactive terminal – defaulting to 1 (Grayscale). "
+              "Set the env var explicitly to avoid this.")
+del _input_channels_env
 
 # ==============================================================================
 # INPUT IMAGES 
