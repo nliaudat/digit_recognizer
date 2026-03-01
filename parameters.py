@@ -38,7 +38,7 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v17",   # IoT GhostNet-inspired — ultra-efficient ~50KB
     # "esp_quantization_ready",
     # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
-    # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
+    "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
     "mnist_quantization", #63.6kB	0.9848
     "original_haverland", #203.3	0.9822 & baseline
 ]
@@ -127,11 +127,43 @@ INPUT_HEIGHT = 32
 
 def update_derived_parameters():
     """Refresh parameters that depend on NB_CLASSES or INPUT_CHANNELS"""
-    global INPUT_SHAPE, USE_GRAYSCALE, OUTPUT_DIR
+    global INPUT_SHAPE, USE_GRAYSCALE, OUTPUT_DIR, DATA_SOURCES
     INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
     USE_GRAYSCALE = (INPUT_CHANNELS == 1)
     _color_suffix = "GRAY" if USE_GRAYSCALE else "RGB"
     OUTPUT_DIR = f"exported_models/{NB_CLASSES}cls_{_color_suffix}"
+    
+    # Refresh DATA_SOURCES to use correct NB_CLASSES for label files
+    DATA_SOURCES = [
+        {
+            'name': 'Tenth-of-step-of-a-meter-digit',
+            'type': 'label_file', 
+            'labels': f'labels_{NB_CLASSES}_shuffle.txt',
+            'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
+            'weight': 1.0,
+        },
+        {
+            'name': 'real_integra_bad_predictions',
+            'type': 'label_file', 
+            'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
+            'path': 'datasets/real_integra_bad_predictions', 
+            'weight': 1.0,
+        },
+        {
+            'name': 'real_integra',
+            'type': 'label_file', 
+            'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
+            'path': 'datasets/real_integra', 
+            'weight': 0.7,
+        },
+        {
+            'name': 'static_augmentation',
+            'type': 'label_file', 
+            'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
+            'path': 'datasets/static_augmentation', 
+            'weight': 0.6,
+        },
+    ]
 
 # Initial call to set defaults
 update_derived_parameters()
@@ -142,37 +174,7 @@ update_derived_parameters()
 
 # This is far better to use labels that have been shuffled for training, folder_structure shuffle by batch TF_DATA_SHUFFLE_BUFFER and SHUFFLE_SEED
 
-# Multiple Data Sources Configuration
-DATA_SOURCES = [
-    {
-        'name': 'Tenth-of-step-of-a-meter-digit',
-        'type': 'label_file', 
-        'labels': f'labels_{NB_CLASSES}_shuffle.txt',
-        'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
-        'weight': 1.0,
-    },
-    {
-        'name': 'real_integra_bad_predictions',
-        'type': 'label_file', 
-        'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
-        'path': 'datasets/real_integra_bad_predictions', 
-        'weight': 1.0,
-    },
-    {
-        'name': 'real_integra',
-        'type': 'label_file', 
-        'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
-        'path': 'datasets/real_integra', 
-        'weight': 0.7,
-    },
-    {
-        'name': 'static_augmentation',
-        'type': 'label_file', 
-        'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
-        'path': 'datasets/static_augmentation', 
-        'weight': 0.6,
-    },
-]
+# (Initial DATA_SOURCES is set via update_derived_parameters() below)
 
 # ==============================================================================
 # QUANTIZATION PARAMETERS
@@ -300,15 +302,39 @@ ADAMW_EPSILON = 1e-07
 
 
 # ==============================================================================
-# LOSS FUNCTION HYPERPARAMETERS
-# ==============================================================================
-
-LOSS_TYPE = "sparse_categorical_crossentropy"  # Options: "sparse_categorical_crossentropy", "categorical_crossentropy"
+# --------------------------------------------------------------------------- #
+#  Training & Loss Configuration
+# --------------------------------------------------------------------------- #
+# Options: "sparse_categorical_crossentropy", "categorical_crossentropy", "focal_loss"
+# "focal_loss": Uses IntelligentFocalLossController to adapt gamma based on val_acc
+LOSS_TYPE = "IntelligentFocalLossController"  
 LABEL_SMOOTHING = 0.0  # Apply label smoothing if > 0
 
 # Focal Loss Parameters
-USE_FOCAL_LOSS = False  # Set to True to use Focal Loss instead of CrossEntropy. Primarily used for retrain/fine-tuning.
-FOCAL_GAMMA = 2.0      # Focus parameter for Focal Loss (0 = CrossEntropy)
+FOCAL_GAMMA = 2.0      # Target focus parameter for Focal Loss
+# FOCAL_ALPHA = 0.45     # Class balancing (0.25 recommended for binary, 0.5 for multi-class)
+if NB_CLASSES <= 10:
+    FOCAL_ALPHA = 0.45  # Your current value for 10 classes
+elif NB_CLASSES <= 20:
+    FOCAL_ALPHA = 0.38  # Sweet spot for 15-20 classes
+elif NB_CLASSES <= 50:
+    FOCAL_ALPHA = 0.32  # For medium-sized datasets
+else:  # 100 classes
+    FOCAL_ALPHA = 0.27  # Optimal for 100 classes
+
+# Adaptive Focal Loss Controller Settings
+if NB_CLASSES <= 10:
+    FOCAL_ACCURACY_THRESHOLDS = [0.80, 0.90, 0.95]
+else:  # 100 classes or more
+    FOCAL_ACCURACY_THRESHOLDS = [0.75, 0.85, 0.92]  # Lower thresholds for harder 100-class task
+
+FOCAL_GAMMA_VALUES = [1.0, 1.5, 2.0]
+FOCAL_PLATEAU_PATIENCE = 5
+FOCAL_PLATEAU_MIN_DELTA = 0.001
+
+# Advanced Training Options (defaulting to True as requested in prev sessions)
+USE_EARLY_STOPPING = True
+# 2.0      # Focus parameter for Focal Loss (0 = CrossEntropy) # This line was a duplicate and commented out.
 
 # Dynamic Class Weighting
 USE_DYNAMIC_WEIGHTS = True   # Update loss weights based on validation accuracy
@@ -519,7 +545,7 @@ def validate_hyperparameters():
         raise ValueError(f"❌ Invalid OPTIMIZER_TYPE: {OPTIMIZER_TYPE}. Must be one of {valid_optimizers}")
     
     # Loss function validation
-    valid_losses = ["sparse_categorical_crossentropy", "categorical_crossentropy"]
+    valid_losses = ["sparse_categorical_crossentropy", "categorical_crossentropy", "focal_loss", "IntelligentFocalLossController"]
     if LOSS_TYPE not in valid_losses:
         raise ValueError(f"❌ Invalid LOSS_TYPE: {LOSS_TYPE}. Must be one of {valid_losses}")
     
