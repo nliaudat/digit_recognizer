@@ -27,3 +27,4 @@ train_old.py
 exported_models/100cls_RGB/super_high_accuracy_validator_100cls_RGB/super_high_accuracy_validator.keras
 exported_models/100cls_RGB/super_high_accuracy_validator_100cls_RGB_initial/super_high_accuracy_validator.keras
 /.dataset_cache
+/digit_recognizer_testing
