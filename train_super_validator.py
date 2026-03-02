@@ -26,6 +26,9 @@ import argparse
 import numpy as np
 import tensorflow as tf
 from pathlib import Path
+import parameters as params
+from utils.losses import focal_loss
+from utils.train_helpers import IntelligentFocalLossController, PerClassAccuracyCallback
 
 # Force UTF-8 output on Windows to support emojis
 if sys.stdout.encoding != 'utf-8':
@@ -101,7 +104,7 @@ def parse_args():
 # Data Loading (re-uses project dataset conventions)
 # ──────────────────────────────────────────────────────────────────────────────
 
-NB_CLASSES   = 100
+NB_CLASSES   = params.NB_CLASSES
 INPUT_SHAPE  = (32, 20, 3)   # H × W × C
 USE_GRAYSCALE = False
 

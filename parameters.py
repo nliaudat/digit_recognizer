@@ -305,8 +305,12 @@ ADAMW_EPSILON = 1e-07
 # --------------------------------------------------------------------------- #
 #  Training & Loss Configuration
 # --------------------------------------------------------------------------- #
-# Options: "sparse_categorical_crossentropy", "categorical_crossentropy", "focal_loss"
-# "focal_loss": Uses IntelligentFocalLossController to adapt gamma based on val_acc
+# Options: 
+#   - "IntelligentFocalLossController": Adaptive Focal Loss. Gamma starts at 1.0 (CE) and 
+#     increases at accuracy thresholds. (Best for most tasks)
+#   - "focal_loss": Standard Focal Loss using FOCAL_GAMMA and FOCAL_ALPHA.
+#   - "sparse_categorical_crossentropy": Standard CrossEntropy (for integer labels).
+#   - "categorical_crossentropy": Standard CrossEntropy (for one-hot/haverland model).
 LOSS_TYPE = "IntelligentFocalLossController"  
 LABEL_SMOOTHING = 0.0  # Apply label smoothing if > 0
 
@@ -322,7 +326,7 @@ elif NB_CLASSES <= 50:
 else:  # 100 classes
     FOCAL_ALPHA = 0.27  # Optimal for 100 classes
 
-# Adaptive Focal Loss Controller Settings
+# Intelligent Focal Loss Controller Settings
 if NB_CLASSES <= 10:
     FOCAL_ACCURACY_THRESHOLDS = [0.80, 0.90, 0.95]
 else:  # 100 classes or more

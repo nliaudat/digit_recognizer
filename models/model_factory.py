@@ -204,15 +204,17 @@ def compile_model(model, loss_type='sparse'):
 
     # Handle Focal Loss
     if loss in ["focal_loss", "IntelligentFocalLossController"]:
-        # If using IntelligentFocalLossController, we start with standard CE 
-        # and let the controller switch to Focal Loss at the first threshold.
-        # This prevents starting with gamma=2.0 and "switching" back to 1.0.
+        from utils.losses import sparse_focal_loss, focal_loss, DynamicSparseFocalLoss, DynamicFocalLoss
+        
         if loss == "IntelligentFocalLossController":
-             print("🔧 IntelligentFocalLossController active: Starting with standard CrossEntropy")
-             # Fall through to standard CE logic below
-             loss = 'categorical_crossentropy' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse_categorical_crossentropy'
+             # We start with gamma=0.0 (equivalent to CrossEntropy)
+             # and let the controller update gamma/alpha dynamically
+             print("🔧 IntelligentFocalLossController active: Using Dynamic Focal Loss (starting with γ=0.0)")
+             if params.MODEL_ARCHITECTURE == "original_haverland":
+                 loss = DynamicFocalLoss(gamma=0.0, alpha=params.FOCAL_ALPHA)
+             else:
+                 loss = DynamicSparseFocalLoss(gamma=0.0, alpha=params.FOCAL_ALPHA)
         else:
-            from utils.losses import sparse_focal_loss, focal_loss
             if params.MODEL_ARCHITECTURE == "original_haverland":
                 loss = focal_loss(gamma=params.FOCAL_GAMMA, alpha=params.FOCAL_ALPHA)
                 print(f"🔧 Using focal_loss (one-hot) with gamma={params.FOCAL_GAMMA}")

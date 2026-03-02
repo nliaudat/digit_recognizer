@@ -1,6 +1,7 @@
 # utils/losses.py
 import tensorflow as tf
 from tensorflow.keras import backend as K
+import numpy as np
 
 def sparse_focal_loss(gamma=2.0, alpha=0.25):
     """
@@ -12,7 +13,6 @@ def sparse_focal_loss(gamma=2.0, alpha=0.25):
     """
     def loss(y_true, y_pred):
         # Convert sparse labels to one-hot
-        # Handle potential rank mismatch if labels have an extra dimension
         y_true_int = tf.cast(y_true, tf.int32)
         if len(y_true_int.shape) > 1 and y_true_int.shape[-1] == 1:
             y_true_int = tf.squeeze(y_true_int, axis=-1)
@@ -35,8 +35,8 @@ def sparse_focal_loss(gamma=2.0, alpha=0.25):
             cross_entropy = alpha_t * cross_entropy
         
         # Compute focal loss
-        focal_loss = weights * cross_entropy
-        return tf.reduce_sum(focal_loss, axis=-1)
+        f = weights * cross_entropy
+        return tf.reduce_sum(f, axis=-1)
     
     return loss
 
@@ -65,7 +65,78 @@ def focal_loss(gamma=2.0, alpha=0.25):
             cross_entropy = alpha_t * cross_entropy
         
         # Compute focal loss
-        focal_loss = weights * cross_entropy
-        return tf.reduce_sum(focal_loss, axis=-1)
+        f = weights * cross_entropy
+        return tf.reduce_sum(f, axis=-1)
     
     return loss
+
+class DynamicSparseFocalLoss(tf.keras.losses.Loss):
+    """
+    Keras 3 compatible Focal Loss that allows updating gamma and alpha 
+    during training without model recompilation.
+    """
+    def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None, name='dynamic_sparse_focal_loss'):
+        super().__init__(name=name)
+        self.gamma = tf.Variable(gamma, dtype=tf.float32, trainable=False, name=f"{name}_gamma")
+        
+        # We always use a vector for alpha internally to support per-class weighting smoothly
+        if nb_classes is None:
+            import parameters as params
+            nb_classes = params.NB_CLASSES
+            
+        if isinstance(alpha, (list, tuple, np.ndarray)):
+            init_alpha = np.array(alpha, dtype=np.float32)
+        else:
+            init_alpha = np.ones(nb_classes, dtype=np.float32) * float(alpha)
+            
+        self.alpha = tf.Variable(init_alpha, dtype=tf.float32, trainable=False, name=f"{name}_alpha")
+
+    def call(self, y_true, y_pred):
+        y_true_int = tf.cast(y_true, tf.int32)
+        if len(y_true_int.shape) > 1 and y_true_int.shape[-1] == 1:
+            y_true_int = tf.squeeze(y_true_int, axis=-1)
+            
+        y_true_one_hot = tf.one_hot(y_true_int, depth=tf.shape(y_pred)[-1])
+        
+        epsilon = K.epsilon()
+        y_pred = tf.clip_by_value(y_pred, epsilon, 1. - epsilon)
+        
+        cross_entropy = -y_true_one_hot * tf.math.log(y_pred)
+        weights = tf.pow(1 - y_pred, self.gamma)
+        
+        # Match alpha vector to y_true_one_hot labels
+        # self.alpha is (NB_CLASSES,)
+        alpha_t = tf.reduce_sum(y_true_one_hot * self.alpha, axis=-1, keepdims=True)
+        
+        return tf.reduce_sum(weights * alpha_t * cross_entropy, axis=-1)
+
+class DynamicFocalLoss(tf.keras.losses.Loss):
+    """Same as DynamicSparseFocalLoss but for one-hot labels."""
+    def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None, name='dynamic_focal_loss'):
+        super().__init__(name=name)
+        self.gamma = tf.Variable(gamma, dtype=tf.float32, trainable=False, name=f"{name}_gamma")
+        
+        if nb_classes is None:
+            import parameters as params
+            nb_classes = params.NB_CLASSES
+            
+        if isinstance(alpha, (list, tuple, np.ndarray)):
+            init_alpha = np.array(alpha, dtype=np.float32)
+        else:
+            init_alpha = np.ones(nb_classes, dtype=np.float32) * float(alpha)
+            
+        self.alpha = tf.Variable(init_alpha, dtype=tf.float32, trainable=False, name=f"{name}_alpha")
+
+    def call(self, y_true, y_pred):
+        y_true_one_hot = tf.cast(y_true, y_pred.dtype)
+        
+        epsilon = K.epsilon()
+        y_pred = tf.clip_by_value(y_pred, epsilon, 1. - epsilon)
+        
+        cross_entropy = -y_true_one_hot * tf.math.log(y_pred)
+        weights = tf.pow(1 - y_pred, self.gamma)
+        
+        # Match alpha vector to y_true_one_hot labels
+        alpha_t = tf.reduce_sum(y_true_one_hot * self.alpha, axis=-1, keepdims=True)
+        
+        return tf.reduce_sum(weights * alpha_t * cross_entropy, axis=-1)

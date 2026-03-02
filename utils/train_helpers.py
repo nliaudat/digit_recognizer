@@ -6,6 +6,28 @@ from datetime import datetime
 from tensorflow.keras import backend as K
 import parameters as params
 
+def normalize_validation_data(data, batch_size=32):
+    """
+    Ensure validation data is a tf.data.Dataset for consistent iteration.
+    Handles (x, y) tuples, lists, and existing datasets.
+    """
+    if data is None:
+        return None
+    if isinstance(data, tf.data.Dataset):
+        return data
+    
+    # If it's a tuple/list of (x, y)
+    if isinstance(data, (tuple, list)) and len(data) >= 2:
+        try:
+            # from_tensor_slices expects a tuple of tensors
+            ds = tf.data.Dataset.from_tensor_slices((data[0], data[1]))
+            return ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+        except Exception as e:
+            print(f"⚠️  Failed to convert validation tuple to dataset: {e}")
+            return data
+            
+    return data
+
 def print_training_summary(model, x_train, x_val, x_test, debug=False):
     """Print comprehensive training summary"""
     print("\n" + "="*60)
@@ -119,6 +141,20 @@ def save_training_config(training_dir, tflite_size, keras_size, tflite_manager,
         'esp_dl_enabled': params.ESP_DL_QUANTIZE,
         'data_augmentation': params.USE_DATA_AUGMENTATION,
         'grayscale': params.USE_GRAYSCALE,
+        
+        # --- Expanded Learning Configuration ---
+        'loss_type': params.LOSS_TYPE,
+        'label_smoothing': params.LABEL_SMOOTHING,
+        'optimizer_type': params.OPTIMIZER_TYPE,
+        'weight_decay': getattr(params, f"{params.OPTIMIZER_TYPE.upper()}_WEIGHT_DECAY", 0.0) if hasattr(params, f"{params.OPTIMIZER_TYPE.upper()}_WEIGHT_DECAY") else 0.0,
+        'l1_reg': params.L1_REGULARIZATION,
+        'l2_reg': params.L2_REGULARIZATION,
+        'dropout_rate': params.DEFAULT_DROPOUT_RATE,
+        'use_batch_norm': params.USE_BATCH_NORM,
+        'lr_scheduler': params.LR_SCHEDULER_TYPE if params.USE_LEARNING_RATE_SCHEDULER else "None",
+        'dynamic_weighting': params.USE_DYNAMIC_WEIGHTS,
+        # ----------------------------------------
+
         'best_validation_accuracy': float(tflite_manager.best_accuracy),
         'test_accuracy_keras': float(test_accuracy),
         'test_accuracy_tflite': float(tflite_accuracy),
@@ -127,6 +163,13 @@ def save_training_config(training_dir, tflite_size, keras_size, tflite_manager,
         'total_parameters': model.count_params() if model else 0
     }
     
+    # Add Focal Loss specific params if applicable
+    if "focal" in params.LOSS_TYPE.lower():
+        config_data['focal_gamma'] = params.FOCAL_GAMMA
+        config_data['focal_alpha'] = params.FOCAL_ALPHA
+        if hasattr(params, 'FOCAL_ACCURACY_THRESHOLDS'):
+            config_data['focal_thresholds'] = params.FOCAL_ACCURACY_THRESHOLDS
+
     # Calculate size reduction if quantization is enabled
     if params.QUANTIZE_MODEL and keras_size > 0:
         size_reduction = ((keras_size - tflite_size) / keras_size) * 100
@@ -148,10 +191,30 @@ def save_training_config(training_dir, tflite_size, keras_size, tflite_manager,
             f.write(f"   Number of classes: {config_data['num_classes']}\n")
             f.write(f"   Total parameters: {config_data['total_parameters']:,}\n\n")
             
-            f.write("⚙️  Training Parameters:\n")
+            f.write("🧠 Learning Mode & Parameters:\n")
+            f.write(f"   Loss Type: {config_data['loss_type']}\n")
+            f.write(f"   Optimizer: {config_data['optimizer_type']}\n")
+            if config_data['label_smoothing'] > 0:
+                f.write(f"   Label Smoothing: {config_data['label_smoothing']}\n")
+            if config_data['weight_decay'] > 0:
+                f.write(f"   Weight Decay: {config_data['weight_decay']}\n")
+            
+            if 'focal_gamma' in config_data:
+                f.write(f"   Focal Gamma: {config_data['focal_gamma']}\n")
+                f.write(f"   Focal Alpha: {config_data['focal_alpha']}\n")
+                if 'focal_thresholds' in config_data:
+                    f.write(f"   Thresholds: {config_data['focal_thresholds']}\n")
+            
+            f.write(f"   Learning Rate: {config_data['learning_rate']}\n")
+            f.write(f"   LR Scheduler: {config_data['lr_scheduler']}\n")
+            f.write(f"   L1/L2 Reg: {config_data['l1_reg']}/{config_data['l2_reg']}\n")
+            f.write(f"   Dropout: {config_data['dropout_rate']}\n")
+            f.write(f"   Batch Norm: {config_data['use_batch_norm']}\n")
+            f.write(f"   Dynamic Weights: {config_data['dynamic_weighting']}\n\n")
+
+            f.write("⚙️  Training Context:\n")
             f.write(f"   Epochs: {config_data['epochs']}\n")
             f.write(f"   Batch size: {config_data['batch_size']}\n")
-            f.write(f"   Learning rate: {config_data['learning_rate']}\n")
             f.write(f"   Data augmentation: {config_data['data_augmentation']}\n")
             f.write(f"   Grayscale: {config_data['grayscale']}\n\n")
             
@@ -194,10 +257,30 @@ def save_training_config(training_dir, tflite_size, keras_size, tflite_manager,
             f.write(f"   Number of classes: {config_data['num_classes']}\n")
             f.write(f"   Total parameters: {config_data['total_parameters']:,}\n\n")
             
-            f.write("Training Parameters:\n")
+            f.write("Learning Mode & Parameters:\n")
+            f.write(f"   Loss Type: {config_data['loss_type']}\n")
+            f.write(f"   Optimizer: {config_data['optimizer_type']}\n")
+            if config_data['label_smoothing'] > 0:
+                f.write(f"   Label Smoothing: {config_data['label_smoothing']}\n")
+            if config_data['weight_decay'] > 0:
+                f.write(f"   Weight Decay: {config_data['weight_decay']}\n")
+            
+            if 'focal_gamma' in config_data:
+                f.write(f"   Focal Gamma: {config_data['focal_gamma']}\n")
+                f.write(f"   Focal Alpha: {config_data['focal_alpha']}\n")
+                if 'focal_thresholds' in config_data:
+                    f.write(f"   Thresholds: {config_data['focal_thresholds']}\n")
+            
+            f.write(f"   Learning Rate: {config_data['learning_rate']}\n")
+            f.write(f"   LR Scheduler: {config_data['lr_scheduler']}\n")
+            f.write(f"   L1/L2 Reg: {config_data['l1_reg']}/{config_data['l2_reg']}\n")
+            f.write(f"   Dropout: {config_data['dropout_rate']}\n")
+            f.write(f"   Batch Norm: {config_data['use_batch_norm']}\n")
+            f.write(f"   Dynamic Weights: {config_data['dynamic_weighting']}\n\n")
+
+            f.write("Training Context:\n")
             f.write(f"   Epochs: {config_data['epochs']}\n")
             f.write(f"   Batch size: {config_data['batch_size']}\n")
-            f.write(f"   Learning rate: {config_data['learning_rate']}\n")
             f.write(f"   Data augmentation: {config_data['data_augmentation']}\n")
             f.write(f"   Grayscale: {config_data['grayscale']}\n\n")
             
@@ -258,7 +341,7 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                  debug=False,
                  **kwargs):
         # Intercept val_ds if passed in kwargs before calling super
-        self.val_ds = kwargs.pop('val_ds', None)
+        self.val_ds = normalize_validation_data(kwargs.pop('val_ds', None), batch_size=params.BATCH_SIZE)
         super().__init__() # Don't pass kwargs to Keras Callback init
         self.thresholds = accuracy_thresholds
         self.gammas = gamma_values
@@ -273,10 +356,12 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
         self.threshold_reached_epoch = {}
         
     def on_train_begin(self, logs=None):
-        print("\n🎯 Adaptive Focal Loss Controller initialized")
+        print("\n🎯 Focal Loss Base Controller initialized")
         print(f"   Thresholds: {self.thresholds}")
         print(f"   Gamma values: {self.gammas}")
         print(f"   Starting with current model loss")
+        print("   ⏳ Loading dataset and optimizing computation graph...")
+        print("      (This may take a minute for the first epoch)")
         
     def on_epoch_end(self, epoch, logs=None):
         if logs is None:
@@ -313,37 +398,93 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
             print(f"   Epoch {epoch}: val_acc={val_acc:.3f}, current_gamma={self.current_gamma}")
     
     def _switch_to_focal_loss(self, epoch, new_gamma, threshold):
-        """Perform the actual loss function switch"""
+        """Perform the actual loss function switch by updating variables"""
         print(f"\n🔄 Epoch {epoch}: Switching to Focal Loss (γ={new_gamma:.1f})")
-        print(f"   Trigger: val_acc reached {threshold:.2f}")
         
-        # Store old optimizer config (to preserve LR and state)
-        old_lr = K.get_value(self.model.optimizer.learning_rate)
-        
-        # Create new loss based on architecture
-        from utils.losses import sparse_focal_loss, focal_loss
-        if params.MODEL_ARCHITECTURE == "original_haverland":
-            new_loss_fn = focal_loss(gamma=new_gamma, alpha=self.alpha)
+        # Link to the configuration parameters for transparency
+        idx = -1
+        try:
+            # Check internal lists (self.thresholds) for a match
+            t_list = getattr(self, 'thresholds', [])
+            for i, val in enumerate(t_list):
+                if abs(float(val) - float(threshold)) < 0.0001:
+                    idx = i
+                    break
+        except:
+            pass
+
+        if idx != -1:
+            why = f"val_acc {threshold:.2f} met FOCAL_ACCURACY_THRESHOLDS[{idx}]"
+            how = f"Picked FOCAL_GAMMA_VALUES[{idx}] (γ={new_gamma:.1f})"
+        elif isinstance(threshold, (int, float)):
+            why = f"Validation accuracy reached {threshold:.2f}"
+            how = f"Switching to γ={new_gamma:.1f}"
         else:
-            new_loss_fn = sparse_focal_loss(gamma=new_gamma, alpha=self.alpha)
+            why = f"Trigger: {threshold}"
+            how = f"Adjusting γ to {new_gamma:.1f}"
+            
+        print(f"   Why: {why}")
+        print(f"   How: {how}")
         
-        # Recompile with new loss but keep optimizer instance
-        self.model.compile(
-            optimizer=self.model.optimizer,
-            loss=new_loss_fn,
-            metrics=['accuracy']
-        )
+        # Check if model has the dynamic loss object
+        # Note: In Keras 3, model.loss might be the object or a wrapper
+        loss_obj = self.model.loss
         
-        # Keras 3: optimizer state should be preserved if we pass the same instance
-        # but manual LR set is safer
-        K.set_value(self.model.optimizer.learning_rate, old_lr)
+        # We need to find the dynamic loss object if it's wrapped or in a list
+        # Check for our dynamic loss types
+        from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss
         
+        target_loss = None
+        if isinstance(loss_obj, (DynamicSparseFocalLoss, DynamicFocalLoss)):
+            target_loss = loss_obj
+        
+        if target_loss:
+            # Update the variables directly - no recompilation needed!
+            target_loss.gamma.assign(float(new_gamma))
+            
+            # Update alpha (handle both scalar and per-class vector)
+            if isinstance(self.alpha, (list, tuple, np.ndarray)):
+                target_loss.alpha.assign(np.array(self.alpha, dtype=np.float32))
+            else:
+                nb_classes = params.NB_CLASSES
+                target_loss.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
+            
+            print(f"   ✅ Successfully updated γ to {new_gamma:.1f} (No model re-compile)")
+        else:
+            print(f"   ⚠️  Model loss is not a DynamicFocalLoss instance ({type(loss_obj)}).")
+            print("      Falling back to legacy recompile method (WARNING: may crash in Keras 3)")
+            
+            # Store old learning rate
+            if hasattr(self.model.optimizer.learning_rate, 'numpy'):
+                old_lr = self.model.optimizer.learning_rate.numpy()
+            else:
+                old_lr = float(self.model.optimizer.learning_rate)
+            
+            # Create new loss based on architecture
+            from utils.losses import sparse_focal_loss, focal_loss
+            if params.MODEL_ARCHITECTURE == "original_haverland":
+                new_loss_fn = focal_loss(gamma=new_gamma, alpha=self.alpha)
+            else:
+                new_loss_fn = sparse_focal_loss(gamma=new_gamma, alpha=self.alpha)
+            
+            # Recompile
+            self.model.compile(
+                optimizer=self.model.optimizer,
+                loss=new_loss_fn,
+                metrics=['accuracy']
+            )
+            
+            # Restore learning rate
+            if hasattr(self.model.optimizer.learning_rate, 'assign'):
+                self.model.optimizer.learning_rate.assign(old_lr)
+            else:
+                self.model.optimizer.learning_rate = old_lr
+            
+            print(f"   ✅ Legacy recompile successful (γ={new_gamma:.1f})")
+
         # Update state
         self.current_gamma = new_gamma
         self.last_switch_epoch = epoch
-        
-        print(f"   ✅ Successfully switched to γ={new_gamma:.1f}")
-        print(f"   📊 Learning rate maintained at {old_lr:.6f}")
 
 class IntelligentFocalLossController(AdaptiveFocalLossController):
     """
@@ -367,10 +508,21 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
         # Dynamic Alpha Scaling - Base alpha on class count
         nb_classes = params.NB_CLASSES
         self.base_alpha = min(0.45, max(0.25, 0.45 * (10/nb_classes)**0.3))
+        self.alpha = self.base_alpha # Ensure base class uses our dynamic alpha
         self.current_alpha = self.base_alpha
         
         if self.debug:
-            print(f"🎯 Dynamic Alpha Base: {self.base_alpha:.4f} (for {nb_classes} classes)")
+            print(f"🎯 Intelligent Focal Loss initialized:")
+            print(f"   Dynamic Alpha Base: {self.base_alpha:.4f} (for {nb_classes} classes)")
+            print(f"   Plateau Patience  : {self.plateau_patience}")
+
+    def on_train_begin(self, logs=None):
+        print("\n🎯 Intelligent Focal Loss Controller initialized")
+        print(f"   Thresholds      : {self.thresholds}")
+        print(f"   Gamma values    : {self.gammas}")
+        print(f"   Plateau Patience: {self.plateau_patience}")
+        print(f"   Dynamic Alpha   : Enabled (Base={self.current_alpha:.4f})")
+        print("   ⏳ Optimizing computation graph for adaptive weighting...")
 
     def _get_per_class_accuracy(self):
         """Helper to compute per-class accuracy for alpha adjustment"""
@@ -380,13 +532,26 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
         if not hasattr(self, 'val_ds') or self.val_ds is None:
             return None
 
-        for x_batch, y_batch in self.val_ds:
-            preds = self.model.predict(x_batch, verbose=0)
-            y_pred_all.append(np.argmax(preds, axis=-1))
-            if len(y_batch.shape) > 1 and y_batch.shape[-1] > 1:
-                y_true_all.append(np.argmax(y_batch, axis=-1))
-            else:
-                y_true_all.append(np.cast[np.int32](y_batch)) # Simplified
+        from tqdm import tqdm
+        print(f"📊 Analyzing per-class accuracy for {params.NB_CLASSES} classes...")
+        # Try to get data length for tqdm
+        data_len = None
+        if hasattr(self.val_ds, "cardinality"):
+            card = self.val_ds.cardinality().numpy()
+            if card > 0:
+                data_len = card
+        elif hasattr(self.val_ds, "__len__"):
+            data_len = len(self.val_ds)
+        
+        with tqdm(total=data_len, desc="Evaluating classes", leave=False) as pbar:
+            for x_batch, y_batch in self.val_ds:
+                preds = self.model.predict(x_batch, verbose=0)
+                y_pred_all.append(np.argmax(preds, axis=-1))
+                if len(y_batch.shape) > 1 and y_batch.shape[-1] > 1:
+                    y_true_all.append(np.argmax(y_batch, axis=-1))
+                else:
+                    y_true_all.append(np.cast[np.int32](y_batch)) # Simplified
+                pbar.update(1)
                 
         y_true = np.concatenate(y_true_all)
         y_pred = np.concatenate(y_pred_all)
@@ -446,6 +611,8 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
                     
                     # Adjust alpha per class
                     self.current_alpha = self.base_alpha * class_weights
+                    self.alpha = self.current_alpha # Sync for base class switch method
+                    
                     if self.debug:
                         print(f"⚖️  Adjusting Alpha per-class (max weight: {np.max(class_weights):.2f}x)")
                     
@@ -462,7 +629,7 @@ class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
 
     def __init__(self, val_ds, every_n_epochs=5, debug=False):
         super().__init__()
-        self.val_ds = val_ds
+        self.val_ds = normalize_validation_data(val_ds, batch_size=params.BATCH_SIZE)
         self.every_n = every_n_epochs
         self.debug = debug
         self.nb_classes = params.NB_CLASSES
@@ -476,25 +643,38 @@ class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
         y_true_all = []
         y_pred_all = []
         
-        for x_batch, y_batch in self.val_ds:
-            preds = self.model.predict(x_batch, verbose=0)
-            y_pred_all.append(np.argmax(preds, axis=-1))
-            
-            # Handle both sparse and one-hot labels
-            if len(y_batch.shape) > 1 and y_batch.shape[-1] > 1:
-                y_true_all.append(np.argmax(y_batch, axis=-1))
-            else:
-                y_true_all.append(y_batch.numpy().flatten())
+        from tqdm import tqdm
+        # Try to get data length for tqdm
+        data_len = None
+        if hasattr(self.val_ds, "cardinality"):
+            card = self.val_ds.cardinality().numpy()
+            if card > 0:
+                data_len = card
+        elif hasattr(self.val_ds, "__len__"):
+            data_len = len(self.val_ds)
+
+        with tqdm(total=data_len, desc="Validation Report", leave=False) as pbar:
+            for x_batch, y_batch in self.val_ds:
+                preds = self.model.predict(x_batch, verbose=0)
+                y_pred_all.append(np.argmax(preds, axis=-1))
+                
+                # Handle both sparse and one-hot labels
+                if len(y_batch.shape) > 1 and y_batch.shape[-1] > 1:
+                    y_true_all.append(np.argmax(y_batch, axis=-1))
+                else:
+                    # Convert to numpy and flatten
+                    if hasattr(y_batch, "numpy"):
+                        y_true_all.append(y_batch.numpy().flatten())
+                    else:
+                        y_true_all.append(np.array(y_batch).flatten())
+                pbar.update(1)
                 
         y_true = np.concatenate(y_true_all)
         y_pred = np.concatenate(y_pred_all)
         
         # Header
-        print(f"{'Class':<5} | {'Name':<15} | {'Samples':<8} | {'Accuracy':<10}")
-        print("-" * 50)
-        
-        # Load labels if available
-        label_names = params.get_label_names()
+        print(f"{'Class':<5} | {'Name':<15} | {'Validator Samples':<18} | {'Accuracy':<10}")
+        print("-" * 60)
         
         accuracies = []
         for i in range(self.nb_classes):
@@ -503,8 +683,8 @@ class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
             if samples > 0:
                 acc = np.mean(y_pred[mask] == y_true[mask])
                 accuracies.append(acc)
-                name = label_names[i] if i < len(label_names) else f"Class {i}"
-                print(f"{i:<5} | {name[:15]:<15} | {int(samples):<8} | {acc:.4f}")
+                # Use index directly as name for simplicity (0-9 or 0-99)
+                print(f"{i:<5} | {i:<15} | {int(samples):<18} | {acc:.4f}")
             else:
                 accuracies.append(1.0) # No samples, don't penalize
         
