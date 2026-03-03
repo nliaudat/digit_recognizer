@@ -2,7 +2,8 @@
 import tensorflow as tf
 import keras_tuner as kt
 import parameters as params
-from models import create_model
+from models import create_model, compile_model
+from utils.losses import focal_loss, sparse_focal_loss
 import os
 from datetime import datetime
 import random
@@ -21,16 +22,21 @@ class SimpleGuaranteedTuner:
         self.directory = directory
         self.project_name = project_name
         
-        # Get search space parameters
+        # Get search space parameters from params file
         self.tuner_optimizers = getattr(params, 'TUNER_OPTIMIZERS', ['adam', 'rmsprop', 'sgd', 'nadam'])
-        self.tuner_learning_rates = getattr(params, 'TUNER_LEARNING_RATES', [1e-2, 1e-3, 1e-4])
-        self.tuner_batch_sizes = getattr(params, 'TUNER_BATCH_SIZES', [32, 64, 128])
+        self.tuner_learning_rates = getattr(params, 'TUNER_LEARNING_RATES', [1e-3, 5e-4, 1e-4])
+        self.tuner_batch_sizes = getattr(params, 'TUNER_BATCH_SIZES', [32, 64])
+        self.tuner_gammas = getattr(params, 'TUNER_GAMMAS', [0.0, 2.0])
+        self.tuner_alphas = getattr(params, 'TUNER_ALPHAS', [0.25, 0.45])
         
         # Generate all possible configurations
+        # Now including Gamma and Alpha for Focal Loss tuning
         self.all_configs = list(product(
             self.tuner_optimizers, 
             self.tuner_learning_rates, 
-            self.tuner_batch_sizes
+            self.tuner_batch_sizes,
+            self.tuner_gammas,
+            self.tuner_alphas
         ))
         random.shuffle(self.all_configs)
         
@@ -42,25 +48,26 @@ class SimpleGuaranteedTuner:
         self.best_score = -float('inf')
         self.best_config = None
         
-        print(f"🔢 Generated {len(self.all_configs)} unique configurations")
+        print(f"🔢 Generated {len(self.all_configs)} unique configurations (Opt x LR x BS x Gamma x Alpha)")
     
     def search(self, x_train, y_train, validation_data, epochs, verbose=0, callbacks=None):
         """Run the search"""
         x_val, y_val = validation_data
         
-        for i, (optimizer, lr, bs) in enumerate(self.all_configs):
-            print(f"\n🎯 Trial {i+1}/{len(self.all_configs)}: {optimizer}, LR: {lr}, BS: {bs}")
+        for i, (optimizer, lr, bs, gamma, alpha) in enumerate(self.all_configs):
+            gamma_str = f", Gamma: {gamma}" if gamma > 0 else ", Loss: SCCE"
+            print(f"\n🎯 Trial {i+1}/{len(self.all_configs)}: {optimizer}, LR: {lr}, BS: {bs}{gamma_str}")
             
             try:
                 # Build model with current config
-                model = self._build_model_with_config(optimizer, lr, bs)
+                model = self._build_model_with_config(optimizer, lr, bs, gamma, alpha)
                 
                 # Train model
                 history = model.fit(
                     x_train, y_train,
                     validation_data=(x_val, y_val),
                     epochs=epochs,
-                    batch_size=32,  # Fixed during search for fairness
+                    batch_size=bs,  # Now using the tuned batch size
                     verbose=verbose,
                     callbacks=callbacks
                 )
@@ -74,6 +81,8 @@ class SimpleGuaranteedTuner:
                     'optimizer': optimizer,
                     'learning_rate': lr,
                     'batch_size': bs,
+                    'gamma': gamma,
+                    'alpha': alpha,
                     'val_accuracy': val_accuracy,
                     'status': 'COMPLETED',
                     'score': val_accuracy
@@ -95,6 +104,8 @@ class SimpleGuaranteedTuner:
                     'optimizer': optimizer,
                     'learning_rate': lr,
                     'batch_size': bs,
+                    'gamma': gamma,
+                    'alpha': alpha,
                     'val_accuracy': 0.0,
                     'status': 'FAILED',
                     'score': 0.0
@@ -104,9 +115,9 @@ class SimpleGuaranteedTuner:
             # Clean up
             tf.keras.backend.clear_session()
     
-    def _build_model_with_config(self, optimizer, learning_rate, batch_size):
-        """Build model with specific configuration"""
-        print(f"🏗️ Building model with: {optimizer}, LR: {learning_rate}, BS: {batch_size}")
+    def _build_model_with_config(self, optimizer, learning_rate, batch_size, gamma=0.0, alpha=0.45):
+        """Build model with specific configuration including Focal Loss support"""
+        print(f"🏗️ Building model with: {optimizer}, LR: {learning_rate}, BS: {batch_size}, Gamma: {gamma}, Alpha: {alpha}")
         
         # Create model with current architecture
         model = create_model()
@@ -120,24 +131,28 @@ class SimpleGuaranteedTuner:
             opt = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9)
         elif optimizer == 'nadam':
             opt = tf.keras.optimizers.Nadam(learning_rate=learning_rate)
-        elif optimizer == 'adagrad':
-            opt = tf.keras.optimizers.Adagrad(learning_rate=learning_rate)
-        elif optimizer == 'adadelta':
-            opt = tf.keras.optimizers.Adadelta(learning_rate=learning_rate)
         else:
             opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         
-        # DYNAMIC LOSS SELECTION based on model type
-        if params.MODEL_ARCHITECTURE == "original_haverland":
-            loss = 'categorical_crossentropy'
-            print(f"   Using categorical crossentropy for Haverland model")
+        # Determine Loss Function
+        is_haverland = (params.MODEL_ARCHITECTURE == "original_haverland")
+        
+        if gamma > 0:
+            # Use Focal Loss if gamma is enabled in this trial
+            if is_haverland:
+                loss_fn = focal_loss(gamma=gamma, alpha=alpha)
+                print(f"   Using Categorical Focal Loss (γ={gamma}, α={alpha})")
+            else:
+                loss_fn = sparse_focal_loss(gamma=gamma, alpha=alpha)
+                print(f"   Using Sparse Focal Loss (γ={gamma}, α={alpha})")
         else:
-            loss = 'sparse_categorical_crossentropy'
-            print(f"   Using sparse categorical crossentropy for {params.MODEL_ARCHITECTURE}")
+            # Revert to standard CrossEntropy
+            loss_fn = 'categorical_crossentropy' if is_haverland else 'sparse_categorical_crossentropy'
+            print(f"   Using standard {'Categorical' if is_haverland else 'Sparse Categorical'} Crossentropy")
         
         model.compile(
             optimizer=opt,
-            loss=loss,
+            loss=loss_fn,
             metrics=['accuracy']
         )
         
@@ -179,10 +194,11 @@ def save_tuning_results_csv(trials, output_dir, search_type="guaranteed_unique")
         for trial in trials:
             csv_data.append({
                 'trial_id': trial['trial_id'],
-                'trial_trial_id': f"trial_{trial['trial_id']}",
                 'optimizer': trial['optimizer'],
                 'learning_rate': trial['learning_rate'],
                 'batch_size': trial['batch_size'],
+                'gamma': trial.get('gamma', 0.0),
+                'alpha': trial.get('alpha', 0.45),
                 'val_accuracy': trial['val_accuracy'],
                 'status': trial['status'],
                 'score': trial['score'],
@@ -225,6 +241,8 @@ def save_best_hyperparameters_json(best_params, output_dir):
             "BEST_OPTIMIZER": best_params['optimizer'],
             "BEST_LEARNING_RATE": best_params['learning_rate'],
             "BEST_BATCH_SIZE": best_params['batch_size'],
+            "BEST_FOCAL_GAMMA": best_params.get('gamma', 0.0),
+            "BEST_FOCAL_ALPHA": best_params.get('alpha', 0.45),
             "BEST_VAL_ACCURACY": float(best_params['val_accuracy']),
             "TUNING_TIMESTAMP": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "MODEL_ARCHITECTURE": params.MODEL_ARCHITECTURE,
@@ -246,6 +264,8 @@ def save_best_hyperparameters_json(best_params, output_dir):
             f.write(f"BEST_OPTIMIZER = '{best_params['optimizer']}'\n")
             f.write(f"BEST_LEARNING_RATE = {best_params['learning_rate']}\n")
             f.write(f"BEST_BATCH_SIZE = {best_params['batch_size']}\n")
+            f.write(f"FOCAL_GAMMA = {best_params.get('gamma', 0.0)}\n")
+            f.write(f"FOCAL_ALPHA = {best_params.get('alpha', 0.45)}\n")
             f.write(f"# Best validation accuracy: {best_params['val_accuracy']:.4f}\n")
             f.write(f"# Tuning completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"# Model architecture: {params.MODEL_ARCHITECTURE}\n")
@@ -321,11 +341,13 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
     
     # Get search space parameters
     tuner_optimizers = getattr(params, 'TUNER_OPTIMIZERS', ['adam', 'rmsprop', 'sgd', 'nadam'])
-    tuner_learning_rates = getattr(params, 'TUNER_LEARNING_RATES', [1e-2, 1e-3, 1e-4])
-    tuner_batch_sizes = getattr(params, 'TUNER_BATCH_SIZES', [32, 64, 128])
+    tuner_learning_rates = getattr(params, 'TUNER_LEARNING_RATES', [1e-3, 5e-4, 2e-4, 1e-4])
+    tuner_batch_sizes = getattr(params, 'TUNER_BATCH_SIZES', [32, 64])
+    tuner_gammas = getattr(params, 'TUNER_GAMMAS', [0.0, 1.5, 2.0, 3.0, 4.5])
+    tuner_alphas = getattr(params, 'TUNER_ALPHAS', [0.25, 0.45])
     
     # Calculate total possible combinations
-    total_combinations = len(tuner_optimizers) * len(tuner_learning_rates) * len(tuner_batch_sizes)
+    total_combinations = len(tuner_optimizers) * len(tuner_learning_rates) * len(tuner_batch_sizes) * len(tuner_gammas) * len(tuner_alphas)
     
     # Don't allow more trials than possible combinations
     if num_trials > total_combinations:
@@ -360,6 +382,8 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
         print(f"   Optimizers: {tuner_optimizers}")
         print(f"   Learning rates: {tuner_learning_rates}")
         print(f"   Batch sizes: {tuner_batch_sizes}")
+        print(f"   Gammas (Focal): {tuner_gammas}")
+        print(f"   Alphas (Focal): {tuner_alphas}")
         print(f"   Architecture: FIXED ({params.MODEL_ARCHITECTURE})")
         print(f"   Total combinations: {total_combinations}")
         print(f"   Testing {num_trials} guaranteed unique combinations")
@@ -399,6 +423,8 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
             'optimizer': best_config['optimizer'],
             'learning_rate': best_config['learning_rate'],
             'batch_size': best_config['batch_size'],
+            'gamma': best_config.get('gamma', 0.0),
+            'alpha': best_config.get('alpha', 0.45),
             'val_accuracy': best_config['val_accuracy'],
             'output_dir': output_dir,
             'search_strategy': 'guaranteed_unique'
@@ -437,11 +463,19 @@ def manual_hyperparameter_search(x_train, y_train, x_val, y_val, num_trials=10, 
     print("🎯 Starting MANUAL Hyperparameter Search (Guaranteed Unique)")
     
     tuner_optimizers = getattr(params, 'TUNER_OPTIMIZERS', ['adam', 'rmsprop', 'sgd', 'nadam'])
-    tuner_learning_rates = getattr(params, 'TUNER_LEARNING_RATES', [1e-2, 1e-3, 1e-4])
-    tuner_batch_sizes = getattr(params, 'TUNER_BATCH_SIZES', [32, 64, 128])
+    tuner_learning_rates = getattr(params, 'TUNER_LEARNING_RATES', [1e-3, 5e-4, 2e-4, 1e-4])
+    tuner_batch_sizes = getattr(params, 'TUNER_BATCH_SIZES', [32, 64])
+    tuner_gammas = getattr(params, 'TUNER_GAMMAS', [0.0, 1.5, 2.0, 3.0, 4.5])
+    tuner_alphas = getattr(params, 'TUNER_ALPHAS', [0.25, 0.45])
     
     # Generate all possible combinations
-    all_combinations = list(product(tuner_optimizers, tuner_learning_rates, tuner_batch_sizes))
+    all_combinations = list(product(
+        tuner_optimizers, 
+        tuner_learning_rates, 
+        tuner_batch_sizes,
+        tuner_gammas,
+        tuner_alphas
+    ))
     random.shuffle(all_combinations)
     
     # Limit to requested number of trials
@@ -454,8 +488,9 @@ def manual_hyperparameter_search(x_train, y_train, x_val, y_val, num_trials=10, 
     
     print(f"🔢 Testing {len(combinations_to_test)} guaranteed unique combinations")
     
-    for i, (optimizer, lr, bs) in enumerate(combinations_to_test):
-        print(f"\n🔬 Trial {i+1}/{len(combinations_to_test)}: {optimizer}, LR: {lr}, BS: {bs}")
+    for i, (optimizer, lr, bs, gamma, alpha) in enumerate(combinations_to_test):
+        gamma_str = f", Gamma: {gamma}" if gamma > 0 else ", Loss: SCCE"
+        print(f"\n🔬 Trial {i+1}/{len(combinations_to_test)}: {optimizer}, LR: {lr}, BS: {bs}{gamma_str}")
         
         try:
             # Create and train model
@@ -473,9 +508,17 @@ def manual_hyperparameter_search(x_train, y_train, x_val, y_val, num_trials=10, 
             else:
                 opt = tf.keras.optimizers.Adam(learning_rate=lr)
             
-            # Compile
-            loss = 'categorical_crossentropy' if params.MODEL_ARCHITECTURE == "original_haverland" else 'sparse_categorical_crossentropy'
-            model.compile(optimizer=opt, loss=loss, metrics=['accuracy'])
+            # Determine Loss Function
+            is_haverland = (params.MODEL_ARCHITECTURE == "original_haverland")
+            if gamma > 0:
+                if is_haverland:
+                    loss_fn = focal_loss(gamma=gamma, alpha=alpha)
+                else:
+                    loss_fn = sparse_focal_loss(gamma=gamma, alpha=alpha)
+            else:
+                loss_fn = 'categorical_crossentropy' if is_haverland else 'sparse_categorical_crossentropy'
+            
+            model.compile(optimizer=opt, loss=loss_fn, metrics=['accuracy'])
             
             # Train briefly
             history = model.fit(
@@ -492,6 +535,8 @@ def manual_hyperparameter_search(x_train, y_train, x_val, y_val, num_trials=10, 
                 'optimizer': optimizer,
                 'learning_rate': lr,
                 'batch_size': bs,
+                'gamma': gamma,
+                'alpha': alpha,
                 'val_accuracy': val_accuracy,
                 'status': 'COMPLETED',
                 'score': val_accuracy
@@ -506,6 +551,8 @@ def manual_hyperparameter_search(x_train, y_train, x_val, y_val, num_trials=10, 
                 'optimizer': optimizer,
                 'learning_rate': lr,
                 'batch_size': bs,
+                'gamma': gamma,
+                'alpha': alpha,
                 'val_accuracy': 0.0,
                 'status': 'FAILED',
                 'score': 0.0
@@ -530,11 +577,12 @@ def manual_hyperparameter_search(x_train, y_train, x_val, y_val, num_trials=10, 
     output_dir = os.path.join(params.OUTPUT_DIR, f"manual_tune_{params.MODEL_ARCHITECTURE}_{timestamp}")
     os.makedirs(output_dir, exist_ok=True)
     
-    # Create best parameters dictionary
     best_params = {
         'optimizer': best_result['optimizer'],
         'learning_rate': best_result['learning_rate'],
         'batch_size': best_result['batch_size'],
+        'gamma': best_result.get('gamma', 0.0),
+        'alpha': best_result.get('alpha', 0.45),
         'val_accuracy': best_result['val_accuracy'],
         'output_dir': output_dir,
         'search_strategy': 'manual'

@@ -57,7 +57,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
 
     # TFLite model checkpoint - pass x_train_raw if available
     callbacks.append(
-        TFLiteCheckpoint(tflite_manager, representative_data, x_train_raw)
+        TFLiteCheckpoint(tflite_manager, representative_data, x_train_raw, save_frequency=params.CHECKPOINT_FREQUENCY)
     )
     
     # Learning rate scheduler

@@ -328,11 +328,13 @@ else:  # 100 classes
 
 # Intelligent Focal Loss Controller Settings
 if NB_CLASSES <= 10:
-    FOCAL_ACCURACY_THRESHOLDS = [0.80, 0.90, 0.95]
+    # Delay activation until model hits the SCCE "natural" limit
+    FOCAL_ACCURACY_THRESHOLDS = [0.95, 0.97, 0.985]
 else:  # 100 classes or more
-    FOCAL_ACCURACY_THRESHOLDS = [0.75, 0.85, 0.92]  # Lower thresholds for harder 100-class task
+    # Maintain SCCE baseline longer for complex tasks
+    FOCAL_ACCURACY_THRESHOLDS = [0.85, 0.92, 0.96]
 
-FOCAL_GAMMA_VALUES = [1.0, 1.5, 2.0]
+FOCAL_GAMMA_VALUES = [1.5, 3.0, 4.5] # Sharp focus for the last 1-2% mistakes
 FOCAL_PLATEAU_PATIENCE = 5
 FOCAL_PLATEAU_MIN_DELTA = 0.001
 
@@ -347,6 +349,21 @@ DYNAMIC_WEIGHTS_EPOCHS = 5  # Frequency of dynamic weight updates (in epochs)
 # Resume Training Support
 RESUME_MODEL_PATH = ""  # Path to best_model.keras to resume from (empty = start fresh)
 INITIAL_EPOCH = 0       # Epoch to resume from (auto-detected by retrain_all.py)
+
+# ==============================================================================
+# HYPERPARAMETER TUNING (tuner.py)
+# ==============================================================================
+
+TUNER_MAX_TRIALS = 30       # Maximum number of unique combinations to test
+TUNER_EPOCHS = 10           # Epochs per trial (short training to find best parameters)
+TUNER_EARLY_STOPPING_PATIENCE = 3
+
+# Search Space
+TUNER_OPTIMIZERS = ['adam', 'rmsprop', 'sgd', 'nadam']
+TUNER_LEARNING_RATES = [1e-3, 5e-4, 2e-4, 1e-4]  # Refined precision for high-accuracy tasks
+TUNER_BATCH_SIZES = [32, 64]
+TUNER_GAMMAS = [0.0, 1.5, 2.0, 3.0, 4.5]        # 0.0 means standard SCCE
+TUNER_ALPHAS = [0.25, 0.45]
 
 # ==============================================================================
 # TRAINING HYPERPARAMETERS
