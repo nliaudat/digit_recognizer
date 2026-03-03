@@ -75,7 +75,8 @@ class DynamicSparseFocalLoss(tf.keras.losses.Loss):
     Keras 3 compatible Focal Loss that allows updating gamma and alpha 
     during training without model recompilation.
     """
-    def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None, name='dynamic_sparse_focal_loss'):
+    def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None,
+                 label_smoothing=None, name='dynamic_sparse_focal_loss'):
         super().__init__(name=name)
         self.gamma = tf.Variable(gamma, dtype=tf.float32, trainable=False, name=f"{name}_gamma")
         
@@ -83,6 +84,12 @@ class DynamicSparseFocalLoss(tf.keras.losses.Loss):
         if nb_classes is None:
             import parameters as params
             nb_classes = params.NB_CLASSES
+
+        # Label smoothing: read from params when not supplied explicitly
+        if label_smoothing is None:
+            import parameters as params
+            label_smoothing = getattr(params, 'LABEL_SMOOTHING', 0.0)
+        self.label_smoothing = float(label_smoothing)
             
         if isinstance(alpha, (list, tuple, np.ndarray)):
             init_alpha = np.array(alpha, dtype=np.float32)
@@ -95,8 +102,14 @@ class DynamicSparseFocalLoss(tf.keras.losses.Loss):
         y_true_int = tf.cast(y_true, tf.int32)
         if len(y_true_int.shape) > 1 and y_true_int.shape[-1] == 1:
             y_true_int = tf.squeeze(y_true_int, axis=-1)
-            
-        y_true_one_hot = tf.one_hot(y_true_int, depth=tf.shape(y_pred)[-1])
+
+        num_classes = tf.shape(y_pred)[-1]
+        y_true_one_hot = tf.one_hot(y_true_int, depth=num_classes)
+
+        # Label smoothing: spread ε across all classes, concentrate (1-ε) on true class
+        if self.label_smoothing > 0.0:
+            smooth = self.label_smoothing
+            y_true_one_hot = y_true_one_hot * (1.0 - smooth) + smooth / tf.cast(num_classes, tf.float32)
         
         epsilon = K.epsilon()
         y_pred = tf.clip_by_value(y_pred, epsilon, 1. - epsilon)
@@ -112,13 +125,19 @@ class DynamicSparseFocalLoss(tf.keras.losses.Loss):
 
 class DynamicFocalLoss(tf.keras.losses.Loss):
     """Same as DynamicSparseFocalLoss but for one-hot labels."""
-    def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None, name='dynamic_focal_loss'):
+    def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None,
+                 label_smoothing=None, name='dynamic_focal_loss'):
         super().__init__(name=name)
         self.gamma = tf.Variable(gamma, dtype=tf.float32, trainable=False, name=f"{name}_gamma")
         
         if nb_classes is None:
             import parameters as params
             nb_classes = params.NB_CLASSES
+
+        if label_smoothing is None:
+            import parameters as params
+            label_smoothing = getattr(params, 'LABEL_SMOOTHING', 0.0)
+        self.label_smoothing = float(label_smoothing)
             
         if isinstance(alpha, (list, tuple, np.ndarray)):
             init_alpha = np.array(alpha, dtype=np.float32)
@@ -128,7 +147,13 @@ class DynamicFocalLoss(tf.keras.losses.Loss):
         self.alpha = tf.Variable(init_alpha, dtype=tf.float32, trainable=False, name=f"{name}_alpha")
 
     def call(self, y_true, y_pred):
+        num_classes = tf.shape(y_pred)[-1]
         y_true_one_hot = tf.cast(y_true, y_pred.dtype)
+
+        # Label smoothing
+        if self.label_smoothing > 0.0:
+            smooth = self.label_smoothing
+            y_true_one_hot = y_true_one_hot * (1.0 - smooth) + smooth / tf.cast(num_classes, y_pred.dtype)
         
         epsilon = K.epsilon()
         y_pred = tf.clip_by_value(y_pred, epsilon, 1. - epsilon)
