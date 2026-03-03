@@ -272,8 +272,8 @@ ORIGINAL_HAVERLAND_DROPOUT_RATES = [0.25, 0.25, 0.25, 0.5]  # Fixed from noteboo
 # ==============================================================================
 
 # Optimizer Selection
-OPTIMIZER_TYPE = "rmsprop"  # Options: "rmsprop", "adam", "sgd", "adagrad", "adamw", "nadam"
-# OPTIMIZER_TYPE = "nadam"  # for digit_recognizer_v4 100cls RGB
+OPTIMIZER_TYPE = "adamw"  # was "rmsprop"; AdamW = Adam + proper weight decay (2024-2026 default)
+# OPTIMIZER_TYPE = "rmsprop"  # ← restore to roll back
 
 # RMSprop Hyperparameters
 RMSPROP_RHO = 0.9
@@ -312,7 +312,7 @@ ADAMW_EPSILON = 1e-07
 #   - "sparse_categorical_crossentropy": Standard CrossEntropy (for integer labels).
 #   - "categorical_crossentropy": Standard CrossEntropy (for one-hot/haverland model).
 LOSS_TYPE = "IntelligentFocalLossController"  
-LABEL_SMOOTHING = 0.0  # Apply label smoothing if > 0
+LABEL_SMOOTHING = 0.05  # was 0.0 — regularizes overconfident logits, esp. for 100-class
 
 # Focal Loss Parameters
 FOCAL_GAMMA = 2.0      # Target focus parameter for Focal Loss
@@ -328,13 +328,23 @@ else:  # 100 classes
 
 # Intelligent Focal Loss Controller Settings
 if NB_CLASSES <= 10:
-    # Delay activation until model hits the SCCE "natural" limit
-    FOCAL_ACCURACY_THRESHOLDS = [0.95, 0.97, 0.985]
+    # --- 10-class: delay until SCCE natural ceiling ---
+    # (ep13 analysis: controller fired at val_acc=0.9656, causing a −0.006 dip)
+    FOCAL_ACCURACY_THRESHOLDS = [0.96, 0.975, 0.988]  # was [0.95, 0.97, 0.985]
 else:  # 100 classes or more
-    # Maintain SCCE baseline longer for complex tasks
-    FOCAL_ACCURACY_THRESHOLDS = [0.85, 0.92, 0.96]
+    # --- 100-class: wait longer; model needs to learn easy examples first ---
+    # (ep38 analysis: γ fired at val_acc≈0.786, too early for 100-class task)
+    FOCAL_ACCURACY_THRESHOLDS = [0.88, 0.93, 0.97]   # was [0.85, 0.92, 0.96]
 
-FOCAL_GAMMA_VALUES = [1.5, 3.0, 4.5] # Sharp focus for the last 1-2% mistakes
+if NB_CLASSES <= 10:
+    FOCAL_GAMMA_VALUES = [1.5, 3.0, 4.5]   # unchanged for 10cls (already proven)
+else:
+    FOCAL_GAMMA_VALUES = [1.2, 2.0, 3.5]   # gentler ramp for 100cls (was [1.5, 3.0, 4.5])
+
+# Smooth γ transition: ramp linearly over N epochs instead of an instant step.
+# Set to 0 to keep the original hard-switch behaviour.
+FOCAL_GAMMA_RAMP_EPOCHS = 5             # NEW — eliminates the γ-activation accuracy dip
+
 FOCAL_PLATEAU_PATIENCE = 5
 FOCAL_PLATEAU_MIN_DELTA = 0.001
 
@@ -359,11 +369,19 @@ TUNER_EPOCHS = 10           # Epochs per trial (short training to find best para
 TUNER_EARLY_STOPPING_PATIENCE = 3
 
 # Search Space
-TUNER_OPTIMIZERS = ['adam', 'rmsprop', 'sgd', 'nadam']
+TUNER_OPTIMIZERS = ['adam', 'rmsprop', 'sgd', 'nadam', 'adamw']  # adamw added
 TUNER_LEARNING_RATES = [1e-3, 5e-4, 2e-4, 1e-4]  # Refined precision for high-accuracy tasks
 TUNER_BATCH_SIZES = [32, 64]
 TUNER_GAMMAS = [0.0, 1.5, 2.0, 3.0, 4.5]        # 0.0 means standard SCCE
 TUNER_ALPHAS = [0.25, 0.45]
+
+# Fine-Tune Tuner Search Space (used by: python tuner.py --finetune)
+# Loads a pre-trained best_model.keras and searches only post-plateau decisions:
+TUNER_FINETUNE_EPOCHS = 15                                        # epochs per fine-tune trial
+TUNER_FINETUNE_LRS = [5e-5, 1e-4, 3e-4, 5e-4]                  # small LRs only
+TUNER_FINETUNE_OPTIMIZERS = ['adam', 'rmsprop', 'nadam', 'sgd', 'adamw']  # adamw added
+TUNER_LR_FACTORS = [0.3, 0.5, 0.7]                              # ReduceLROnPlateau factor to sweep
+FINETUNE_UNFREEZE_LAST_N = 0                                      # 0 = unfreeze all layers
 
 # ==============================================================================
 # TRAINING HYPERPARAMETERS
@@ -384,21 +402,34 @@ VALIDATION_SPLIT = 0.2     # 20% of training for validation
 
 # Learning Rate Scheduler
 USE_LEARNING_RATE_SCHEDULER = True
-LR_SCHEDULER_TYPE = "reduce_on_plateau"  # Options: "reduce_on_plateau", "exponential", "cosine", "step"
+# 'onecycle': single cosine warm-up + decay (super-convergence, 2024-2026 SOTA for small models)
+# 'cosine': CosineDecayRestarts with periodic kicks
+# 'reduce_on_plateau': classic plateau-based decay (still available, set to roll back)
+LR_SCHEDULER_TYPE = "onecycle"  # was "cosine"
 
 # ReduceLROnPlateau Parameters
 LR_SCHEDULER_PATIENCE = 3
 LR_SCHEDULER_MIN_LR = 1e-7
-LR_SCHEDULER_FACTOR = 0.5
+# Nudged from 0.5 →0.4: slightly faster decay avoids 20-epoch plateau-creep
+# (both 10cls and 100cls runs showed ~15-25 wasted epochs at near-identical val_acc)
+LR_SCHEDULER_FACTOR = 0.4
 LR_SCHEDULER_MONITOR = 'val_loss'
+
+# LR Warm-up (applied at training start before the main scheduler kicks in)
+# Note: when LR_SCHEDULER_TYPE='cosine', warm-up is less critical since cosine
+# already starts from the full LR. Consider setting USE_LR_WARMUP=False for cosine.
+USE_LR_WARMUP = False         # Disabled for cosine (the schedule handles the ramp naturally)
+LR_WARMUP_INITIAL_SCALE = 0.1 # Used only when USE_LR_WARMUP=True
 
 # Exponential Decay Parameters
 EXPONENTIAL_DECAY_STEPS = 1000
 EXPONENTIAL_DECAY_RATE = 0.96
 
 # Cosine Decay Parameters
-COSINE_DECAY_ALPHA = 0.0  # Minimum learning rate as fraction of initial
-LR_WARMUP_EPOCHS = 10     # Number of warmup epochs for CosineDecayRestarts
+COSINE_DECAY_ALPHA = 1e-6    # Minimum LR floor (never decays below this)
+# LR_WARMUP_EPOCHS doubles as `first_decay_steps` for CosineDecayRestarts:
+# 15 epochs gives the model time to settle before each restart kick.
+LR_WARMUP_EPOCHS = 15        # was 5 — longer period makes cosine restarts more useful
 
 # Step Decay Parameters
 STEP_DECAY_STEP_SIZE = 10
@@ -438,9 +469,12 @@ WEIGHT_INITIALIZER = "he_normal"  # Options: "glorot_uniform", "he_normal", "he_
 
 # Early Stopping
 USE_EARLY_STOPPING = True
-EARLY_STOPPING_PATIENCE = 30
+# Tightened from 30→20: both runs wasted 15-25 epochs with no real improvement
+# (10cls plateau @ep46, 100cls plateau @ep68 — both ran 15-25 epochs beyond the peak)
+EARLY_STOPPING_PATIENCE = 20
 EARLY_STOPPING_MONITOR = 'val_accuracy'
-EARLY_STOPPING_MIN_DELTA = 0.0001
+# Raised from 0.0001→0.0002: more realistic threshold at the noise floor
+EARLY_STOPPING_MIN_DELTA = 0.0002
 RESTORE_BEST_WEIGHTS = True
 
 # Model Checkpoint

@@ -325,6 +325,61 @@ def save_training_csv(training_dir, history):
     return None
 
 # ──────────────────────────────────────────────────────────────────────────────
+# LR Warm-up Callback
+# ──────────────────────────────────────────────────────────────────────────────
+
+class LRWarmupCallback(tf.keras.callbacks.Callback):
+    """
+    Linearly ramps the learning rate from `initial_lr * initial_scale` up to
+    `initial_lr` over `warmup_epochs` epochs, then deactivates itself.
+
+    Prevents high-variance gradient updates on cold-start when LR=1e-3 hits
+    freshly-initialised weights.  After the warm-up window, ReduceLROnPlateau
+    (or whichever scheduler is configured) takes full control.
+
+    Parameters read from `parameters.py` when not supplied explicitly:
+      USE_LR_WARMUP, LR_WARMUP_EPOCHS, LR_WARMUP_INITIAL_SCALE
+    """
+
+    def __init__(self, initial_lr=None, warmup_epochs=None, initial_scale=None):
+        super().__init__()
+        self.initial_lr = initial_lr or getattr(params, 'LEARNING_RATE', 1e-3)
+        self.warmup_epochs = warmup_epochs or getattr(params, 'LR_WARMUP_EPOCHS', 5)
+        self.initial_scale = initial_scale or getattr(params, 'LR_WARMUP_INITIAL_SCALE', 0.1)
+        self._active = True  # disabled after warm-up completes
+
+    def on_train_begin(self, logs=None):
+        # Set to scaled start value immediately
+        start_lr = self.initial_lr * self.initial_scale
+        self._set_lr(start_lr)
+        print(f"\n🌡️  LR Warm-up active: {start_lr:.2e} → {self.initial_lr:.2e} "
+              f"over {self.warmup_epochs} epochs")
+
+    def on_epoch_begin(self, epoch, logs=None):
+        if not self._active:
+            return
+        if epoch < self.warmup_epochs:
+            # Linear interpolation: epoch 0 → initial_scale, epoch warmup_epochs → 1.0
+            progress = epoch / self.warmup_epochs  # 0.0 … <1.0
+            scale = self.initial_scale + (1.0 - self.initial_scale) * progress
+            lr = self.initial_lr * scale
+            self._set_lr(lr)
+        else:
+            # Warm-up complete — restore full LR and deactivate
+            self._set_lr(self.initial_lr)
+            self._active = False
+            print(f"\n✅ LR Warm-up complete at epoch {epoch}. "
+                  f"LR restored to {self.initial_lr:.2e}")
+
+    def _set_lr(self, lr):
+        if hasattr(self.model, 'optimizer') and self.model.optimizer is not None:
+            if hasattr(self.model.optimizer.learning_rate, 'assign'):
+                self.model.optimizer.learning_rate.assign(float(lr))
+            else:
+                self.model.optimizer.learning_rate = float(lr)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Adaptive Loss Controllers
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -354,6 +409,12 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
         self.current_gamma = 0.0  # Start with CrossEntropy (effectively)
         self.last_switch_epoch = 0
         self.threshold_reached_epoch = {}
+
+        # γ ramp state — smooth transition instead of hard step
+        self.gamma_ramp_epochs = getattr(params, 'FOCAL_GAMMA_RAMP_EPOCHS', 0)
+        self._ramp_start_gamma = 0.0
+        self._ramp_target_gamma = 0.0
+        self._ramp_start_epoch = -1  # -1 means no ramp in progress
         
     def on_train_begin(self, logs=None):
         print("\n🎯 Focal Loss Base Controller initialized")
@@ -366,8 +427,17 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         if logs is None:
             return
-            
+
+        # Advance any in-progress γ ramp first (safe no-op when no ramp)
+        self._tick_gamma_ramp(epoch)
+
         val_acc = logs.get('val_accuracy', 0)
+
+        # While a ramp is in progress, skip threshold checks to avoid cascading switches
+        if self._ramp_start_epoch >= 0:
+            if self.debug:
+                print(f"   Epoch {epoch}: γ ramp in progress, skipping threshold check")
+            return
         
         # Check each threshold
         for i, threshold in enumerate(self.thresholds):
@@ -395,11 +465,41 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
         
         # Log current state
         if self.debug and epoch % 5 == 0:
-            print(f"   Epoch {epoch}: val_acc={val_acc:.3f}, current_gamma={self.current_gamma}")
+            print(f"   Epoch {epoch}: val_acc={val_acc:.3f}, current_gamma={self.current_gamma:.3f}")
     
+    def _tick_gamma_ramp(self, epoch):
+        """Called every epoch to advance an in-progress γ ramp."""
+        if self._ramp_start_epoch < 0:
+            return  # No ramp in progress
+
+        elapsed = epoch - self._ramp_start_epoch
+        if elapsed >= self.gamma_ramp_epochs:
+            # Ramp complete — snap to target
+            interp_gamma = self._ramp_target_gamma
+            self._ramp_start_epoch = -1  # Mark ramp done
+        else:
+            # Linear interpolation
+            progress = elapsed / self.gamma_ramp_epochs
+            interp_gamma = self._ramp_start_gamma + progress * (self._ramp_target_gamma - self._ramp_start_gamma)
+
+        # Apply to the live loss variable (no recompile)
+        from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss
+        loss_obj = self.model.loss
+        if isinstance(loss_obj, (DynamicSparseFocalLoss, DynamicFocalLoss)):
+            loss_obj.gamma.assign(float(interp_gamma))
+            self.current_gamma = interp_gamma
+            if self.debug:
+                print(f"   🎚️  γ ramp: epoch {epoch}, γ={interp_gamma:.3f} "
+                      f"({elapsed}/{self.gamma_ramp_epochs} steps)")
+
     def _switch_to_focal_loss(self, epoch, new_gamma, threshold):
-        """Perform the actual loss function switch by updating variables"""
-        print(f"\n🔄 Epoch {epoch}: Switching to Focal Loss (γ={new_gamma:.1f})")
+        """Perform the actual loss function switch by updating variables.
+        When gamma_ramp_epochs > 0, kicks off a linear ramp instead of a hard step."""
+        if self.gamma_ramp_epochs > 0:
+            print(f"\n🔄 Epoch {epoch}: Starting γ ramp → {new_gamma:.1f} "
+                  f"(over {self.gamma_ramp_epochs} epochs)")
+        else:
+            print(f"\n🔄 Epoch {epoch}: Switching to Focal Loss (γ={new_gamma:.1f})")
         
         # Link to the configuration parameters for transparency
         idx = -1
@@ -439,17 +539,31 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
             target_loss = loss_obj
         
         if target_loss:
-            # Update the variables directly - no recompilation needed!
-            target_loss.gamma.assign(float(new_gamma))
-            
-            # Update alpha (handle both scalar and per-class vector)
-            if isinstance(self.alpha, (list, tuple, np.ndarray)):
-                target_loss.alpha.assign(np.array(self.alpha, dtype=np.float32))
+            if self.gamma_ramp_epochs > 0:
+                # Kick off a smooth ramp — don't assign yet, let _tick_gamma_ramp drive it
+                self._ramp_start_gamma = float(self.current_gamma)
+                self._ramp_target_gamma = float(new_gamma)
+                self._ramp_start_epoch = epoch
+                # We still need to update alpha immediately
+                if isinstance(self.alpha, (list, tuple, np.ndarray)):
+                    target_loss.alpha.assign(np.array(self.alpha, dtype=np.float32))
+                else:
+                    nb_classes = params.NB_CLASSES
+                    target_loss.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
+                print(f"   🎚️  γ ramp initiated: {self._ramp_start_gamma:.2f} → {new_gamma:.1f} "
+                      f"over {self.gamma_ramp_epochs} epochs")
             else:
-                nb_classes = params.NB_CLASSES
-                target_loss.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
-            
-            print(f"   ✅ Successfully updated γ to {new_gamma:.1f} (No model re-compile)")
+                # Hard switch (original behaviour, ramp_epochs=0)
+                target_loss.gamma.assign(float(new_gamma))
+                
+                # Update alpha (handle both scalar and per-class vector)
+                if isinstance(self.alpha, (list, tuple, np.ndarray)):
+                    target_loss.alpha.assign(np.array(self.alpha, dtype=np.float32))
+                else:
+                    nb_classes = params.NB_CLASSES
+                    target_loss.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
+                
+                print(f"   ✅ Successfully updated γ to {new_gamma:.1f} (No model re-compile)")
         else:
             print(f"   ⚠️  Model loss is not a DynamicFocalLoss instance ({type(loss_obj)}).")
             print("      Falling back to legacy recompile method (WARNING: may crash in Keras 3)")
@@ -482,8 +596,9 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
             
             print(f"   ✅ Legacy recompile successful (γ={new_gamma:.1f})")
 
-        # Update state
-        self.current_gamma = new_gamma
+        # Update state (for ramp, current_gamma will be updated each epoch by _tick_gamma_ramp)
+        if self.gamma_ramp_epochs == 0:
+            self.current_gamma = new_gamma
         self.last_switch_epoch = epoch
 
 class IntelligentFocalLossController(AdaptiveFocalLossController):
@@ -522,6 +637,8 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
         print(f"   Gamma values    : {self.gammas}")
         print(f"   Plateau Patience: {self.plateau_patience}")
         print(f"   Dynamic Alpha   : Enabled (Base={self.current_alpha:.4f})")
+        ramp_info = f"{self.gamma_ramp_epochs} epochs" if self.gamma_ramp_epochs > 0 else "disabled (hard switch)"
+        print(f"   γ Ramp          : {ramp_info}")
         print("   ⏳ Optimizing computation graph for adaptive weighting...")
 
     def _get_per_class_accuracy(self):

@@ -60,16 +60,124 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         TFLiteCheckpoint(tflite_manager, representative_data, x_train_raw, save_frequency=params.CHECKPOINT_FREQUENCY)
     )
     
-    # Learning rate scheduler
-    callbacks.append(
-        tf.keras.callbacks.ReduceLROnPlateau(
-            monitor=params.LR_SCHEDULER_MONITOR,
-            factor=params.LR_SCHEDULER_FACTOR,
-            patience=params.LR_SCHEDULER_PATIENCE,
-            min_lr=params.LR_SCHEDULER_MIN_LR,
-            verbose=1 if debug else 0
+    # Learning rate scheduler — respects LR_SCHEDULER_TYPE from parameters.py
+    scheduler_type = getattr(params, 'LR_SCHEDULER_TYPE', 'reduce_on_plateau')
+
+    if scheduler_type == 'onecycle':
+        # OneCycleLR: warm up to peak LR over 30% of total epochs,
+        # then cosine-decay to near-zero over the remaining 70%.
+        # This is the 2024-2026 super-convergence standard for small models.
+        warmup_frac = 0.3
+        warmup_steps = max(1, int(total_epochs * warmup_frac))
+        decay_steps  = max(1, total_epochs - warmup_steps)
+
+        min_lr = getattr(params, 'COSINE_DECAY_ALPHA', 1e-6)
+        peak_lr = params.LEARNING_RATE
+
+        # Phase 1: linear warm-up
+        warmup_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
+            initial_learning_rate=peak_lr * 0.1,
+            decay_steps=warmup_steps,
+            end_learning_rate=peak_lr,
+            power=1.0,
         )
-    )
+        # Phase 2: cosine decay from peak to floor
+        cosine_schedule = tf.keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=peak_lr,
+            decay_steps=decay_steps,
+            alpha=min_lr / peak_lr,
+        )
+
+        def _onecycle_lr(epoch):
+            if epoch < warmup_steps:
+                return float(warmup_schedule(epoch))
+            else:
+                return float(cosine_schedule(epoch - warmup_steps))
+
+        callbacks.append(
+            tf.keras.callbacks.LearningRateScheduler(_onecycle_lr, verbose=0)
+        )
+        if debug:
+            print(f"🔁 OneCycleLR scheduler added "
+                  f"(warmup={warmup_steps} epochs → peak {peak_lr:.2e}, "
+                  f"then cosine → {min_lr:.0e})")
+
+    elif scheduler_type == 'cosine':
+        # CosineDecayRestarts: cyclic warm restarts that prevent LR hitting the noise floor.
+        # The model gets periodic "second chances" to escape local minima — avoids the
+        # 20-40 epoch stranded-plateau seen with ReduceLROnPlateau.
+        first_decay_steps = max(1, getattr(params, 'LR_WARMUP_EPOCHS', 10))
+        lr_schedule = tf.keras.optimizers.schedules.CosineDecayRestarts(
+            initial_learning_rate=params.LEARNING_RATE,
+            first_decay_steps=first_decay_steps,
+            t_mul=2.0,      # each restart period doubles
+            m_mul=0.9,      # peak LR shrinks 10% each restart
+            alpha=getattr(params, 'COSINE_DECAY_ALPHA', 1e-6),  # minimum LR
+        )
+        # LambdaCallback updates the optimizer LR each epoch from the schedule
+        import numpy as np
+        def _cosine_lr_setter(epoch, logs=None):
+            new_lr = float(lr_schedule(epoch))
+            if hasattr(params.model_optimizer if hasattr(params, 'model_optimizer') else None, 'assign'):
+                pass  # will be handled by the schedule
+        callbacks.append(
+            tf.keras.callbacks.LearningRateScheduler(
+                lambda epoch: float(lr_schedule(epoch)),
+                verbose=0,
+            )
+        )
+        if debug:
+            print(f"🌀 CosineDecayRestarts LR scheduler added "
+                  f"(first_decay={first_decay_steps} epochs, α={getattr(params, 'COSINE_DECAY_ALPHA', 1e-6):.0e})")
+
+    elif scheduler_type == 'exponential':
+        callbacks.append(
+            tf.keras.callbacks.LearningRateScheduler(
+                lambda epoch: params.LEARNING_RATE * (params.EXPONENTIAL_DECAY_RATE ** (epoch // params.EXPONENTIAL_DECAY_STEPS)),
+                verbose=0,
+            )
+        )
+        if debug:
+            print("📉 Exponential decay LR scheduler added")
+
+    elif scheduler_type == 'step':
+        callbacks.append(
+            tf.keras.callbacks.LearningRateScheduler(
+                lambda epoch: params.LEARNING_RATE * (params.STEP_DECAY_GAMMA ** (epoch // params.STEP_DECAY_STEP_SIZE)),
+                verbose=0,
+            )
+        )
+        if debug:
+            print("📉 Step decay LR scheduler added")
+
+    else:  # 'reduce_on_plateau' (default / fallback)
+        callbacks.append(
+            tf.keras.callbacks.ReduceLROnPlateau(
+                monitor=params.LR_SCHEDULER_MONITOR,
+                factor=params.LR_SCHEDULER_FACTOR,
+                patience=params.LR_SCHEDULER_PATIENCE,
+                min_lr=params.LR_SCHEDULER_MIN_LR,
+                verbose=1 if debug else 0,
+            )
+        )
+        if debug:
+            print("📉 ReduceLROnPlateau LR scheduler added")
+
+    # LR Warm-up — ramps LR from a small fraction up to LEARNING_RATE over
+    # LR_WARMUP_EPOCHS epochs; deactivates itself once warm-up is done.
+    # Must come AFTER ReduceLROnPlateau in the list so that on_epoch_begin
+    # (warm-up) and on_epoch_end (plateau scheduler) don't interfere.
+    if getattr(params, 'USE_LR_WARMUP', False):
+        from utils.train_helpers import LRWarmupCallback
+        callbacks.append(
+            LRWarmupCallback(
+                initial_lr=params.LEARNING_RATE,
+                warmup_epochs=getattr(params, 'LR_WARMUP_EPOCHS', 5),
+                initial_scale=getattr(params, 'LR_WARMUP_INITIAL_SCALE', 0.1),
+            )
+        )
+        if debug:
+            print("🌡️  LRWarmupCallback callback added")
     
     # TQDM progress bar
     callbacks.append(
