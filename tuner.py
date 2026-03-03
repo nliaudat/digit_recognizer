@@ -126,7 +126,12 @@ class SimpleGuaranteedTuner:
         model = create_model()
         
         # Select optimizer
-        if optimizer == 'adam':
+        if optimizer == 'adamw':
+            opt = tf.keras.optimizers.AdamW(
+                learning_rate=learning_rate,
+                weight_decay=getattr(params, 'ADAMW_WEIGHT_DECAY', 0.01),
+            )
+        elif optimizer == 'adam':
             opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         elif optimizer == 'rmsprop':
             opt = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
@@ -524,7 +529,12 @@ class FineTuneTuner(SimpleGuaranteedTuner):
                 layer.trainable = True
 
         # Build optimizer
-        if optimizer == 'adam':
+        if optimizer == 'adamw':
+            opt = tf.keras.optimizers.AdamW(
+                learning_rate=learning_rate,
+                weight_decay=getattr(params, 'ADAMW_WEIGHT_DECAY', 0.01),
+            )
+        elif optimizer == 'adam':
             opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         elif optimizer == 'rmsprop':
             opt = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
