@@ -331,12 +331,12 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT
                 
             # Filter by model_list if provided
             if model_list:
-                # Check if either the model filename or the directory matches any item in model_list
-                match_found = False
-                for item in model_list:
-                    if item == model_file or item == training_dir or item in f"{training_dir}/{model_file}":
-                        match_found = True
-                        break
+                full_model_path = f"{training_dir}/{model_file}"
+                # Check if any item in model_list matches the directory, file, or full path string.
+                match_found = any(
+                    item == model_file or item == training_dir or item in full_model_path
+                    for item in model_list
+                )
                 if not match_found:
                     continue
 

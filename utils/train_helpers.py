@@ -667,7 +667,7 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
                 if len(y_batch.shape) > 1 and y_batch.shape[-1] > 1:
                     y_true_all.append(np.argmax(y_batch, axis=-1))
                 else:
-                    y_true_all.append(np.cast[np.int32](y_batch)) # Simplified
+                    y_true_all.append(y_batch.numpy().astype(np.int32)) # Simplified
                 pbar.update(1)
                 
         y_true = np.concatenate(y_true_all)

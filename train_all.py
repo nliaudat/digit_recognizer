@@ -81,11 +81,12 @@ def main():
             for nb_classes, channels, desc in combinations:
                 print(f"Launching {model_name} - {desc}...")
                 
-                window_title = f"{model_name} - {desc}"
-                cmd_string = f'set DIGIT_NB_CLASSES={nb_classes}&& set DIGIT_INPUT_CHANNELS={channels}&& title {window_title}&& python train.py --train {model_name} {extra_args_str}'
+                env = os.environ.copy()
+                env["DIGIT_NB_CLASSES"] = str(nb_classes)
+                env["DIGIT_INPUT_CHANNELS"] = str(channels)
                 
-                # Use Windows 'start' to pop open a new command processor
-                subprocess.Popen(f'start "{window_title}" cmd /c "{cmd_string}"', shell=True)
+                full_cmd = [sys.executable, "train.py", "--train", model_name] + extra_args
+                subprocess.Popen(full_cmd, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
                 
         print(f"\n{'='*80}")
         print(f"🎉 All {total_trainings} training sessions have been launched in separate windows.")
