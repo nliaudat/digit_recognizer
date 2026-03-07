@@ -147,7 +147,7 @@ def update_derived_parameters():
             'type': 'label_file', 
             'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
             'path': 'datasets/real_integra_bad_predictions', 
-            'weight': 1.4,
+            'weight': 1.9,
         },
         {
             'name': 'real_integra',
@@ -155,6 +155,13 @@ def update_derived_parameters():
             'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
             'path': 'datasets/real_integra', 
             'weight': 0.7,
+        },
+        {
+            'name': 'failed_predictions_{NB_CLASSES}',
+            'type': 'label_file', 
+            'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
+            'path': 'datasets/failed_predictions_{NB_CLASSES}', 
+            'weight': 1.3,
         },
         {
             'name': 'static_augmentation',
