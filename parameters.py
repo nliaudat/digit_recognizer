@@ -38,7 +38,7 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v17",   # IoT GhostNet-inspired — ultra-efficient ~50KB
     # "esp_quantization_ready",
     # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
-    # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
+    "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
     "mnist_quantization", #63.6kB	0.9848
     "original_haverland", #203.3	0.9822 & baseline
 ]
@@ -50,45 +50,123 @@ MODEL_ARCHITECTURE = "digit_recognizer_v17" # one of the models in AVAILABLE_MOD
 # GENERAL PARAMETERS
 # ==============================================================================
 
-# ==============================================================================
-# GENERAL PARAMETERS
-# ==============================================================================
+### MANUAL OVERRIDES (Set to None to use Environment Variables or Defaults)
+# If set, these will supersede environment variables.
+MANUAL_NB_CLASSES = None # 10 or 100
+MANUAL_INPUT_CHANNELS = None # 1 (Gray) or 3 (RGB)
 
-
-
+# --- NB_CLASSES Logic ---
 _nb_classes_env = os.environ.get("DIGIT_NB_CLASSES")
-if _nb_classes_env is not None:
+if MANUAL_NB_CLASSES is not None:
+    NB_CLASSES = MANUAL_NB_CLASSES
+elif _nb_classes_env is not None:
     NB_CLASSES = int(_nb_classes_env)
+elif "-h" in sys.argv or "--help" in sys.argv:
+    # Avoid interactive prompt when just showing help
+    NB_CLASSES = 100
 else:
     # Not set via environment – ask the user to avoid silently using a wrong default
     if sys.stdin.isatty():
         while True:
-            _user_input = input("Enter number of classes [10 or 100]: ").strip()
-            if _user_input in ("10", "100"):
-                NB_CLASSES = int(_user_input)
+            try:
+                _user_input = input("Enter number of classes [10 or 100]: ").strip()
+                if _user_input in ("10", "100"):
+                    NB_CLASSES = int(_user_input)
+                    break
+                print("  Please enter 10 or 100.")
+            except EOFError:
+                NB_CLASSES = 100
                 break
-            print("  Please enter 10 or 100.")
     else:
         # Non-interactive context (subprocess, CI, etc.) – keep a safe default and warn
-        NB_CLASSES = 10
-        print("WARNING: DIGIT_NB_CLASSES not set and no interactive terminal – defaulting to 10. "
+        NB_CLASSES = 100
+        print("WARNING: DIGIT_NB_CLASSES not set and no interactive terminal – defaulting to 100. "
               "Set the env var explicitly to avoid this.")
 del _nb_classes_env
+
+# --- INPUT_CHANNELS Logic ---
+_input_channels_env = os.environ.get("DIGIT_INPUT_CHANNELS")
+if MANUAL_INPUT_CHANNELS is not None:
+    INPUT_CHANNELS = MANUAL_INPUT_CHANNELS
+elif _input_channels_env is not None:
+    INPUT_CHANNELS = int(_input_channels_env)
+elif "-h" in sys.argv or "--help" in sys.argv:
+    # Avoid interactive prompt when just showing help
+    INPUT_CHANNELS = 1
+else:
+    # Not set via environment – ask the user to avoid silently using a wrong default
+    if sys.stdin.isatty():
+        while True:
+            try:
+                _user_input = input("Enter color mode [gray or rgb]: ").strip().lower()
+                if _user_input == "gray":
+                    INPUT_CHANNELS = 1
+                    break
+                elif _user_input == "rgb":
+                    INPUT_CHANNELS = 3
+                    break
+                print("  Please enter 'gray' or 'rgb'.")
+            except EOFError:
+                INPUT_CHANNELS = 3
+                break
+    else:
+        # Non-interactive context (subprocess, CI, etc.) – keep a safe default and warn
+        INPUT_CHANNELS = 3
+        print("WARNING: DIGIT_INPUT_CHANNELS not set and no interactive terminal – defaulting to 3 (RGB). "
+              "Set the env var explicitly to avoid this.")
+del _input_channels_env
 
 # ==============================================================================
 # INPUT IMAGES 
 # ==============================================================================
-### for testing
-# NB_CLASSES   = 100
-# INPUT_SHAPE  = (32, 20, 3)   # H × W × C
-# USE_GRAYSCALE = False
+
 
 # Image Parameters
 INPUT_WIDTH = 20
 INPUT_HEIGHT = 32
-INPUT_CHANNELS = int(os.environ.get("DIGIT_INPUT_CHANNELS", 3))  # 1 for grayscale, 3 for RGB
-INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
-USE_GRAYSCALE = (INPUT_CHANNELS == 1) 
+
+def update_derived_parameters():
+    """Refresh parameters that depend on NB_CLASSES or INPUT_CHANNELS"""
+    global INPUT_SHAPE, USE_GRAYSCALE, OUTPUT_DIR, DATA_SOURCES
+    INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
+    USE_GRAYSCALE = (INPUT_CHANNELS == 1)
+    _color_suffix = "GRAY" if USE_GRAYSCALE else "RGB"
+    OUTPUT_DIR = f"exported_models/{NB_CLASSES}cls_{_color_suffix}"
+    
+    # Refresh DATA_SOURCES to use correct NB_CLASSES for label files
+    DATA_SOURCES = [
+        {
+            'name': 'Tenth-of-step-of-a-meter-digit',
+            'type': 'label_file', 
+            'labels': f'labels_{NB_CLASSES}_shuffle.txt',
+            'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
+            'weight': 1.0,
+        },
+        {
+            'name': 'real_integra_bad_predictions',
+            'type': 'label_file', 
+            'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
+            'path': 'datasets/real_integra_bad_predictions', 
+            'weight': 1.4,
+        },
+        {
+            'name': 'real_integra',
+            'type': 'label_file', 
+            'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
+            'path': 'datasets/real_integra', 
+            'weight': 0.7,
+        },
+        {
+            'name': 'static_augmentation',
+            'type': 'label_file', 
+            'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
+            'path': 'datasets/static_augmentation', 
+            'weight': 0.6,
+        },
+    ]
+
+# Initial call to set defaults
+update_derived_parameters()
 
 # ==============================================================================
 # DATA SOURCES
@@ -96,37 +174,7 @@ USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 
 # This is far better to use labels that have been shuffled for training, folder_structure shuffle by batch TF_DATA_SHUFFLE_BUFFER and SHUFFLE_SEED
 
-# Multiple Data Sources Configuration
-DATA_SOURCES = [
-    {
-        'name': 'Tenth-of-step-of-a-meter-digit',
-        'type': 'label_file', 
-        'labels': f'labels_{NB_CLASSES}_shuffle.txt',
-        'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
-        'weight': 1.0,
-    },
-    {
-        'name': 'real_integra_bad_predictions',
-        'type': 'label_file', 
-        'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
-        'path': 'datasets/real_integra_bad_predictions', 
-        'weight': 1.0,
-    },
-    {
-        'name': 'real_integra',
-        'type': 'label_file', 
-        'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
-        'path': 'datasets/real_integra', 
-        'weight': 0.7,
-    },
-    {
-        'name': 'static_augmentation',
-        'type': 'label_file', 
-        'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
-        'path': 'datasets/static_augmentation', 
-        'weight': 0.6,
-    },
-]
+# (Initial DATA_SOURCES is set via update_derived_parameters() below)
 
 # ==============================================================================
 # QUANTIZATION PARAMETERS
@@ -170,29 +218,20 @@ QAT_QUANTIZE_ALL = True  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
 
 # Automatically disable quantization flags for PC-only validator models
-PC_ONLY_MODELS = {"high_accuracy_validator", "super_high_accuracy_validator"}
-if MODEL_ARCHITECTURE in PC_ONLY_MODELS:
-    QUANTIZE_MODEL = False
-    ESP_DL_QUANTIZE = False
-    USE_QAT = False
+# PC_ONLY_MODELS = {"high_accuracy_validator", "super_high_accuracy_validator"}
+# if MODEL_ARCHITECTURE in PC_ONLY_MODELS:
+#     QUANTIZE_MODEL = False
+#     ESP_DL_QUANTIZE = False
+#     USE_QAT = False
+
+# Dataset disk cache directory
+DATASET_CACHE_DIR = os.environ.get("DATASET_CACHE_DIR", ".dataset_cache")
 
 # Data pipeline configuration
 USE_TF_DATA_PIPELINE = False
 TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
 TF_DATA_SHUFFLE_BUFFER = 1000
 TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
-
-# File Paths
-# Output directory is automatically derived from NB_CLASSES and color space.
-# Override by setting OUTPUT_DIR manually below if needed.
-_color_suffix = "GRAY" if USE_GRAYSCALE else "RGB"
-OUTPUT_DIR = f"exported_models/{NB_CLASSES}cls_{_color_suffix}"
-# Manual overrides (uncomment one to force a specific directory):
-# OUTPUT_DIR = "exported_models"
-# OUTPUT_DIR = "exported_models/10cls_GRAY"
-# OUTPUT_DIR = "exported_models/10cls_RGB"
-# OUTPUT_DIR = "exported_models/100cls_GRAY"
-# OUTPUT_DIR = "exported_models/100cls_RGB"
 QUANTIZE_NUM_SAMPLES = 22000
 # TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
 # FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
@@ -233,8 +272,39 @@ ORIGINAL_HAVERLAND_DROPOUT_RATES = [0.25, 0.25, 0.25, 0.5]  # Fixed from noteboo
 # ==============================================================================
 
 # Optimizer Selection
-OPTIMIZER_TYPE = "rmsprop"  # Options: "rmsprop", "adam", "sgd", "adagrad", "adamw", "nadam"
-# OPTIMIZER_TYPE = "nadam"  # for digit_recognizer_v4 100cls RGB
+# Options:
+#   - "rmsprop":
+#       Adaptive per-parameter LR (rho=0.9). Handles noisy gradients well.
+#       ✅ Best proven for 100cls QAT — all successful runs used RMSprop.
+#       ✅ Robust to the gradient noise introduced by fake-quantization.
+#       ⚠️  No weight decay — can overfit on long runs (use L2_REGULARIZATION).
+#
+#   - "adam":
+#       Adaptive moment estimation (β1=0.9, β2=0.999). Fast, popular default.
+#       ✅ Good general baseline for most tasks.
+#       ⚠️  Weight decay in Adam is incorrect (decoupled in AdamW) — prefer AdamW.
+#       ⚠️  Slightly worse than RMSprop on 100cls historically — test with tuner.
+#
+#   - "adamw":
+#       Adam with proper decoupled weight decay. 2024-2026 standard for fine-tuning.
+#       ✅ Best for regularised fine-tuning and escaping the ceiling (Phase 2 switch).
+#       ⚠️  Cold-start QAT + 100cls: slower initial climb than RMSprop.
+#       → Best used as Phase 2 in OPTIMIZER_SEQUENCE after RMSprop climb.
+#
+#   - "nadam":
+#       Adam + Nesterov momentum. Often converges faster than plain Adam.
+#       ✅ Worth testing if Adam plateaus — lookahead corrects overshoot.
+#       ⚠️  Untested on this project's 100cls QAT — add to Group A config_runner run.
+#
+#   - "sgd":
+#       Classic stochastic gradient descent with momentum (momentum=0.9, Nesterov=True).
+#       ✅ Best final-layer fine-tuning convergence when combined with cosine annealing.
+#       ❌ Slow cold-start — needs many epochs to settle without a warm-up.
+#       → Never use alone for cold-start 100cls; pair with CosineDecayRestarts.
+OPTIMIZER_TYPE = "nadam"            # Best default for cold-start 100cls
+# OPTIMIZER_TYPE = "rmsprop"            # Best default for cold-start 100cls
+# OPTIMIZER_TYPE = "sgd"              # (Optimized for v17 fine-tuning: best balance with 0.0003 LR / 128 BS)
+# OPTIMIZER_TYPE = "adamw"            # ← restore to roll back
 
 # RMSprop Hyperparameters
 RMSPROP_RHO = 0.9
@@ -263,20 +333,121 @@ ADAMW_EPSILON = 1e-07
 
 
 # ==============================================================================
-# LOSS FUNCTION HYPERPARAMETERS
+# --------------------------------------------------------------------------- #
+#  Training & Loss Configuration
+# --------------------------------------------------------------------------- #
+# Options:
+#   - "IntelligentFocalLossController":
+#       Adaptive Focal Loss that starts as CrossEntropy (γ=0) and gradually
+#       increases γ at val_acc thresholds (FOCAL_ACCURACY_THRESHOLDS).
+#       Also detects plateaus and adjusts α per-class when stuck.
+#       ✅ Best for most tasks — zero config needed, self-tuning.
+#       ⚠️  Adds ~15% training overhead (plateau detection / α recompute).
+#
+#   - "focal_loss":
+#       Standard Focal Loss with fixed γ=FOCAL_GAMMA and α=FOCAL_ALPHA.
+#       Down-weights well-classified examples so the model focuses on hard ones.
+#       ✅ Good when class imbalance is the main problem.
+#       ⚠️  Requires manual tuning of γ (start 1.0–2.0) and α (0.25–0.45).
+#       ⚠️  High γ (>3) can destabilize early training on 100-class tasks.
+#
+#   - "sparse_categorical_crossentropy":
+#       Standard CrossEntropy for integer labels (all models except haverland).
+#       Fast, stable, no hyperparameters.
+#       ✅ Best baseline; use to diagnose if focal/controller is hurting accuracy.
+#       ❌ No focus on hard examples; hits a ceiling earlier on complex tasks.
+#
+#   - "categorical_crossentropy":
+#       Standard CrossEntropy for one-hot labels.
+#       ✅ Required for original_haverland model (uses softmax + one-hot).
+#       ❌ Do not use with other models (label format mismatch).
+LOSS_TYPE = "IntelligentFocalLossController"
+if NB_CLASSES <= 10:
+    LABEL_SMOOTHING = 0.02  # mild smoothing — 10cls rarely overconfident
+else:  # 100 classes
+    LABEL_SMOOTHING = 0.05  # stronger smoothing — 100cls softmax easily collapses
+
+# Focal Loss Parameters
+FOCAL_GAMMA = 2.0      # Robust standard focus parameter
+# FOCAL_GAMMA = 0.7     # (Optimized for v17 fine-tuning)
+# FOCAL_ALPHA = 0.45     # Class balancing (0.25 recommended for binary, 0.5 for multi-class)
+if NB_CLASSES <= 10:
+    FOCAL_ALPHA = 0.45  # Your current value for 10 classes
+elif NB_CLASSES <= 20:
+    FOCAL_ALPHA = 0.38  # Sweet spot for 15-20 classes
+elif NB_CLASSES <= 50:
+    FOCAL_ALPHA = 0.32  # For medium-sized datasets
+else:  # 100 classes
+    FOCAL_ALPHA = 0.27  # Optimal for 100 classes
+
+# Intelligent Focal Loss Controller Settings
+if NB_CLASSES <= 10:
+    # --- 10-class: delay until SCCE natural ceiling ---
+    # (ep13 analysis: controller fired at val_acc=0.9656, causing a −0.006 dip)
+    FOCAL_ACCURACY_THRESHOLDS = [0.96, 0.975, 0.988]  # was [0.95, 0.97, 0.985]
+else:  # 100 classes or more
+    # --- 100-class: wait longer; model needs to learn easy examples first ---
+    # (ep38 analysis: γ fired at val_acc≈0.786, too early for 100-class task)
+    FOCAL_ACCURACY_THRESHOLDS = [0.88, 0.93, 0.97]   # was [0.85, 0.92, 0.96]
+
+if NB_CLASSES <= 10:
+    FOCAL_GAMMA_VALUES = [1.5, 3.0, 4.5]   # unchanged for 10cls (already proven)
+else:
+    FOCAL_GAMMA_VALUES = [1.2, 2.0, 3.5]   # gentler ramp for 100cls (was [1.5, 3.0, 4.5])
+
+# Smooth γ transition: ramp linearly over N epochs instead of an instant step.
+# Set to 0 to keep the original hard-switch behaviour.
+FOCAL_GAMMA_RAMP_EPOCHS = 5             # NEW — eliminates the γ-activation accuracy dip
+
+FOCAL_PLATEAU_PATIENCE = 5
+FOCAL_PLATEAU_MIN_DELTA = 0.001
+
+# Advanced Training Options (defaulting to True as requested in prev sessions)
+USE_EARLY_STOPPING = True
+# 2.0      # Focus parameter for Focal Loss (0 = CrossEntropy) # This line was a duplicate and commented out.
+
+# Dynamic Class Weighting
+USE_DYNAMIC_WEIGHTS = True   # Update loss weights based on validation accuracy
+DYNAMIC_WEIGHTS_EPOCHS = 5  # Frequency of dynamic weight updates (in epochs)
+
+# Resume Training Support
+RESUME_MODEL_PATH = ""  # Path to best_model.keras to resume from (empty = start fresh)
+INITIAL_EPOCH = 0       # Epoch to resume from (auto-detected by retrain_all.py)
+
+# ==============================================================================
+# HYPERPARAMETER TUNING (tuner.py)
 # ==============================================================================
 
-LOSS_TYPE = "sparse_categorical_crossentropy"  # Options: "sparse_categorical_crossentropy", "categorical_crossentropy"
-LABEL_SMOOTHING = 0.0  # Apply label smoothing if > 0
+TUNER_MAX_TRIALS = 30       # Maximum number of unique combinations to test
+TUNER_EPOCHS = 10           # Epochs per trial (short training to find best parameters)
+TUNER_EARLY_STOPPING_PATIENCE = 3
+
+# Search Space
+TUNER_OPTIMIZERS = ['adam', 'rmsprop', 'sgd', 'nadam', 'adamw']  # adamw added
+TUNER_LEARNING_RATES = [1e-3, 5e-4, 2e-4, 1e-4]  # Refined precision for high-accuracy tasks
+TUNER_BATCH_SIZES = [32, 64]
+# Added 1.2 and 3.5 based on 100-class log analysis (gentler focal ramp)
+TUNER_GAMMAS = [0.0, 1.2, 1.5, 2.0, 3.0, 3.5, 4.5]
+TUNER_ALPHAS = [0.25, 0.45]
+
+# Fine-Tune Tuner Search Space (used by: python tuner.py --finetune)
+# Loads a pre-trained best_model.keras and searches only post-plateau decisions:
+TUNER_FINETUNE_EPOCHS = 15                                        # epochs per fine-tune trial
+TUNER_FINETUNE_LRS = [5e-5, 1e-4, 3e-4, 5e-4]                  # small LRs only
+TUNER_FINETUNE_OPTIMIZERS = ['adam', 'rmsprop', 'nadam', 'sgd', 'adamw']  # adamw added
+TUNER_LR_FACTORS = [0.3, 0.5, 0.7]                              # ReduceLROnPlateau factor to sweep
+FINETUNE_UNFREEZE_LAST_N = 0                                      # 0 = unfreeze all layers
 
 # ==============================================================================
 # TRAINING HYPERPARAMETERS
 # ==============================================================================
 
 # Basic Training Parameters
-BATCH_SIZE = 32 # 32
-EPOCHS = 200
-LEARNING_RATE = 0.001
+BATCH_SIZE = 32      # Robust default for cold-start (use 128 only after initial 50-80% accuracy)
+EPOCHS = 250
+LEARNING_RATE = 0.001 # Robust default for cold-start
+# BATCH_SIZE = 128      # (Optimized for v17 fine-tuning speed)
+# LEARNING_RATE = 0.0003 # (Optimized for v17 fine-tuning stability)
 TRAINING_PERCENTAGE = 1.0  # Use 100% of available data
 VALIDATION_SPLIT = 0.2     # 20% of training for validation
 
@@ -287,25 +458,102 @@ VALIDATION_SPLIT = 0.2     # 20% of training for validation
 # ==============================================================================
 
 # Learning Rate Scheduler
+# Options:
+#   - "reduce_on_plateau":
+#       Halves LR each time val_loss stops improving (factor × current LR).
+#       ✅ Best proven for 100cls — stable, well-understood staircase decay.
+#       ✅ Best default for cold-start QAT models (safe, no epoch-count dependency).
+#       ⚠️  Eventually decays LR to the noise floor; model can get stranded 20–30 eps.
+#       → Use with USE_DYNAMIC_SCHEDULER=True + cosine phase to escape the ceiling.
+#
+#   - "onecycle":
+#       Linear LR warm-up (30% of epochs) → cosine decay to near-zero.
+#       ✅ Super-convergence: reaches high accuracy faster on well-trained small models.
+#       ❌ Cold-start QAT + 100cls: too aggressive — early stopping kills training at ep~6.
+#       → Safe for 10cls fine-tuning or as Phase-0 in DynamicSchedulerController.
+#
+#   - "cosine":
+#       CosineDecayRestarts: LR periodically resets (with shrinking peaks) to escape minima.
+#       ✅ Good escape mechanism after a plateau — avoids the noise-floor trap.
+#       ⚠️  Requires tuning of LR_WARMUP_EPOCHS (= first_decay_steps). Too short = chaotic.
+#       → Ideal as the final phase in LR_SCHEDULER_SEQUENCE (after reduce_on_plateau).
+#
+#   - "exponential":
+#       Smooth exponential decay: LR × EXPONENTIAL_DECAY_RATE every EXPONENTIAL_DECAY_STEPS.
+#       ✅ Predictable, no plateaus. Good when you know convergence speed in advance.
+#       ⚠️  Decays even when model is still improving (wastes capacity early on).
+#
+#   - "step":
+#       Drops LR by STEP_DECAY_GAMMA every STEP_DECAY_STEP_SIZE epochs.
+#       ✅ Simple and interpretable. Useful for manual LR design.
+#       ⚠️  Coarse — sudden drops can destabilize training if steps are too small.
 USE_LEARNING_RATE_SCHEDULER = True
-LR_SCHEDULER_TYPE = "reduce_on_plateau"  # Options: "reduce_on_plateau", "exponential", "cosine", "step"
+LR_SCHEDULER_TYPE = "reduce_on_plateau"  # best for 100cls per training analysis
+# LR_SCHEDULER_TYPE = "onecycle"         # ← restore to roll back
 
 # ReduceLROnPlateau Parameters
 LR_SCHEDULER_PATIENCE = 3
 LR_SCHEDULER_MIN_LR = 1e-7
-LR_SCHEDULER_FACTOR = 0.5
+# Nudged from 0.5 →0.4: slightly faster decay avoids 20-epoch plateau-creep
+# (both 10cls and 100cls runs showed ~15-25 wasted epochs at near-identical val_acc)
+LR_SCHEDULER_FACTOR = 0.4
 LR_SCHEDULER_MONITOR = 'val_loss'
+
+# LR Warm-up (only active when USE_LR_WARMUP=True).
+# Ramps LR from LEARNING_RATE × scale → LEARNING_RATE over LR_WARMUP_EPOCHS.
+# Disabled for reduce_on_plateau: the first few steps already use full LR and
+# ReduceLROnPlateau handles the decay naturally. Useful only for onecycle/cosine.
+USE_LR_WARMUP = False         # not needed with reduce_on_plateau
+LR_WARMUP_INITIAL_SCALE = 0.1 # start LR fraction when USE_LR_WARMUP=True
 
 # Exponential Decay Parameters
 EXPONENTIAL_DECAY_STEPS = 1000
 EXPONENTIAL_DECAY_RATE = 0.96
 
 # Cosine Decay Parameters
-COSINE_DECAY_ALPHA = 0.0  # Minimum learning rate as fraction of initial
+COSINE_DECAY_ALPHA = 1e-6    # Minimum LR floor (never decays below this)
+# LR_WARMUP_EPOCHS doubles as `first_decay_steps` for CosineDecayRestarts:
+# 15 epochs gives the model time to settle before each restart kick.
+LR_WARMUP_EPOCHS = 15        # was 5 — longer period makes cosine restarts more useful
 
 # Step Decay Parameters
 STEP_DECAY_STEP_SIZE = 10
 STEP_DECAY_GAMMA = 0.1
+
+# Dynamic Scheduler Controller
+# Switches the active LR scheduler at val_accuracy thresholds, similar to how
+# IntelligentFocalLossController switches γ. Requires USE_LEARNING_RATE_SCHEDULER=True.
+USE_DYNAMIC_SCHEDULER = True    # enabled: switches scheduler at val_acc thresholds
+
+# val_accuracy thresholds that trigger a phase switch.
+# Must have exactly len(LR_SCHEDULER_SEQUENCE) - 1 values.
+if NB_CLASSES <= 10:
+    LR_SCHEDULER_THRESHOLDS = [0.95, 0.975]   # 10cls: switch near the accuracy ceiling
+else:
+    LR_SCHEDULER_THRESHOLDS = [0.75, 0.82]    # 100cls: switch at mid-plateau and ceiling
+
+# Scheduler per phase: Phase 0 = start, each threshold triggers the next.
+# Phase 0+1: reduce_on_plateau (proven fast-climb); Phase 2: cosine to escape ceiling.
+# Options: 'reduce_on_plateau' | 'cosine' | 'exponential' | 'step' | 'onecycle'
+LR_SCHEDULER_SEQUENCE = ["reduce_on_plateau", "reduce_on_plateau", "cosine"]
+
+# On phase switch, reset LR to this fraction of LEARNING_RATE.
+# E.g. 0.5 → restores to 5e-4 when cosine kicks in after ReduceLROnPlateau has decayed.
+# Set to None to keep the current (decayed) LR as the starting point for the new phase.
+LR_SCHEDULER_RESET_FRACTION = 0.5   # restore to 50% of base LR on each phase switch
+
+# Optional: also switch optimizer at the same thresholds (risky — resets momentum state).
+# Disabled by default; use only after validating with USE_DYNAMIC_SCHEDULER first.
+# Each entry corresponds to a phase in LR_SCHEDULER_SEQUENCE.
+USE_DYNAMIC_OPTIMIZER = False        # ⚠️ NOT SAFE YET: resets momentum state mid-training
+                                     # enable only after validating USE_DYNAMIC_SCHEDULER first
+if NB_CLASSES <= 10:
+    # Phase 0+1: rmsprop for fast initial climb; Phase 2: adamw for fine-tuning near ceiling
+    OPTIMIZER_SEQUENCE = ["rmsprop", "rmsprop", "adamw"]
+else:
+    # Same logic for 100cls — rmsprop proven best for climb, adamw for plateau phase
+    OPTIMIZER_SEQUENCE = ["rmsprop", "rmsprop", "adamw"]
+
 
 # ==============================================================================
 # REGULARIZATION HYPERPARAMETERS
@@ -341,9 +589,12 @@ WEIGHT_INITIALIZER = "he_normal"  # Options: "glorot_uniform", "he_normal", "he_
 
 # Early Stopping
 USE_EARLY_STOPPING = True
-EARLY_STOPPING_PATIENCE = 30
+# Tightened from 30→20: both runs wasted 15-25 epochs with no real improvement
+# (10cls plateau @ep46, 100cls plateau @ep68 — both ran 15-25 epochs beyond the peak)
+EARLY_STOPPING_PATIENCE = 20
 EARLY_STOPPING_MONITOR = 'val_accuracy'
-EARLY_STOPPING_MIN_DELTA = 0.0001
+# Raised from 0.0001→0.0002: more realistic threshold at the noise floor
+EARLY_STOPPING_MIN_DELTA = 0.0002
 RESTORE_BEST_WEIGHTS = True
 
 # Model Checkpoint
@@ -371,6 +622,11 @@ AUGMENTATION_WIDTH_SHIFT_RANGE = 0.0
 AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.0
 AUGMENTATION_HORIZONTAL_FLIP = False
 AUGMENTATION_VERTICAL_FLIP = False
+
+# Advanced Augmentations (used by super_high_accuracy_validator)
+USE_MIXUP = False           # Disabled by default for stability (destructive on small images)
+USE_CUTMIX = False
+USE_RANDOM_ERASING = False # Disabled by default for benchmark stability
 
 # not implemented yet
 
@@ -429,7 +685,7 @@ TUNER_NUM_TRIAL = 10
 TUNER_EPOCHS = 15
 
 # Search Space Configuration
-TUNER_OPTIMIZERS = ["adam", "rmsprop", "nadam", "sgd"]  # Limit to best performers ["rmsprop", "adam", "sgd", "adagrad", "adamw", "nadam"]
+TUNER_OPTIMIZERS = ['adam', 'rmsprop', 'sgd', 'nadam', 'adamw'] # Limit to best performers ["rmsprop", "adam", "sgd", "adagrad", "adamw", "nadam"]
 TUNER_LEARNING_RATES = [1e-2, 5e-3, 1e-3, 5e-4, 1e-4]  # Wider range
 TUNER_BATCH_SIZES = [16, 32, 64, 128]  # More options
 
@@ -464,12 +720,12 @@ def validate_hyperparameters():
         raise ValueError(f"❌ Invalid OPTIMIZER_TYPE: {OPTIMIZER_TYPE}. Must be one of {valid_optimizers}")
     
     # Loss function validation
-    valid_losses = ["sparse_categorical_crossentropy", "categorical_crossentropy"]
+    valid_losses = ["sparse_categorical_crossentropy", "categorical_crossentropy", "focal_loss", "IntelligentFocalLossController"]
     if LOSS_TYPE not in valid_losses:
         raise ValueError(f"❌ Invalid LOSS_TYPE: {LOSS_TYPE}. Must be one of {valid_losses}")
     
     # Learning rate scheduler validation
-    valid_schedulers = ["reduce_on_plateau", "exponential", "cosine", "step"]
+    valid_schedulers = ["reduce_on_plateau", "exponential", "cosine", "step", "onecycle"]
     if LR_SCHEDULER_TYPE not in valid_schedulers:
         raise ValueError(f"❌ Invalid LR_SCHEDULER_TYPE: {LR_SCHEDULER_TYPE}. Must be one of {valid_schedulers}")
     

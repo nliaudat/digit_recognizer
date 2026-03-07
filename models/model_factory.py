@@ -197,11 +197,33 @@ def compile_model(model, loss_type='sparse'):
         loss = 'categorical_crossentropy'
         print("🔧 Override: Using categorical crossentropy loss (for Haverland model)")
     elif loss_type == 'sparse':
-        loss = 'sparse_categorical_crossentropy'
-        print("🔧 Override: Using sparse categorical crossentropy loss (for other models)")
+        # Don't override if it's already a specialized loss like focal_loss
+        if loss not in ["focal_loss", "IntelligentFocalLossController"]:
+            loss = 'sparse_categorical_crossentropy'
+            print("🔧 Override: Using sparse categorical crossentropy loss")
 
-    # Convert string loss to object form to prevent deprecation warnings
-    if params.LABEL_SMOOTHING > 0:
+    # Handle Focal Loss
+    if loss in ["focal_loss", "IntelligentFocalLossController"]:
+        from utils.losses import sparse_focal_loss, focal_loss, DynamicSparseFocalLoss, DynamicFocalLoss
+        
+        if loss == "IntelligentFocalLossController":
+             # We start with gamma=0.0 (equivalent to CrossEntropy)
+             # and let the controller update gamma/alpha dynamically
+             print("🔧 IntelligentFocalLossController active: Using Dynamic Focal Loss (starting with γ=0.0)")
+             if params.MODEL_ARCHITECTURE == "original_haverland":
+                 loss = DynamicFocalLoss(gamma=0.0, alpha=params.FOCAL_ALPHA)
+             else:
+                 loss = DynamicSparseFocalLoss(gamma=0.0, alpha=params.FOCAL_ALPHA)
+        else:
+            if params.MODEL_ARCHITECTURE == "original_haverland":
+                loss = focal_loss(gamma=params.FOCAL_GAMMA, alpha=params.FOCAL_ALPHA)
+                print(f"🔧 Using focal_loss (one-hot) with gamma={params.FOCAL_GAMMA}")
+            else:
+                loss = sparse_focal_loss(gamma=params.FOCAL_GAMMA, alpha=params.FOCAL_ALPHA)
+                print(f"🔧 Using sparse_focal_loss with gamma={params.FOCAL_GAMMA}")
+    
+    # Handle standard crossentropy with label smoothing
+    elif params.LABEL_SMOOTHING > 0:
         if loss == "categorical_crossentropy":
             loss = tf.keras.losses.CategoricalCrossentropy(
                 label_smoothing=params.LABEL_SMOOTHING
@@ -294,6 +316,41 @@ def create_learning_rate_scheduler():
         print(f"🔧 Using CosineDecayRestarts scheduler")
         return lr_schedule
     
+    elif params.LR_SCHEDULER_TYPE == "onecycle":
+        # OneCycleLR: warm up to peak LR over 30% of total epochs,
+        # then cosine-decay to near-zero over the remaining 70%.
+        total_epochs = params.EPOCHS
+        warmup_frac = 0.3
+        warmup_steps = max(1, int(total_epochs * warmup_frac))
+        decay_steps  = max(1, total_epochs - warmup_steps)
+
+        min_lr = getattr(params, 'COSINE_DECAY_ALPHA', 1e-6)
+        peak_lr = params.LEARNING_RATE
+
+        # Phase 1: linear warm-up
+        warmup_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
+            initial_learning_rate=peak_lr * 0.1,
+            decay_steps=warmup_steps,
+            end_learning_rate=peak_lr,
+            power=1.0,
+        )
+        # Phase 2: cosine decay from peak to floor
+        cosine_schedule = tf.keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=peak_lr,
+            decay_steps=decay_steps,
+            alpha=min_lr / peak_lr,
+        )
+
+        def _onecycle_lr(epoch):
+            if epoch < warmup_steps:
+                return float(warmup_schedule(epoch))
+            else:
+                return float(cosine_schedule(epoch - warmup_steps))
+
+        from tensorflow.keras.callbacks import LearningRateScheduler
+        scheduler = LearningRateScheduler(_onecycle_lr, verbose=1)
+        print(f"🔧 Using OneCycleLR scheduler (warmup={warmup_steps} epochs)")
+
     elif params.LR_SCHEDULER_TYPE == "step":
         # Custom step decay implementation
         def step_decay(epoch):

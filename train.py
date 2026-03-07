@@ -21,11 +21,19 @@ Features
 """
 
 # --------------------------------------------------------------------------- #
-#  Standard library imports
+# Standard library imports
 # --------------------------------------------------------------------------- #
-import argparse
 import os
 import sys
+
+# Set default environment variables strictly before importing parameters.py
+# This prevents parameters.py from triggering the interactive input prompt
+if "DIGIT_NB_CLASSES" not in os.environ:
+    os.environ["DIGIT_NB_CLASSES"] = "10"
+if "DIGIT_INPUT_CHANNELS" not in os.environ:
+    os.environ["DIGIT_INPUT_CHANNELS"] = "1"
+
+import argparse
 import logging
 import warnings
 import random
@@ -40,8 +48,8 @@ from pathlib import Path
 # --------------------------------------------------------------------------- #
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
+import matplotlib.pyplot as plt
 
 # --------------------------------------------------------------------------- #
 #  Project imports (core utilities)
@@ -221,6 +229,12 @@ def parse_arguments():
         help="Enable verbose TensorFlow logging and extra debug prints.\n"
              "Useful for troubleshooting model graph issues or tracking detailed execution flow."
     )
+    parser.add_argument(
+        "--task-name",
+        type=str,
+        default=None,
+        help="Custom prefix for the output directory name. Useful for organizing experiments."
+    )
     
     # --- Training Modes ---
     parser.add_argument(
@@ -242,6 +256,13 @@ def parse_arguments():
         help="Run a rapid sanity check on every architecture.\n"
              "Compiles each model and trains for exactly 1 epoch using a tiny subset of data "
              "to ensure there are no syntax errors or shape mismatches."
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        choices=params.AVAILABLE_MODELS,
+        help="Specify a single architecture to train (overrides parameters.py).\n"
+             "Example: --model digit_recognizer_v17"
     )
     
     # --- Hyperparameter Tuning ---
@@ -281,6 +302,56 @@ def parse_arguments():
              "Disables TFLite conversion, confusion matrix generation, and inference timing."
     )
     
+    # --- Hyperparameter Overrides (from legacy train_super_validator) ---
+    parser.add_argument("--epochs", type=int, default=None, help="Override maximum number of training epochs.")
+    parser.add_argument("--batch", type=int, default=None, help="Override batch size.")
+    parser.add_argument("--lr", type=float, default=None, help="Override initial learning rate.")
+    parser.add_argument("--warmup-epochs", type=int, default=None, help="Override learning rate warmup epochs.")
+    parser.add_argument("--weight-decay", type=float, default=None, help="Override weight decay parameter.")
+    parser.add_argument("--label-smoothing", type=float, default=None, help="Override label smoothing factor.")
+    parser.add_argument("--loss_type", type=str, default=None, 
+                        help="Override the loss function type.\n"
+                             "Possibilities:\n"
+                             "  - IntelligentFocalLossController: Adaptive Focal Loss (Default)\n"
+                             "  - focal_loss: Standard Focal Loss with fixed gamma\n"
+                             "  - sparse_categorical_crossentropy: Standard CrossEntropy for integer labels\n"
+                             "  - categorical_crossentropy: Standard CrossEntropy for one-hot labels")
+    parser.add_argument("--focal-gamma", type=float, default=None, help="Override Focal Loss Gamma.")
+    parser.add_argument("--rotation-range", type=float, default=None, help="Override maximum rotation augmentation in degrees.")
+    parser.add_argument("--no-mixup", action="store_true", help="Disable Mixup augmentation.")
+    parser.add_argument("--no-mixed-precision", action="store_true", help="Disable mixed precision.")
+    parser.add_argument("--focal-loss", action="store_true", help="Explicitly enable Focal Loss.")
+    parser.add_argument("--no-focal-loss", action="store_true", help="Explicitly disable Focal Loss.")
+    
+    # --- Advanced Features ---
+    parser.add_argument("--cutmix", action="store_true", help="Enable CutMix augmentation.")
+    parser.add_argument("--no-random-erasing", action="store_true", help="Disable Random Erasing augmentation.")
+    parser.add_argument("--optimizer", type=str, default=None, help="Override the optimizer (e.g. adamw).")
+    parser.add_argument("--lr-scheduler", type=str, default=None, help="Override the LR scheduler (e.g. cosine).")
+    parser.add_argument("--no-dynamic-weights", action="store_true", help="Disable dynamic per-class weighting.")
+
+    # --- Dynamic Scheduler / Optimizer ---
+    parser.add_argument("--dynamic-scheduler", action="store_true", default=None,
+                        help="Enable DynamicSchedulerController (USE_DYNAMIC_SCHEDULER=True).")
+    parser.add_argument("--no-dynamic-scheduler", action="store_true",
+                        help="Disable DynamicSchedulerController (USE_DYNAMIC_SCHEDULER=False).")
+    parser.add_argument("--dynamic-optimizer", action="store_true",
+                        help="Enable mid-training optimizer switch (USE_DYNAMIC_OPTIMIZER=True). Experimental.")
+    parser.add_argument("--no-warmup", action="store_true",
+                        help="Disable LR warm-up (USE_LR_WARMUP=False).")
+    parser.add_argument("--lr-reset-fraction", type=float, default=None,
+                        help="Override LR_SCHEDULER_RESET_FRACTION (fraction of base LR restored on scheduler switch).")
+
+    # --- Resume Training ---
+    parser.add_argument("--resume", type=str, default="",
+        help="Path to a best_model.keras file to resume from.")
+    parser.add_argument("--initial-epoch", type=int, default=0,
+        help="Epoch to resume from (auto-filled by retrain_all.py from training_log.csv).")
+
+    # --- Dataset Configuration Overrides ---
+    parser.add_argument("--classes", type=int, choices=[10, 100], help="Number of classes (10 or 100).")
+    parser.add_argument("--color", type=str, choices=["rgb", "gray"], help="Color mode (rgb or gray).")
+
     return parser.parse_args()
 
 
@@ -483,7 +554,77 @@ def train_specific_models(models_to_train, debug: bool = False, no_cleanup: bool
 #  Entry point – parse arguments and dispatch to the appropriate mode
 # --------------------------------------------------------------------------- #
 def main():
+    # Now parse arguments
     args = parse_arguments()
+
+    # Apply overrides to params module
+    if args.model is not None:
+        params.MODEL_ARCHITECTURE = args.model
+    if args.epochs is not None:
+        params.EPOCHS = args.epochs
+    if args.batch is not None:
+        params.BATCH_SIZE = args.batch
+    if args.lr is not None:
+        params.LEARNING_RATE = args.lr
+    if args.focal_gamma is not None:
+        params.FOCAL_GAMMA = args.focal_gamma
+    if args.rotation_range is not None:
+        params.AUGMENTATION_ROTATION_RANGE = args.rotation_range
+    
+    if args.no_mixup:
+        params.USE_MIXUP = False
+    if args.no_mixed_precision:
+        params.USE_MIXED_PRECISION = False
+    
+    # Loss type overrides - CLI --loss_type takes precedence
+    if args.loss_type:
+        params.LOSS_TYPE = args.loss_type
+    elif args.focal_loss:
+        params.LOSS_TYPE = "focal_loss"
+    elif args.no_focal_loss:
+        params.LOSS_TYPE = "sparse_categorical_crossentropy"
+
+    if args.classes is not None:
+        params.NB_CLASSES = args.classes
+    if args.color is not None:
+        params.INPUT_CHANNELS = 1 if args.color == "gray" else 3
+    
+    # Update derived parameters after potential CLI overrides
+    if args.classes is not None or args.color is not None:
+        params.update_derived_parameters()
+
+    if args.warmup_epochs is not None:
+        params.LR_WARMUP_EPOCHS = args.warmup_epochs
+    if args.weight_decay is not None:
+        params.ADAMW_WEIGHT_DECAY = args.weight_decay
+    if args.cutmix:
+        params.USE_CUTMIX = True
+    if args.no_random_erasing:
+        params.USE_RANDOM_ERASING = False
+    if args.optimizer is not None:
+        params.OPTIMIZER_TYPE = args.optimizer
+    if args.lr_scheduler is not None:
+        params.LR_SCHEDULER_TYPE = args.lr_scheduler
+    if args.task_name is not None:
+        params.TASK_NAME = args.task_name
+    if args.no_dynamic_weights:
+        params.USE_DYNAMIC_WEIGHTS = False
+    if args.label_smoothing is not None:
+        params.LABEL_SMOOTHING = args.label_smoothing
+    if args.dynamic_scheduler:
+        params.USE_DYNAMIC_SCHEDULER = True
+    if args.no_dynamic_scheduler:
+        params.USE_DYNAMIC_SCHEDULER = False
+    if args.dynamic_optimizer:
+        params.USE_DYNAMIC_OPTIMIZER = True
+    if args.no_warmup:
+        params.USE_LR_WARMUP = False
+    if args.lr_reset_fraction is not None:
+        params.LR_SCHEDULER_RESET_FRACTION = args.lr_reset_fraction
+    if args.resume:
+        params.RESUME_MODEL_PATH = args.resume
+    if args.initial_epoch:
+        params.INITIAL_EPOCH = args.initial_epoch
 
     # -----------------------------------------------------------------
     #  Hyper parameter tuning mode
@@ -497,12 +638,16 @@ def main():
         x_train = preprocess_for_training(x_train_raw)
         x_val   = preprocess_for_training(x_val_raw)
 
-        if params.MODEL_ARCHITECTURE == "original_haverland":
+        # Only one-hot encode if specifically using categorical_crossentropy
+        # (original_haverland default or manual setting)
+        if params.LOSS_TYPE == "categorical_crossentropy":
             y_train = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
             y_val   = tf.keras.utils.to_categorical(y_val_raw,   params.NB_CLASSES)
+            print("🔧 One-hot encoding labels (for categorical_crossentropy)")
         else:
             y_train = y_train_raw
             y_val   = y_val_raw
+            print(f"🔧 Using sparse labels (for {params.LOSS_TYPE})")
 
         tuning_res = run_architecture_tuning(
             x_train=x_train,
@@ -568,424 +713,469 @@ def main():
         print(f"\n✅ Training completed - results stored in {out_dir}")
     else:
         print("\n❌ Training failed or returned early.")
+        if result is None:
+            print("   Reason: train_model returned None (check logs above for validation errors)")
+        elif result[0] is None:
+            print("   Reason: model object is None (check logs above for architecture/compilation errors)")
 
 
 def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, full_analysis: bool = True):
     """Main training function with comprehensive quantization handling"""
-    setup_tensorflow_logging(debug)
-    set_all_seeds(params.SHUFFLE_SEED)
-    
     try:
-        import mlflow
-        MLFLOW_AVAILABLE = True
-    except ImportError:
-        MLFLOW_AVAILABLE = False
-        print("ℹ️ MLflow not installed. Skipping experiment tracking. (Run `pip install mlflow` to enable)")
-    
-    # Validate quantization parameters
-    print("🎯 VALIDATING QUANTIZATION PARAMETERS...")
-    is_valid, corrected_params, message = validate_quantization_parameters()
-    print(message)
-    
-    if not is_valid:
-        print("🔄 Applying parameter corrections...")
-        params.QUANTIZE_MODEL = corrected_params['QUANTIZE_MODEL']
-        params.USE_QAT = corrected_params['USE_QAT']
-        params.ESP_DL_QUANTIZE = corrected_params['ESP_DL_QUANTIZE']
-        print("✅ Corrected parameters applied")
-    
-    # Validate quantization combination
-    is_valid, msg = validate_quantization_combination()
-    if not is_valid:
-        print(f"❌ {msg}")
-        return None, None, None
-    
-    print(f"✅ {msg}")
-    
-    # Setup hardware
-    strategy = setup_gpu()
-    
-    # Create output directory
-    color_mode = "GRAY" if params.USE_GRAYSCALE else "RGB"
-    quantization_mode = ""
-    if params.USE_QAT:
-        quantization_mode = "_QAT"
-    if params.ESP_DL_QUANTIZE:
-        quantization_mode += "_ESP-DL"
-    elif params.QUANTIZE_MODEL:
-        quantization_mode += "_QUANT"
-    
-    training_dir = os.path.join(
-        params.OUTPUT_DIR, 
-        f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls{quantization_mode}_{color_mode}_{datetime.now().strftime('%m%d_%H%M')}"
-    )
-    os.makedirs(training_dir, exist_ok=True)
-    print(f"📁 Output directory: {training_dir}")
-    
-    # Load and preprocess data
-    print("\nLoading dataset from multiple sources...")
-    (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
-    
-    print("🔄 Preprocessing images...")
-    x_train = preprocess_for_training(x_train_raw)
-    x_val   = preprocess_for_training(x_val_raw)
-    x_test  = preprocess_for_training(x_test_raw)
-    
-    # Handle labels based on model type
-    if params.MODEL_ARCHITECTURE == "original_haverland":
-        y_train_final = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
-        y_val_final = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES) 
-        y_test_final = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)
-    else:
-        y_train_final = y_train_raw.copy()
-        y_val_final = y_val_raw.copy()
-        y_test_final = y_test_raw.copy()
-    
-    # Create model with QAT if enabled
-    use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
-
-    if use_qat:
-        print("Creating model with Quantization Aware Training...")
-        model = create_qat_model()
-    else:
-        model = create_model()
-
-    # Compile – loss depends on the architecture
-    if params.MODEL_ARCHITECTURE == "original_haverland":
-        loss_type = "categorical"
-    else:
-        loss_type = "sparse"
-
-    model = compile_model(model, loss_type=loss_type) 
-    
-    # Build model with explicit input shape (required for TF2.x eager mode)
-    print("🔧 Building model with explicit input shape...")
-    model.build(input_shape=(None,) + params.INPUT_SHAPE)
-    
-    # ✅ MOVE QAT VALIDATION HERE - AFTER MODEL IS CREATED
-    print("🎯 VALIDATING QAT DATA CONSISTENCY...")
-    if params.USE_QAT and params.QUANTIZE_MODEL:
-        qat_consistent, qat_msg = validate_qat_data_consistency()
-        if not qat_consistent:
-            print(f"🚨 CRITICAL: {qat_msg}")
-            print("   QAT training may produce incorrect results!")
-        else:
-            print(f"✅ {qat_msg}")
-    
-    # ✅ MOVE COMPREHENSIVE QAT VALIDATION HERE
-    if params.USE_QAT and params.QUANTIZE_MODEL:
-        print("🎯 RUNNING COMPREHENSIVE QAT VALIDATION...")
-        qat_valid, qat_summary = validate_complete_qat_setup(model, debug=debug)
+        setup_tensorflow_logging(debug)
+        set_all_seeds(params.SHUFFLE_SEED)
         
-        if not qat_valid:
-            print("🚨 QAT validation failed - consider reviewing quantization settings")
-        else:
-            print("✅ QAT validation passed - ready for quantization-aware training")
-            
-    # if params.USE_QAT and params.QUANTIZE_MODEL:
-        # gradient_ok = check_qat_gradient_flow(model, x_train, y_train_final)
-        # output_ok = diagnose_qat_output_behavior(model, x_train, y_train_final)
-        # if not gradient_ok:
-            # print("🔄 QAT gradient issue - falling back to standard model")
-            # params.USE_QAT = False
-            # model = create_model()
-            # model = compile_model(model)
-            
-    if params.USE_QAT and params.QUANTIZE_MODEL and params.MODEL_ARCHITECTURE != "original_haverland":
-        gradient_ok = check_qat_gradient_flow(model, x_train, y_train_final)
-        output_ok = diagnose_qat_output_behavior(model, x_train, y_train_final)
-        if not gradient_ok:
-            print("🔄 QAT gradient issue - falling back to standard model")
-            params.USE_QAT = False
-            model = create_model()
-
-    # Force recompilation with correct loss
-    if params.MODEL_ARCHITECTURE == "original_haverland":
-        model.compile(
-            optimizer=model.optimizer,
-            loss=tf.keras.losses.CategoricalCrossentropy(),
-            metrics=['accuracy']
-        )
-    else:
-        model.compile(
-            optimizer=model.optimizer, 
-            loss=tf.keras.losses.SparseCategoricalCrossentropy(),
-            metrics=['accuracy']
-        )
-        
-    # Validate QAT data flow if using QAT
-    if use_qat:
-        qat_valid, qat_msg = validate_qat_data_flow(model, x_train, debug=debug)
-        if not qat_valid:
-            print(f"❌ QAT data flow validation failed: {qat_msg}")
-            return None, None, None
-            
-    # Test if the model behaves like a quantized model
-    print("\n🧪 QUICK QAT VERIFICATION TEST:")
-    test_input = tf.convert_to_tensor(np.random.randint(0, 255, (1,) + params.INPUT_SHAPE, dtype=np.uint8))
-    output = model(test_input)
-    print(f"   Input dtype: {test_input.dtype}")
-    print(f"   Output range: [{output.numpy().min():.3f}, {output.numpy().max():.3f}]")
-    print(f"   Output sum: {np.sum(output.numpy(), axis=1)}")
-    
-    # Continue with the rest of training...
-    # Setup training components
-    tflite_manager = TFLiteModelManager(training_dir, debug)
-
-    # This will automatically test strategies and use the best one
-    tflite_blob, size = tflite_manager.save_as_tflite_enhanced(
-        model, 
-        params.get_tflite_filename(),
-        quantize=True
-    )
-    
-    monitor = TrainingMonitor(training_dir, debug)
-    monitor.set_model(model)
-    
-    # Print training summary
-    print_training_summary(model, x_train, x_val, x_test, debug)
-    save_model_summary_to_file(model, training_dir)
-    
-    # # Create representative dataset
-    # if params.USE_QAT and params.QUANTIZE_MODEL:
-        # # QAT models already carry quantisation information – no calibration needed.
-        # representative_data = None
-    # else:
-        # representative_data = create_qat_representative_dataset(x_train_raw)
-        
-    # -----------------------------------------------------------------
-    #  Representative dataset for PTQ
-    # -----------------------------------------------------------------
-    # If we are doing QAT we **do not** need a calibration set – the model
-    # already contains fake quant nodes.  For pure PTQ we must supply
-    # float32 data; the helper below now uses the *training* preprocessing
-    # (float32) to avoid the previous uint8 → float conversion.
-    # if params.USE_QAT and params.QUANTIZE_MODEL:
-        # representative_data = None
-    # else:
-        # representative_data = create_qat_representative_dataset(x_train_raw)
-        
-    if params.USE_QAT and params.QUANTIZE_MODEL:
-        # QAT models already carry quantization information – no calibration needed for TFLite conversion
-        representative_data = None
-        print("🎯 QAT model: No representative dataset needed (fake quant layers provide scales)")
-    else:
-        # PTQ needs calibration data
-        representative_data = create_qat_representative_dataset(x_train_raw)
-        print("🎯 PTQ: Representative dataset created for calibration")
-    
-    # Create callbacks
-    callbacks = create_callbacks(
-        training_dir, 
-        tflite_manager, 
-        representative_data, 
-        params.EPOCHS, 
-        monitor, 
-        debug, 
-        validation_data=(x_val, y_val_final),
-        x_train_raw=x_train_raw
-    )
-    
-    # Start training
-    print("\n🎯 Starting training...")
-    start_time = datetime.now()
-    
-    active_run = None
-    if MLFLOW_AVAILABLE:
         try:
             import mlflow
-            mlflow.set_tracking_uri("file://" + os.path.abspath("mlruns"))
-            mlflow.set_experiment("Digit_Recognizer")
-            active_run = mlflow.start_run(run_name=f"{params.MODEL_ARCHITECTURE}_{color_mode}")
-            mlflow.tensorflow.autolog(log_models=False, log_datasets=False)
-            mlflow.log_param("architecture", params.MODEL_ARCHITECTURE)
-            mlflow.log_param("qat_enabled", params.USE_QAT)
-            mlflow.log_param("epochs", params.EPOCHS)
-            mlflow.log_param("batch_size", params.BATCH_SIZE)
-        except Exception as e:
-            print(f"⚠️ MLflow tracking initialization failed: {e}")
+            MLFLOW_AVAILABLE = True
+        except ImportError:
             MLFLOW_AVAILABLE = False
-
-    if params.USE_DATA_AUGMENTATION:
-        train_dataset, val_dataset, _ = setup_augmentation_for_training(
-            x_train, y_train_final, x_val, y_val_final, debug=debug
-        )
-        history = model.fit(
-            train_dataset,
-            epochs=params.EPOCHS,
-            validation_data=val_dataset,
-            callbacks=callbacks,
-            verbose=0
-        )
-    else:
-        # Compute class weights to handle imbalanced datasets
+            print("ℹ️ MLflow not installed. Skipping experiment tracking. (Run `pip install mlflow` to enable)")
+        
+        # Validate quantization parameters
+        # Validate quantization parameters
+        print("🎯 VALIDATING QUANTIZATION PARAMETERS...")
         try:
-            from sklearn.utils.class_weight import compute_class_weight
-            unique_classes = np.unique(y_train_final)
-            weights = compute_class_weight(
-                class_weight='balanced',
-                classes=unique_classes,
-                y=y_train_final
-            )
-            class_weight_dict = dict(zip(unique_classes, weights))
-            print(f"⚖️  Using class weights for {len(unique_classes)} classes (max ratio: {max(weights)/min(weights):.2f}x)")
+            is_valid, corrected_params, message = validate_quantization_parameters()
+            print(message)
         except Exception as e:
-            print(f"⚠️  Could not compute class weights: {e}. Training without class weighting.")
-            class_weight_dict = None
-
-        history = model.fit(
-            x_train, y_train_final,
-            batch_size=params.BATCH_SIZE,
-            epochs=params.EPOCHS,
-            validation_data=(x_val, y_val_final),
-            callbacks=callbacks,
-            verbose=0,
-            shuffle=True,
-            class_weight=class_weight_dict
-        )
-    
-    training_time = datetime.now() - start_time
-    
-    # Final model evaluation and quantization analysis
-    print("\n📈 Evaluating models...")
-    
-    # Evaluate Keras model
-    train_accuracy = model.evaluate(x_train, y_train_final, verbose=0)[1]
-    val_accuracy = model.evaluate(x_val, y_val_final, verbose=0)[1]
-    test_accuracy = model.evaluate(x_test, y_test_final, verbose=0)[1]
-    
-    print(f"✅ Keras Model Evaluation:")
-    print(f"   Train Accuracy: {train_accuracy:.4f}")
-    print(f"   Val Accuracy: {val_accuracy:.4f}")
-    print(f"   Test Accuracy: {test_accuracy:.4f}")
-    
-    # TFLite model evaluation and quantization analysis
-    tflite_accuracy = 0.0
-    # quantized_tflite_path = os.path.join(training_dir, params.TFLITE_FILENAME)
-    quantized_tflite_path = os.path.join(training_dir, params.get_tflite_filename())
-    
-    quantization_results = {
-        'tflite_accuracy': 0.0,
-        'keras_accuracy': test_accuracy,
-        'tflite_size': 0,
-        'keras_size': 0,
-        'accuracy_drop': 0.0,
-        'size_reduction': 0.0
-    }
-
-    if os.path.exists(quantized_tflite_path) and params.QUANTIZE_MODEL:
+            print(f"❌ Quantization parameter validation failed: {e}")
+            return None, None, None
+        
+        if not is_valid:
+            print("🔄 Applying parameter corrections...")
+            params.QUANTIZE_MODEL = corrected_params['QUANTIZE_MODEL']
+            params.USE_QAT = corrected_params['USE_QAT']
+            params.ESP_DL_QUANTIZE = corrected_params['ESP_DL_QUANTIZE']
+            print("✅ Corrected parameters applied")
+        
+        # Validate quantization combination
         try:
-            print("🔍 Running quantization analysis...")
-            # Use the analysis function with correct parameter order
-            analysis_result = analyze_quantization_impact(
-                model, x_test, y_test_final, quantized_tflite_path, debug=debug
-            )
-            
-            if analysis_result is not None:
-                quantization_results.update(analysis_result)
-                tflite_accuracy = quantization_results.get('tflite_accuracy', 0.0)
-                
-                # Generate detailed report
-                analyzer = QuantizationAnalyzer(debug=debug)
-                analyzer.analysis_results = quantization_results
-                analyzer.generate_quantization_report(training_dir)
+            is_valid, msg = validate_quantization_combination()
+            if not is_valid:
+                print(f"❌ Quantization combination invalid: {msg}")
+                return None, None, None
+            print(f"✅ {msg}")
+        except Exception as e:
+            print(f"❌ Quantization combination validation crashed: {e}")
+            return None, None, None
+        
+        # Setup hardware
+        strategy = setup_gpu()
+        
+        # Create output directory
+        color_mode = "GRAY" if params.USE_GRAYSCALE else "RGB"
+        quantization_mode = ""
+        if params.USE_QAT:
+            quantization_mode = "_QAT"
+        if params.ESP_DL_QUANTIZE:
+            quantization_mode += "_ESP-DL"
+        elif params.QUANTIZE_MODEL:
+            quantization_mode += "_QUANT"
+        
+        # Use task name if provided
+        task_prefix = f"{params.TASK_NAME}_" if getattr(params, 'TASK_NAME', None) else ""
+        
+        training_dir = os.path.join(
+            params.OUTPUT_DIR, 
+            f"{task_prefix}{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls{quantization_mode}_{color_mode}_{datetime.now().strftime('%m%d_%H%M')}"
+        )
+        os.makedirs(training_dir, exist_ok=True)
+        print(f"📁 Output directory: {training_dir}")
+        
+        # Load and preprocess data
+        print("\nLoading dataset from multiple sources...")
+        (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), (x_test_raw, y_test_raw) = get_data_splits()
+        
+        print("🔄 Preprocessing images...")
+        x_train = preprocess_for_training(x_train_raw)
+        x_val   = preprocess_for_training(x_val_raw)
+        x_test  = preprocess_for_training(x_test_raw)
+        
+        # Handle labels based on model type
+        if params.MODEL_ARCHITECTURE == "original_haverland":
+            y_train_final = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
+            y_val_final = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES) 
+            y_test_final = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)
+        else:
+            y_train_final = y_train_raw.copy()
+            y_val_final = y_val_raw.copy()
+            y_test_final = y_test_raw.copy()
+        
+        # Create model with QAT if enabled
+        use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
+
+        if use_qat:
+            print("Creating model with Quantization Aware Training...")
+            model = create_qat_model()
+        else:
+            model = create_model()
+
+        # Compile – loss depends on the architecture
+        if params.MODEL_ARCHITECTURE == "original_haverland":
+            loss_type = "categorical"
+        else:
+            loss_type = "sparse"
+
+        model = compile_model(model, loss_type=loss_type) 
+        
+        # -----------------------------------------------------------------
+        #  Resume Training Logic
+        # -----------------------------------------------------------------
+        if hasattr(params, 'RESUME_MODEL_PATH') and params.RESUME_MODEL_PATH:
+            print(f"🔄 Resuming from checkpoint: {params.RESUME_MODEL_PATH}")
+            try:
+                model.load_weights(params.RESUME_MODEL_PATH)
+                print("   ✅ Weights loaded successfully")
+            except Exception as e:
+                print(f"   ❌ Failed to load weights: {e}")
+                print("   ⚠️  Starting training from scratch instead.")
+        
+        # Build model with explicit input shape (required for TF2.x eager mode)
+        print("🔧 Building model with explicit input shape...")
+        model.build(input_shape=(None,) + params.INPUT_SHAPE)
+        
+        # ✅ MOVE QAT VALIDATION HERE - AFTER MODEL IS CREATED
+        print("🎯 VALIDATING QAT DATA CONSISTENCY...")
+        if params.USE_QAT and params.QUANTIZE_MODEL:
+            qat_consistent, qat_msg = validate_qat_data_consistency()
+            if not qat_consistent:
+                print(f"🚨 CRITICAL: {qat_msg}")
+                print("   QAT training may produce incorrect results!")
             else:
-                print("⚠️  Quantization analysis returned no results, using fallback values")
-                # Fallback: basic size measurements with better error handling
+                print(f"✅ {qat_msg}")
+        
+        # ✅ MOVE COMPREHENSIVE QAT VALIDATION HERE
+        if params.USE_QAT and params.QUANTIZE_MODEL:
+            print("🎯 RUNNING COMPREHENSIVE QAT VALIDATION...")
+            from tqdm import tqdm
+            with tqdm(total=1, desc="QAT Validation", leave=False) as pbar:
+                qat_valid, qat_summary = validate_complete_qat_setup(model, debug=debug)
+                pbar.update(1)
+            
+            if not qat_valid:
+                print("🚨 QAT validation failed - consider reviewing quantization settings")
+            else:
+                print("✅ QAT validation passed - ready for quantization-aware training")
+                
+        if params.USE_QAT and params.QUANTIZE_MODEL and params.MODEL_ARCHITECTURE != "original_haverland":
+            gradient_ok = check_qat_gradient_flow(model, x_train, y_train_final)
+            output_ok = diagnose_qat_output_behavior(model, x_train, y_train_final)
+            if not gradient_ok:
+                print("🔄 QAT gradient issue - falling back to standard model")
+                params.USE_QAT = False
+                model = create_model()
+            
+        # Validate QAT data flow if using QAT
+        if use_qat:
+            try:
+                qat_valid, qat_msg = validate_qat_data_flow(model, x_train, debug=debug)
+                if not qat_valid:
+                    print(f"❌ QAT data flow validation failed: {qat_msg}")
+                    return None, None, None
+            except Exception as e:
+                print(f"❌ QAT data flow validation crashed: {e}")
+                return None, None, None
+                
+        # Test if the model behaves like a quantized model
+        print("\n🧪 QUICK QAT VERIFICATION TEST:")
+        test_input = tf.convert_to_tensor(np.random.randint(0, 255, (1,) + params.INPUT_SHAPE, dtype=np.uint8))
+        output = model(test_input)
+        print(f"   Input dtype: {test_input.dtype}")
+        print(f"   Output range: [{output.numpy().min():.3f}, {output.numpy().max():.3f}]")
+        print(f"   Output sum: {np.sum(output.numpy(), axis=1)}")
+    
+        # Continue with the rest of training...
+        # Setup training components
+        tflite_manager = TFLiteModelManager(training_dir, debug)
+        tflite_manager.set_data(x_train=x_train_raw, x_test=x_test_raw, y_test=y_test_raw)
+
+        # This will automatically test strategies and use the best one
+        print("📦 Generating optimized TFLite model for initial verification...")
+        with tqdm(total=1, desc="TFLite Conversion", leave=False) as pbar:
+            tflite_blob, size = tflite_manager.save_as_tflite_enhanced(
+                model, 
+                params.get_tflite_filename(),
+                quantize=params.QUANTIZE_MODEL
+            )
+            pbar.update(1)
+        
+        monitor = TrainingMonitor(training_dir, debug)
+        monitor.set_model(model)
+        
+        # Print training summary
+        print_training_summary(model, x_train, x_val, x_test, debug)
+        save_model_summary_to_file(model, training_dir)
+        
+        # # Create representative dataset
+        # if params.USE_QAT and params.QUANTIZE_MODEL:
+            # # QAT models already carry quantisation information – no calibration needed.
+            # representative_data = None
+        # else:
+            # representative_data = create_qat_representative_dataset(x_train_raw)
+            
+        # -----------------------------------------------------------------
+        #  Representative dataset for PTQ
+        # -----------------------------------------------------------------
+        # If we are doing QAT we **do not** need a calibration set – the model
+        # already contains fake quant nodes.  For pure PTQ we must supply
+        # float32 data; the helper below now uses the *training* preprocessing
+        # (float32) to avoid the previous uint8 → float conversion.
+        # if params.USE_QAT and params.QUANTIZE_MODEL:
+            # representative_data = None
+        # else:
+            # representative_data = create_qat_representative_dataset(x_train_raw)
+            
+        if params.USE_QAT and params.QUANTIZE_MODEL:
+            # QAT models already carry quantization information – no calibration needed for TFLite conversion
+            representative_data = None
+            print("🎯 QAT model: No representative dataset needed (fake quant layers provide scales)")
+        else:
+            # PTQ needs calibration data
+            print("🎯 PTQ: Creating representative dataset for calibration...")
+            with tqdm(total=1, desc="Calibration Data", leave=False) as pbar:
+                representative_data = create_qat_representative_dataset(x_train_raw)
+                pbar.update(1)
+            print("   ✅ Representative dataset ready")
+        
+        # Create callbacks
+        callbacks = create_callbacks(
+            training_dir, 
+            tflite_manager, 
+            representative_data, 
+            params.EPOCHS, 
+            monitor, 
+            debug, 
+            validation_data=(x_val, y_val_final),
+            x_train_raw=x_train_raw
+        )
+        
+        # Start training
+        print("\n🎯 Starting training...")
+        start_time = datetime.now()
+        
+        active_run = None
+        if MLFLOW_AVAILABLE:
+            try:
+                import mlflow
+                mlflow.set_tracking_uri("file://" + os.path.abspath("mlruns"))
+                mlflow.set_experiment("Digit_Recognizer")
+                active_run = mlflow.start_run(run_name=f"{params.MODEL_ARCHITECTURE}_{color_mode}")
+                mlflow.tensorflow.autolog(log_models=False, log_datasets=False)
+                mlflow.log_param("architecture", params.MODEL_ARCHITECTURE)
+                mlflow.log_param("qat_enabled", params.USE_QAT)
+                mlflow.log_param("epochs", params.EPOCHS)
+                mlflow.log_param("batch_size", params.BATCH_SIZE)
+            except Exception as e:
+                print(f"⚠️ MLflow tracking initialization failed: {e}")
+                MLFLOW_AVAILABLE = False
+
+        if params.USE_DATA_AUGMENTATION:
+            train_dataset, val_dataset, _ = setup_augmentation_for_training(
+                x_train, y_train_final, x_val, y_val_final, debug=debug
+            )
+            print(f"\n🚀 Initiating model.fit (Phase: {'QAT' if params.USE_QAT else 'Standard'})")
+            print(f"   Epochs: {params.INITIAL_EPOCH if hasattr(params, 'INITIAL_EPOCH') else 0} to {params.EPOCHS}")
+            
+            print("\n⏳ Loading dataset and optimizing computation graph...")
+            print("   (This may take a minute for the first epoch)")
+            from tqdm import tqdm
+            with tqdm(total=1, desc="Graph Optimization", leave=False) as pbar:
+                history = model.fit(
+                    train_dataset,
+                    epochs=params.EPOCHS,
+                    initial_epoch=params.INITIAL_EPOCH if hasattr(params, 'INITIAL_EPOCH') else 0,
+                    validation_data=val_dataset,
+                    callbacks=callbacks,
+                    verbose=0
+                )
+                pbar.update(1)
+        else:
+            # Compute class weights to handle imbalanced datasets
+            try:
+                from sklearn.utils.class_weight import compute_class_weight
+                unique_classes = np.unique(y_train_final)
+                weights = compute_class_weight(
+                    class_weight='balanced',
+                    classes=unique_classes,
+                    y=y_train_final
+                )
+                class_weight_dict = dict(zip(unique_classes, weights))
+                print(f"⚖️  Using class weights for {len(unique_classes)} classes (max ratio: {max(weights)/min(weights):.2f}x)")
+            except Exception as e:
+                print(f"⚠️  Could not compute class weights: {e}. Training without class weighting.")
+                class_weight_dict = None
+
+            print(f"\n🚀 Initiating model.fit (Phase: {'QAT' if params.USE_QAT else 'Standard'})")
+            print(f"   Epochs: {params.INITIAL_EPOCH if hasattr(params, 'INITIAL_EPOCH') else 0} to {params.EPOCHS}")
+            
+            history = model.fit(
+                x_train, y_train_final,
+                batch_size=params.BATCH_SIZE,
+                epochs=params.EPOCHS,
+                initial_epoch=params.INITIAL_EPOCH if hasattr(params, 'INITIAL_EPOCH') else 0,
+                validation_data=(x_val, y_val_final),
+                callbacks=callbacks,
+                verbose=0,
+                shuffle=True,
+                class_weight=class_weight_dict
+            )
+        
+        training_time = datetime.now() - start_time
+        
+        # Final model evaluation and quantization analysis
+        print("\n📈 Evaluating models...")
+        
+        # Evaluate Keras model
+        train_accuracy = model.evaluate(x_train, y_train_final, verbose=0)[1]
+        val_accuracy = model.evaluate(x_val, y_val_final, verbose=0)[1]
+        test_accuracy = model.evaluate(x_test, y_test_final, verbose=0)[1]
+        
+        print(f"✅ Keras Model Evaluation:")
+        print(f"   Train Accuracy: {train_accuracy:.4f}")
+        print(f"   Val Accuracy: {val_accuracy:.4f}")
+        print(f"   Test Accuracy: {test_accuracy:.4f}")
+        
+        # TFLite model evaluation and quantization analysis
+        tflite_accuracy = 0.0
+        # quantized_tflite_path = os.path.join(training_dir, params.TFLITE_FILENAME)
+        quantized_tflite_path = os.path.join(training_dir, params.get_tflite_filename())
+        
+        quantization_results = {
+            'tflite_accuracy': 0.0,
+            'keras_accuracy': test_accuracy,
+            'tflite_size': 0,
+            'keras_size': 0,
+            'accuracy_drop': 0.0,
+            'size_reduction': 0.0
+        }
+
+        if os.path.exists(quantized_tflite_path) and params.QUANTIZE_MODEL:
+            try:
+                print("🔍 Running quantization analysis...")
+                # Use the analysis function with correct parameter order
+                analysis_result = analyze_quantization_impact(
+                    model, x_test, y_test_final, quantized_tflite_path, debug=debug
+                )
+                
+                if analysis_result is not None:
+                    quantization_results.update(analysis_result)
+                    tflite_accuracy = quantization_results.get('tflite_accuracy', 0.0)
+                    
+                    # Generate detailed report
+                    analyzer = QuantizationAnalyzer(debug=debug)
+                    analyzer.analysis_results = quantization_results
+                    analyzer.generate_quantization_report(training_dir)
+                else:
+                    print("⚠️  Quantization analysis returned no results, using fallback values")
+                    # Fallback: basic size measurements with better error handling
+                    try:
+                        quantization_results['tflite_size'] = get_tflite_model_size(quantized_tflite_path)
+                        quantization_results['keras_size'] = get_keras_model_size(model)
+                        if quantization_results['keras_size'] > 0:
+                            quantization_results['size_reduction'] = (
+                                (quantization_results['keras_size'] - quantization_results['tflite_size']) / 
+                                quantization_results['keras_size'] * 100
+                            )
+                    except Exception as size_error:
+                        print(f"⚠️  Fallback size measurement failed: {size_error}")
+                        
+            except Exception as e:
+                print(f"❌ Quantization analysis failed: {e}")
+                if debug:
+                    import traceback
+                    traceback.print_exc()
+                # Fallback measurements with error handling
                 try:
                     quantization_results['tflite_size'] = get_tflite_model_size(quantized_tflite_path)
-                    quantization_results['keras_size'] = get_keras_model_size(model)
-                    if quantization_results['keras_size'] > 0:
-                        quantization_results['size_reduction'] = (
-                            (quantization_results['keras_size'] - quantization_results['tflite_size']) / 
-                            quantization_results['keras_size'] * 100
-                        )
-                except Exception as size_error:
-                    print(f"⚠️  Fallback size measurement failed: {size_error}")
+                except:
+                    quantization_results['tflite_size'] = 0
                     
-        except Exception as e:
-            print(f"❌ Quantization analysis failed: {e}")
-            if debug:
-                import traceback
-                traceback.print_exc()
-            # Fallback measurements with error handling
-            try:
-                quantization_results['tflite_size'] = get_tflite_model_size(quantized_tflite_path)
-            except:
-                quantization_results['tflite_size'] = 0
-                
-            try:
-                quantization_results['keras_size'] = get_keras_model_size(model)
-            except:
-                quantization_results['keras_size'] = 0
-    
-    # Run comprehensive analysis if requested
-    if full_analysis:
-        run_comprehensive_analysis(model, history, training_dir, x_test, y_test_final, debug)
-    else:
-        print("⏭️  Skipping comprehensive analysis (--no_analysis flag used)")
-    
-    # Save training plots and configuration
-    monitor.save_training_plots()
-    save_training_config(training_dir, 
-                        quantization_results['tflite_size'],
-                        quantization_results['keras_size'],
-                        tflite_manager,
-                        test_accuracy, tflite_accuracy, training_time, debug, model=model)
-    
-    # Final summary
-    print("\n" + "="*60)
-    print("🏁 TRAINING COMPLETED")
-    print("="*60)
-    print(f"⏱️  Training time: {training_time}")
-    print(f"📊 Final Results:")
-    print(f"   Best Validation Accuracy: {tflite_manager.best_accuracy:.4f}")
-    print(f"   Test Accuracy - Keras: {test_accuracy:.4f}")
-    print(f"   Test Accuracy - TFLite: {tflite_accuracy:.4f}")
-    
-    if params.QUANTIZE_MODEL:
-        print(f"   Quantized Model Size: {quantization_results['tflite_size']:.1f} KB")
-        print(f"   Float Model Size: {quantization_results['keras_size']:.1f} KB")
-        if quantization_results['keras_size'] > 0:
-            size_reduction = (
-                (quantization_results['keras_size'] - quantization_results['tflite_size']) / 
-                quantization_results['keras_size'] * 100
-            )
-            print(f"   Size Reduction: {size_reduction:.1f}%")
-    
-    # -----------------------------------------------------------------
-    #  CLEANUP: Delete checkpoints if not in debug mode and cleanup not disabled
-    # -----------------------------------------------------------------
-    if not debug and not no_cleanup:
-        print("\n🧹 Cleaning up training checkpoints...")
-        try:
-            files_deleted, space_freed = cleanup_training_directory(training_dir, debug=False)
-            if files_deleted > 0:
-                print(f"✅ Cleanup completed: {files_deleted} files deleted, {space_freed/1024/1024:.1f} MB freed")
-            else:
-                print("💡 No checkpoints found to clean up")
-        except Exception as e:
-            print(f"⚠️  Cleanup failed: {e}")
-    else:
-        if debug:
-            print("🔍 Debug mode - skipping cleanup")
-        if no_cleanup:
-            print("🚫 Cleanup disabled - keeping checkpoints")
+                try:
+                    quantization_results['keras_size'] = get_keras_model_size(model)
+                except:
+                    quantization_results['keras_size'] = 0
         
-        if MLFLOW_AVAILABLE:
-            mlflow.log_metric("test_accuracy", test_accuracy)
-            mlflow.log_metric("tflite_accuracy", tflite_accuracy)
+        # Run comprehensive analysis if requested
+        if full_analysis:
+            run_comprehensive_analysis(model, history, training_dir, x_test, y_test_final, debug)
+        else:
+            print("⏭️  Skipping comprehensive analysis (--no_analysis flag used)")
+        
+        # Save training plots and configuration
+        monitor.save_training_plots()
+        save_training_config(training_dir, 
+                            quantization_results['tflite_size'],
+                            quantization_results['keras_size'],
+                            tflite_manager,
+                            test_accuracy, tflite_accuracy, training_time, debug, model=model)
+        
+        # Final summary
+        print("\n" + "="*60)
+        print("🏁 TRAINING COMPLETED")
+        print("="*60)
+        print(f"⏱️  Training time: {training_time}")
+        print(f"📊 Final Results:")
+        print(f"   Best Validation Accuracy: {tflite_manager.best_accuracy:.4f}")
+        print(f"   Test Accuracy - Keras: {test_accuracy:.4f}")
+        print(f"   Test Accuracy - TFLite: {tflite_accuracy:.4f}")
+        
+        if params.QUANTIZE_MODEL:
+            print(f"   Quantized Model Size: {quantization_results['tflite_size']:.1f} KB")
+            print(f"   Float Model Size: {quantization_results['keras_size']:.1f} KB")
+            if quantization_results['keras_size'] > 0:
+                size_reduction = (
+                    (quantization_results['keras_size'] - quantization_results['tflite_size']) / 
+                    quantization_results['keras_size'] * 100
+                )
+                print(f"   Size Reduction: {size_reduction:.1f}%")
+        
+        # -----------------------------------------------------------------
+        #  CLEANUP: Delete checkpoints if not in debug mode and cleanup not disabled
+        # -----------------------------------------------------------------
+        if not debug and not no_cleanup:
+            print("\n🧹 Cleaning up training checkpoints...")
+            try:
+                files_deleted, space_freed = cleanup_training_directory(training_dir, debug=False)
+                if files_deleted > 0:
+                    print(f"✅ Cleanup completed: {files_deleted} files deleted, {space_freed/1024/1024:.1f} MB freed")
+                else:
+                    print("💡 No checkpoints found to clean up")
+            except Exception as e:
+                print(f"⚠️  Cleanup failed: {e}")
+        else:
+            if debug:
+                print("🔍 Debug mode - skipping cleanup")
+            if no_cleanup:
+                print("🚫 Cleanup disabled - keeping checkpoints")
             
-            # Log the optimized TFLite model as an artifact
-            for root, dirs, files in os.walk(training_dir):
-                for file in files:
-                    if file.endswith(".tflite"):
-                        mlflow.log_artifact(os.path.join(root, file))
-            
-            if active_run:
-                mlflow.end_run()
+            if MLFLOW_AVAILABLE:
+                mlflow.log_metric("test_accuracy", test_accuracy)
+                mlflow.log_metric("tflite_accuracy", tflite_accuracy)
+                
+                # Log the optimized TFLite model as an artifact
+                for root, dirs, files in os.walk(training_dir):
+                    for file in files:
+                        if file.endswith(".tflite"):
+                            mlflow.log_artifact(os.path.join(root, file))
+                
+                if active_run:
+                    mlflow.end_run()
 
         return model, history, training_dir
+
+    except Exception as e:
+        print(f"\n💥 CRITICAL TRAINING ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        # End any active MLflow run if it exists
+        try:
+            import mlflow
+            if mlflow.active_run():
+                mlflow.end_run(status="FAILED")
+        except:
+            pass
+        return None, None, None
 
 if __name__ == "__main__":
     main()

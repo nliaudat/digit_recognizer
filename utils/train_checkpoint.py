@@ -22,11 +22,11 @@ class TFLiteCheckpoint(tf.keras.callbacks.Callback):
         Calibration generator for PTQ (passed through to ``save_best_model``).
     x_train_raw : np.ndarray or None
         Raw training data for creating representative dataset if needed.
-    save_frequency : int, default 10
+    save_frequency : int, default 5 (set in parameters.py CHECKPOINT_FREQUENCY)
         How often (in epochs) to write a regular Keras checkpoint.
     """
 
-    def __init__(self, tflite_manager, representative_data, x_train_raw=None, save_frequency: int = 10):
+    def __init__(self, tflite_manager, representative_data, x_train_raw=None, save_frequency: int = 5):
         super().__init__()
         self.tflite_manager = tflite_manager
         self.representative_data = representative_data
