@@ -808,3 +808,214 @@ class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
         overall_acc = np.mean(y_pred == y_true)
         print("-" * 50)
         print(f"OVERALL ACCURACY: {overall_acc:.4f}")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Dynamic LR Scheduler Controller
+# ──────────────────────────────────────────────────────────────────────────────
+
+class DynamicLRProxy:
+    """
+    Mutable wrapper around an LR schedule function.
+
+    A single LearningRateScheduler callback is registered with this proxy at
+    training start.  When DynamicSchedulerController triggers a phase switch,
+    it simply updates `self.schedule` to a new callable — the Keras callback
+    picks up the change on the very next epoch_begin without any structural
+    modification to the callback list.
+
+    `self.epoch_offset` is reset on each switch so that the new schedule
+    always counts from epoch 0 regardless of how many epochs have elapsed.
+    """
+    def __init__(self):
+        self._schedule = lambda epoch, lr: lr  # pass-through (no-op)
+        self.epoch_offset = 0                  # subtracted from global epoch
+
+    def __call__(self, epoch, lr):
+        return self._schedule(epoch - self.epoch_offset, lr)
+
+    def update(self, new_schedule_fn, current_epoch):
+        """Replace the active schedule and reset the epoch origin."""
+        self._schedule = new_schedule_fn
+        self.epoch_offset = current_epoch
+
+
+class DynamicSchedulerController(tf.keras.callbacks.Callback):
+    """
+    Switches the LR scheduler (and optionally the optimizer) at val_accuracy
+    thresholds, mirroring how IntelligentFocalLossController switches γ.
+
+    Parameters are read from parameters.py:
+        LR_SCHEDULER_THRESHOLDS  – list of val_acc values that trigger a switch
+        LR_SCHEDULER_SEQUENCE    – scheduler name for each phase (len = thresholds+1)
+        LR_SCHEDULER_RESET_FRACTION – restore LR to this × LEARNING_RATE on switch
+                                      (None = keep the current decayed LR)
+        USE_DYNAMIC_OPTIMIZER    – also swap optimizer on each switch (experimental)
+        OPTIMIZER_SEQUENCE       – optimizer name per phase (same length as sequence)
+    """
+
+    def __init__(self, lr_proxy, debug=False):
+        super().__init__()
+        self.lr_proxy = lr_proxy
+        self.debug = debug
+
+        self.thresholds = list(getattr(params, 'LR_SCHEDULER_THRESHOLDS', []))
+        self.scheduler_sequence = list(getattr(params, 'LR_SCHEDULER_SEQUENCE', []))
+        self.reset_fraction = getattr(params, 'LR_SCHEDULER_RESET_FRACTION', None)
+        self.use_dynamic_optimizer = getattr(params, 'USE_DYNAMIC_OPTIMIZER', False)
+        self.optimizer_sequence = list(getattr(params, 'OPTIMIZER_SEQUENCE', []))
+
+        self.current_phase = 0
+        self.phase_switched_epoch = {}   # threshold → epoch it fired
+
+    # ------------------------------------------------------------------
+    def on_train_begin(self, logs=None):
+        print("\n🔀 DynamicSchedulerController initialized")
+        print(f"   Thresholds      : {self.thresholds}")
+        print(f"   Scheduler phases: {self.scheduler_sequence}")
+        if self.reset_fraction is not None:
+            print(f"   LR reset        : {self.reset_fraction} × LEARNING_RATE on switch")
+        if self.use_dynamic_optimizer:
+            print(f"   Optimizer phases: {self.optimizer_sequence}")
+        # Activate phase-0 schedule immediately
+        self._activate_phase(0, epoch=0)
+
+    # ------------------------------------------------------------------
+    def on_epoch_end(self, epoch, logs=None):
+        if logs is None:
+            return
+        val_acc = logs.get('val_accuracy', 0.0)
+
+        # Walk thresholds in order; only fire if still in the corresponding phase
+        for i, threshold in enumerate(self.thresholds):
+            target_phase = i + 1
+            if val_acc >= threshold and self.current_phase < target_phase:
+                if threshold not in self.phase_switched_epoch:
+                    self.phase_switched_epoch[threshold] = epoch
+                    print(f"\n🔀 Epoch {epoch+1}: val_acc {val_acc:.4f} ≥ {threshold} "
+                          f"→ switching to phase {target_phase} "
+                          f"({self.scheduler_sequence[target_phase]})")
+                    self._activate_phase(target_phase, epoch + 1)
+                break   # only one switch per epoch
+
+    # ------------------------------------------------------------------
+    def _activate_phase(self, phase, epoch):
+        """Build + install the scheduler for the given phase."""
+        if phase >= len(self.scheduler_sequence):
+            return
+
+        sched_type = self.scheduler_sequence[phase]
+        peak_lr = params.LEARNING_RATE
+
+        # Optionally restore LR before building the new schedule
+        if self.reset_fraction is not None and phase > 0:
+            new_lr = float(peak_lr * self.reset_fraction)
+            self._set_lr(new_lr)
+            print(f"   ↺ LR reset to {new_lr:.2e} ({self.reset_fraction} × {peak_lr:.2e})")
+        else:
+            new_lr = self._get_lr()
+
+        # Build the schedule function for this phase
+        sched_fn = self._build_schedule(sched_type, new_lr, epoch)
+
+        # Hotswap via the proxy
+        self.lr_proxy.update(sched_fn, epoch)
+        self.current_phase = phase
+        print(f"   ✅ Phase {phase}: '{sched_type}' scheduler active (base_lr={new_lr:.2e})")
+
+        # Optional optimizer switch
+        if self.use_dynamic_optimizer and phase < len(self.optimizer_sequence):
+            self._switch_optimizer(self.optimizer_sequence[phase], new_lr)
+
+    # ------------------------------------------------------------------
+    def _build_schedule(self, sched_type, base_lr, start_epoch):
+        """Return an (epoch, lr) → lr callable for the requested scheduler."""
+        if sched_type == 'reduce_on_plateau':
+            # ReduceLROnPlateau is a Keras callback, not a schedule function.
+            # We approximate it here as a pass-through; the actual ReduceLROnPlateau
+            # callback in the list continues to operate unimpeded.
+            return lambda epoch, lr: lr
+
+        elif sched_type == 'cosine':
+            remaining = max(1, params.EPOCHS - start_epoch)
+            first_decay = max(1, getattr(params, 'LR_WARMUP_EPOCHS', 15))
+            schedule = tf.keras.optimizers.schedules.CosineDecayRestarts(
+                initial_learning_rate=base_lr,
+                first_decay_steps=first_decay,
+                t_mul=2.0,
+                m_mul=0.9,
+                alpha=getattr(params, 'COSINE_DECAY_ALPHA', 1e-6),
+            )
+            return lambda epoch, lr: float(schedule(epoch))
+
+        elif sched_type == 'exponential':
+            schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+                initial_learning_rate=base_lr,
+                decay_steps=getattr(params, 'EXPONENTIAL_DECAY_STEPS', 1000),
+                decay_rate=getattr(params, 'EXPONENTIAL_DECAY_RATE', 0.96),
+            )
+            return lambda epoch, lr: float(schedule(epoch))
+
+        elif sched_type == 'onecycle':
+            total = max(1, params.EPOCHS - start_epoch)
+            warmup = max(1, int(total * 0.3))
+            decay = max(1, total - warmup)
+            min_lr = getattr(params, 'COSINE_DECAY_ALPHA', 1e-6)
+            warmup_sched = tf.keras.optimizers.schedules.PolynomialDecay(
+                initial_learning_rate=base_lr * 0.1,
+                decay_steps=warmup, end_learning_rate=base_lr, power=1.0,
+            )
+            cosine_sched = tf.keras.optimizers.schedules.CosineDecay(
+                initial_learning_rate=base_lr,
+                decay_steps=decay,
+                alpha=min_lr / base_lr,
+            )
+            def _onecycle(epoch, lr):
+                return float(warmup_sched(epoch) if epoch < warmup else cosine_sched(epoch - warmup))
+            return _onecycle
+
+        elif sched_type == 'step':
+            step_size = getattr(params, 'STEP_DECAY_STEP_SIZE', 10)
+            gamma = getattr(params, 'STEP_DECAY_GAMMA', 0.1)
+            return lambda epoch, lr: base_lr * (gamma ** (epoch // step_size))
+
+        else:
+            print(f"   ⚠️  Unknown scheduler type '{sched_type}' — keeping current LR")
+            return lambda epoch, lr: lr
+
+    # ------------------------------------------------------------------
+    def _switch_optimizer(self, opt_type, lr):
+        """Recompile the model with a new optimizer (experimental)."""
+        print(f"   🔧 Switching optimizer → {opt_type} (lr={lr:.2e})")
+        try:
+            from models.model_factory import compile_model
+            # Temporarily override params for recompile
+            old_opt = params.OPTIMIZER_TYPE
+            old_lr = params.LEARNING_RATE
+            params.OPTIMIZER_TYPE = opt_type
+            params.LEARNING_RATE = lr
+            loss_type = 'categorical' if params.MODEL_ARCHITECTURE == 'original_haverland' else 'sparse'
+            compile_model(self.model, loss_type=loss_type)
+            params.OPTIMIZER_TYPE = old_opt
+            params.LEARNING_RATE = old_lr
+            print(f"   ✅ Optimizer switched to {opt_type}")
+        except Exception as e:
+            print(f"   ❌ Optimizer switch failed: {e}")
+
+    # ------------------------------------------------------------------
+    def _get_lr(self):
+        try:
+            lr = self.model.optimizer.learning_rate
+            return float(lr.numpy() if hasattr(lr, 'numpy') else lr)
+        except Exception:
+            return params.LEARNING_RATE
+
+    def _set_lr(self, lr):
+        try:
+            opt_lr = self.model.optimizer.learning_rate
+            if hasattr(opt_lr, 'assign'):
+                opt_lr.assign(float(lr))
+            else:
+                self.model.optimizer.learning_rate = float(lr)
+        except Exception as e:
+            print(f"   ⚠️  Could not set LR: {e}")
