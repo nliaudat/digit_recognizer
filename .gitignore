@@ -23,9 +23,6 @@ datasets/Tenth-of-step-of-a-meter-digit/commands.txt
 /datasets/tools/aug_real_integra_bad_predictions
 /datasets/tools/static_augmentation
 /venv_digreco
-train_old.py
-exported_models/100cls_RGB/super_high_accuracy_validator_100cls_RGB/super_high_accuracy_validator.keras
-exported_models/100cls_RGB/super_high_accuracy_validator_100cls_RGB_initial/super_high_accuracy_validator.keras
 /.dataset_cache
 /digit_recognizer_testing
 /config_runner_results
@@ -33,5 +30,4 @@ config_runner.py
 repair_tflite_qat.py
 meter_reading.log
 generate_v17_report.py
-/exported_models/100cls_RGB/super_high_accuracy_validator_100cls_QAT_QUANT_RGB_0307_1114
-/exported_models/100cls_RGB/super_high_accuracy_validator_100cls_QAT_QUANT_RGB_0302_1845
+/exported_models/100cls_RGB/super_high_accuracy_validator_100cls_RGB
