@@ -1,4 +1,3 @@
-# bench_predict.py
 import tensorflow as tf
 import numpy as np
 import cv2
@@ -6,7 +5,29 @@ import os
 import argparse
 from utils.preprocess import preprocess_for_inference
 import parameters as params
-from tabulate import tabulate
+
+try:
+    from tabulate import tabulate
+except ImportError:
+    # Simple fallback for tabulate when it's not installed.
+    def tabulate(table_data, headers=None, tablefmt=None, stralign=None):
+        """Simple fallback for tabulate when it's not installed."""
+        if not table_data: return ""
+        if not headers: headers = [f"Col{i}" for i in range(len(table_data[0]))]
+        # Basic alignment and spacing
+        cols = list(zip(*([headers] + table_data)))
+        col_widths = [max(len(str(x)) for x in col) for col in cols]
+        
+        lines = []
+        # Header
+        header_line = " | ".join(f"{str(h):{w}}" for h, w in zip(headers, col_widths))
+        lines.append(header_line)
+        lines.append("-" * len(header_line))
+        # Data
+        for row in table_data:
+            lines.append(" | ".join(f"{str(val):{w}}" for val, w in zip(row, col_widths)))
+        return "\n".join(lines)
+
 import glob
 from tqdm import tqdm
 import csv
@@ -30,8 +51,14 @@ class TFLiteDigitPredictor:
     def load_model(self):
         """Load TFLite model"""
         print(f"Loading TFLite model: {self.model_path}")
-        self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
-        self.interpreter.allocate_tensors()
+        try:
+            self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
+            self.interpreter.allocate_tensors()
+        except Exception as e:
+            print(f"❌ Failed to load TFLite model: {e}")
+            if "XNNPACK" in str(e):
+                print("💡 This often indicates a corrupted or incompatible quantized model.")
+            raise e
         
         self.input_details = self.interpreter.get_input_details()
         self.output_details = self.interpreter.get_output_details()
@@ -56,14 +83,24 @@ class TFLiteDigitPredictor:
         else:
             input_data = processed_image
         
-        # The image is already in the exact dtype the model expects,
-        # so we only need to cast to the NumPy type that the interpreter understands.
-        if self.input_details[0]['dtype'] == np.uint8:
-            input_data = input_data.astype(np.uint8)
-        elif self.input_details[0]['dtype'] == np.int8:
-            input_data = input_data.astype(np.int8)
+        # Robustly ensure input is scaled correctly based on what this specific model expects
+        expected_dtype = self.input_details[0]['dtype']
+        if expected_dtype == np.uint8:
+            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+                input_data = (input_data * 255.0).astype(np.uint8)
+            else:
+                input_data = input_data.astype(np.uint8)
+        elif expected_dtype == np.int8:
+            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+                input_data = (input_data * 255.0 - 128).astype(np.int8)
+            elif input_data.dtype == np.uint8:
+                input_data = (input_data.astype(np.int32) - 128).astype(np.int8)
+            else:
+                input_data = input_data.astype(np.int8)
         else:
             input_data = input_data.astype(np.float32)
+            if input_data.max() > 1.0:
+                input_data = input_data / 255.0
         
         # Verify shape matches expected input shape
         expected_shape = self.input_details[0]['shape']
@@ -125,7 +162,7 @@ def find_model_path(model_name=None, input_dir=params.OUTPUT_DIR):
     for dir_name in all_dirs:
         dir_path = os.path.join(input_dir, dir_name)
         # Check if this directory contains .tflite files and is likely a training directory
-        tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite')]
+        tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
         if tflite_files and not dir_name.startswith('test_results'):
             training_dirs.append(dir_name)
     
@@ -150,7 +187,7 @@ def find_model_path(model_name=None, input_dir=params.OUTPUT_DIR):
                 best_match = matching_dirs[0]  # Use first partial match
             
             training_path = os.path.join(input_dir, best_match)
-            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
             
             if tflite_files:
                 # Prefer quantized models
@@ -167,7 +204,7 @@ def find_model_path(model_name=None, input_dir=params.OUTPUT_DIR):
             training_path = os.path.join(input_dir, training_dir)
             
             # Check for exact model file matches
-            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
             for model_file in tflite_files:
                 model_file_clean = model_file.replace('.tflite', '')
                 
@@ -187,7 +224,7 @@ def find_model_path(model_name=None, input_dir=params.OUTPUT_DIR):
         latest_dir_path = os.path.join(input_dir, latest_training)
         
         # Look for any .tflite file in the latest directory
-        tflite_files = [f for f in os.listdir(latest_dir_path) if f.endswith('.tflite')]
+        tflite_files = [f for f in os.listdir(latest_dir_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
         
         if tflite_files:
             # Prefer quantized models if available
@@ -222,14 +259,20 @@ def get_model_parameters_count(model_path):
         return 0
 
 def is_quantized_model(model_path):
-    """Check if a model is quantized by examining its input type"""
+    """Check if a model is quantized by examining its input type or path"""
     try:
+        # Trust directory/file naming conventions first (crucial for dynamic range QAT models 
+        # which have int8 weights but float32 I/O to maintain XNNPACK compatibility)
+        path_lower = model_path.lower()
+        if 'qat' in path_lower or 'quant' in path_lower:
+            return True
+            
         interpreter = tf.lite.Interpreter(model_path=model_path)
         interpreter.allocate_tensors()
         input_details = interpreter.get_input_details()
         input_dtype = input_details[0]['dtype']
         
-        # Quantized models typically use int8 or uint8
+        # Pure integer quantized models use int8 or uint8
         return input_dtype in [np.int8, np.uint8]
     except:
         return False
@@ -253,7 +296,7 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT
     for dir_name in all_dirs:
         dir_path = os.path.join(input_dir, dir_name)
         # Check if this directory contains .tflite files and is likely a training directory
-        tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite')]
+        tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
         if tflite_files and not dir_name.startswith('test_results'):
             training_dirs.append(dir_name)
     
@@ -277,7 +320,7 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT
         training_path = os.path.join(input_dir, training_dir)
         
         # Look for any .tflite files in the directory
-        tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+        tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
         
         for model_file in tflite_files:
             # Skip excluded model if specified
@@ -344,7 +387,11 @@ def is_valid_tflite_model(model_path):
         interpreter.allocate_tensors()
         return True
     except Exception as e:
-        print(f"❌ Invalid TFLite model {os.path.basename(model_path)}: {e}")
+        error_msg = str(e)
+        if "Flex" in error_msg or "Select TensorFlow op(s)" in error_msg:
+            print(f"⚠️  Skipping GPU-only or Flex-dependent model {os.path.basename(model_path)}")
+        else:
+            print(f"❌ Invalid TFLite model {os.path.basename(model_path)}: {error_msg.split(chr(10))[0][:150]}...")
         return False
 
 def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
@@ -759,8 +806,8 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.9))
     
     # Create a separate legend for model names
-    legend_elements = [plt.Rectangle((0,0),1,1, facecolor=colors[i], alpha=0.7, 
-                                   label=f"{labels[i].split('\\n')[0]}\n{model_names[i]}")
+    legend_elements = [plt.Rectangle((0,0),1,1, facecolor=colors[i], alpha=0.7,
+                                   label=f"{labels[i].split(chr(10))[0]}\n{model_names[i]}")
                       for i in range(len(labels))]
     plt.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left', 
                borderaxespad=0., fontsize=8)
@@ -792,8 +839,8 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.9))
     
     # Create a separate legend for model names
-    legend_elements = [plt.Rectangle((0,0),1,1, facecolor=colors[i], alpha=0.7, 
-                                   label=f"{labels[i].split('\\n')[0]}\n{model_names[i]}")
+    legend_elements = [plt.Rectangle((0,0),1,1, facecolor=colors[i], alpha=0.7,
+                                   label=f"{labels[i].split(chr(10))[0]}\n{model_names[i]}")
                       for i in range(len(labels))]
     plt.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left', 
                borderaxespad=0., fontsize=8)
@@ -1651,9 +1698,13 @@ def main():
     
     # Handle single model prediction (highest priority)
     if args.model:
-        model_path = find_model_path(args.model, input_dir=args.input_dir)
+        if os.path.isfile(args.model) and args.model.endswith('.tflite'):
+            model_path = args.model
+        else:
+            model_path = find_model_path(args.model, input_dir=args.input_dir)
+            
         if model_path is None:
-            print(f"❌ Model '{args.model}' not found in {args.input_dir}!")
+            print(f"❌ Model '{args.model}' not found in {args.input_dir} (or as an exact path)!")
             print("Available models:")
             list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, input_dir=args.input_dir, exclude_model=args.exclude_model)
             return
