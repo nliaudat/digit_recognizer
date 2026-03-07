@@ -334,11 +334,9 @@ def main():
             cmd = _build_cmd(run, args)
             env = _build_env(run)
             color = 'RGB' if run['channels'] == 3 else 'GRAY'
-            title = f"{run['model_name']} — {run['nb_classes']}cls {color} [resume]"
-            cmd_str = ' '.join(
-                f'set {k}={env[k]}&& ' for k in ['DIGIT_NB_CLASSES', 'DIGIT_INPUT_CHANNELS']
-            ) + ' '.join(cmd)
-            subprocess.Popen(f'start "{title}" cmd /c "{cmd_str}"', shell=True)
+            env = _build_env(run)
+            # Use CREATE_NEW_CONSOLE to launch in a separate window on Windows without shell=True
+            subprocess.Popen(cmd, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
         print(f"🚀 Launched {len(pending)} resume sessions in separate windows.")
     else:
         for i, run in enumerate(pending, 1):
