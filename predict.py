@@ -89,19 +89,24 @@ class TFLiteDigitPredictor:
         
         print(f"After batch dimension - shape: {input_data.shape}, dtype: {input_data.dtype}")
         
-        # Handle quantization if needed
-        if self.input_details[0]['dtype'] == np.uint8:
-            input_data = input_data.astype(np.uint8)
-        elif self.input_details[0]['dtype'] == np.int8:
-            input_scale, input_zero_point = self.input_details[0]['quantization']
-            print(f"Quantization params - scale: {input_scale}, zero_point: {input_zero_point}")
-            # For int8 quantization, we need to quantize the float32 input
-            if input_data.dtype == np.float32:
-                input_data = (input_data / input_scale + input_zero_point).astype(np.int8)
+        # Robustly ensure input is scaled correctly based on what this specific model expects
+        expected_dtype = self.input_details[0]['dtype']
+        if expected_dtype == np.uint8:
+            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+                input_data = (input_data * 255.0).astype(np.uint8)
+            else:
+                input_data = input_data.astype(np.uint8)
+        elif expected_dtype == np.int8:
+            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+                input_data = (input_data * 255.0 - 128).astype(np.int8)
+            elif input_data.dtype == np.uint8:
+                input_data = (input_data.astype(np.int32) - 128).astype(np.int8)
             else:
                 input_data = input_data.astype(np.int8)
         else:
             input_data = input_data.astype(np.float32)
+            if input_data.max() > 1.0:
+                input_data = input_data / 255.0
         
         print(f"After quantization handling - shape: {input_data.shape}, dtype: {input_data.dtype}")
         print(f"Expected input shape: {self.input_details[0]['shape']}, dtype: {self.input_details[0]['dtype']}")
@@ -233,7 +238,7 @@ def find_model_path(model_name=None):
     for dir_name in all_dirs:
         dir_path = os.path.join(params.OUTPUT_DIR, dir_name)
         # Check if this directory contains .tflite files and is likely a training directory
-        tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite')]
+        tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
         if tflite_files and not dir_name.startswith('test_results'):
             training_dirs.append(dir_name)
     
@@ -261,7 +266,7 @@ def find_model_path(model_name=None):
                 best_match = matching_dirs[0]  # Use first partial match
             
             training_path = os.path.join(params.OUTPUT_DIR, best_match)
-            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
             
             if tflite_files:
                 # Prefer quantized models
@@ -280,7 +285,7 @@ def find_model_path(model_name=None):
             training_path = os.path.join(params.OUTPUT_DIR, training_dir)
             
             # Check for exact model file matches
-            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
             for model_file in tflite_files:
                 model_file_clean = model_file.replace('.tflite', '')
                 
@@ -297,7 +302,7 @@ def find_model_path(model_name=None):
         print("Available models:")
         for training_dir in training_dirs:
             training_path = os.path.join(params.OUTPUT_DIR, training_dir)
-            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite')]
+            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
             if tflite_files:
                 print(f"  {training_dir}:")
                 for model_file in tflite_files:
@@ -309,7 +314,7 @@ def find_model_path(model_name=None):
         latest_dir_path = os.path.join(params.OUTPUT_DIR, latest_training)
         
         # Look for any .tflite file in the latest directory
-        tflite_files = [f for f in os.listdir(latest_dir_path) if f.endswith('.tflite')]
+        tflite_files = [f for f in os.listdir(latest_dir_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
         
         if tflite_files:
             # Prefer quantized models if available
