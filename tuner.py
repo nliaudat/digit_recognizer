@@ -26,7 +26,7 @@ class SimpleGuaranteedTuner:
         self.project_name = project_name
         
         # Get search space parameters from params file
-        self.tuner_optimizers = getattr(params, 'TUNER_OPTIMIZERS', ['adam', 'rmsprop', 'sgd', 'nadam'])
+        self.tuner_optimizers = getattr(params, 'TUNER_OPTIMIZERS', ['adam', 'rmsprop', 'sgd', 'nadam', 'adamw'])
         self.tuner_learning_rates = getattr(params, 'TUNER_LEARNING_RATES', [1e-3, 5e-4, 1e-4])
         self.tuner_batch_sizes = getattr(params, 'TUNER_BATCH_SIZES', [32, 64])
         self.tuner_gammas = getattr(params, 'TUNER_GAMMAS', [0.0, 2.0])
@@ -400,8 +400,8 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
         early_stopping = tf.keras.callbacks.EarlyStopping(
             monitor='val_accuracy',
             patience=getattr(params, 'TUNER_EARLY_STOPPING_PATIENCE', 3),
-            min_delta=getattr(params, 'TUNER_MIN_DELTA', 0.001),
-            restore_best_weights=True,
+            min_delta=0.0005,
+            restore_best_weights=False,  # <-- CRITICAL: True causes 100% disk I/O hangs on Docker
             verbose=1 if debug else 0
         )
         
@@ -584,7 +584,7 @@ class FineTuneTuner(SimpleGuaranteedTuner):
                         monitor='val_accuracy',
                         patience=getattr(params, 'TUNER_EARLY_STOPPING_PATIENCE', 5),
                         min_delta=0.0002,
-                        restore_best_weights=True,
+                        restore_best_weights=False,  # <-- CRITICAL: True causes 100% disk I/O hangs on Docker
                         verbose=0,
                     ),
                 ]

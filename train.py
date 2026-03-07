@@ -229,6 +229,12 @@ def parse_arguments():
         help="Enable verbose TensorFlow logging and extra debug prints.\n"
              "Useful for troubleshooting model graph issues or tracking detailed execution flow."
     )
+    parser.add_argument(
+        "--task-name",
+        type=str,
+        default=None,
+        help="Custom prefix for the output directory name. Useful for organizing experiments."
+    )
     
     # --- Training Modes ---
     parser.add_argument(
@@ -323,6 +329,18 @@ def parse_arguments():
     parser.add_argument("--optimizer", type=str, default=None, help="Override the optimizer (e.g. adamw).")
     parser.add_argument("--lr-scheduler", type=str, default=None, help="Override the LR scheduler (e.g. cosine).")
     parser.add_argument("--no-dynamic-weights", action="store_true", help="Disable dynamic per-class weighting.")
+
+    # --- Dynamic Scheduler / Optimizer ---
+    parser.add_argument("--dynamic-scheduler", action="store_true", default=None,
+                        help="Enable DynamicSchedulerController (USE_DYNAMIC_SCHEDULER=True).")
+    parser.add_argument("--no-dynamic-scheduler", action="store_true",
+                        help="Disable DynamicSchedulerController (USE_DYNAMIC_SCHEDULER=False).")
+    parser.add_argument("--dynamic-optimizer", action="store_true",
+                        help="Enable mid-training optimizer switch (USE_DYNAMIC_OPTIMIZER=True). Experimental.")
+    parser.add_argument("--no-warmup", action="store_true",
+                        help="Disable LR warm-up (USE_LR_WARMUP=False).")
+    parser.add_argument("--lr-reset-fraction", type=float, default=None,
+                        help="Override LR_SCHEDULER_RESET_FRACTION (fraction of base LR restored on scheduler switch).")
 
     # --- Resume Training ---
     parser.add_argument("--resume", type=str, default="",
@@ -587,8 +605,22 @@ def main():
         params.OPTIMIZER_TYPE = args.optimizer
     if args.lr_scheduler is not None:
         params.LR_SCHEDULER_TYPE = args.lr_scheduler
+    if args.task_name is not None:
+        params.TASK_NAME = args.task_name
     if args.no_dynamic_weights:
         params.USE_DYNAMIC_WEIGHTS = False
+    if args.label_smoothing is not None:
+        params.LABEL_SMOOTHING = args.label_smoothing
+    if args.dynamic_scheduler:
+        params.USE_DYNAMIC_SCHEDULER = True
+    if args.no_dynamic_scheduler:
+        params.USE_DYNAMIC_SCHEDULER = False
+    if args.dynamic_optimizer:
+        params.USE_DYNAMIC_OPTIMIZER = True
+    if args.no_warmup:
+        params.USE_LR_WARMUP = False
+    if args.lr_reset_fraction is not None:
+        params.LR_SCHEDULER_RESET_FRACTION = args.lr_reset_fraction
     if args.resume:
         params.RESUME_MODEL_PATH = args.resume
     if args.initial_epoch:
@@ -741,9 +773,12 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         elif params.QUANTIZE_MODEL:
             quantization_mode += "_QUANT"
         
+        # Use task name if provided
+        task_prefix = f"{params.TASK_NAME}_" if getattr(params, 'TASK_NAME', None) else ""
+        
         training_dir = os.path.join(
             params.OUTPUT_DIR, 
-            f"{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls{quantization_mode}_{color_mode}_{datetime.now().strftime('%m%d_%H%M')}"
+            f"{task_prefix}{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls{quantization_mode}_{color_mode}_{datetime.now().strftime('%m%d_%H%M')}"
         )
         os.makedirs(training_dir, exist_ok=True)
         print(f"📁 Output directory: {training_dir}")
