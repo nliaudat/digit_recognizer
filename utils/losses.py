@@ -76,8 +76,8 @@ class DynamicSparseFocalLoss(tf.keras.losses.Loss):
     during training without model recompilation.
     """
     def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None,
-                 label_smoothing=None, name='dynamic_sparse_focal_loss'):
-        super().__init__(name=name)
+                 label_smoothing=None, name='dynamic_sparse_focal_loss', **kwargs):
+        super().__init__(name=name, **kwargs)
         self.gamma = tf.Variable(gamma, dtype=tf.float32, trainable=False, name=f"{name}_gamma")
         
         # We always use a vector for alpha internally to support per-class weighting smoothly
@@ -126,8 +126,8 @@ class DynamicSparseFocalLoss(tf.keras.losses.Loss):
 class DynamicFocalLoss(tf.keras.losses.Loss):
     """Same as DynamicSparseFocalLoss but for one-hot labels."""
     def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None,
-                 label_smoothing=None, name='dynamic_focal_loss'):
-        super().__init__(name=name)
+                 label_smoothing=None, name='dynamic_focal_loss', **kwargs):
+        super().__init__(name=name, **kwargs)
         self.gamma = tf.Variable(gamma, dtype=tf.float32, trainable=False, name=f"{name}_gamma")
         
         if nb_classes is None:
