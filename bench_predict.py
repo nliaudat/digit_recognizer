@@ -134,6 +134,11 @@ class TFLiteDigitPredictor:
         except Exception as e:
             return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
 
+    @property
+    def num_classes(self):
+        """Get the number of classes this model was trained to predict"""
+        return self.output_details[0]['shape'][-1]
+
 def load_image_from_path(image_path, input_channels):
     """Load image from specified path based on model's input requirements"""
     if not os.path.exists(image_path):
@@ -396,37 +401,97 @@ def is_valid_tflite_model(model_path):
 
 def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     """
-    Load test dataset with proper labels using multi_source_loader
-    Returns: list of (image_array, true_label) tuples
-    
-    Args:
-        num_samples: Number of samples to use. 0 means use all available images
-        use_all_datasets: If True, use all available datasets
+    Load test dataset with proper labels, tracking original filenames.
+    Returns: list of (image_array, true_label, filename_no_ext) tuples
     """
     print("📊 Loading test dataset with labels...")
     
-    # Use the multi_source_loader to get properly labeled data
-    loader = MultiSourceDataLoader()
-    images, labels = loader.load_all_sources()
+    test_data = []
     
-    if len(images) == 0:
+    h = params.INPUT_HEIGHT
+    w = params.INPUT_WIDTH
+    grayscale = params.USE_GRAYSCALE
+    flag = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
+
+    for source_config in params.DATA_SOURCES:
+        source_type = source_config.get('type', '')
+        source_path = source_config.get('path', '')
+        source_weight = source_config.get('weight', 1.0)
+
+        if source_type == 'label_file':
+            labels_file = source_config.get('labels', 'labels.txt')
+            label_file_path = os.path.join(source_path, labels_file)
+            images_dir = os.path.join(source_path, 'images')
+            if not os.path.exists(label_file_path) or not os.path.exists(images_dir):
+                print(f"DEBUG: Source {source_path} missing labels ({label_file_path}) or images dir.")
+                continue
+            with open(label_file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            valid_loaded = 0
+            for raw in lines:
+                line = raw.strip()
+                if not line or line.startswith('#'):
+                    continue
+                parts = line.split('\t') if '\t' in line else line.split()
+                if len(parts) < 2:
+                    continue
+                fname, label_str = parts[0], parts[1]
+                try:
+                    label = int(label_str)
+                except ValueError:
+                    continue
+                if label < 0 or label >= params.NB_CLASSES:
+                    continue
+                img_path = os.path.join(images_dir, fname)
+                if not os.path.exists(img_path):
+                    continue
+                img = cv2.imread(img_path, flag)
+                if img is None:
+                    continue
+                img = cv2.resize(img, (w, h))
+                if grayscale and img.ndim == 2:
+                    img = np.expand_dims(img, axis=-1)
+                elif not grayscale and img.ndim == 2:
+                    img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+                test_data.append((img, label, os.path.splitext(fname)[0]))
+                valid_loaded += 1
+            # print(f"DEBUG: Source {source_path} loaded {valid_loaded} images.")
+
+        elif source_type == 'folder_structure':
+            for class_label in range(params.NB_CLASSES):
+                class_dir = os.path.join(source_path, str(class_label))
+                if not os.path.exists(class_dir):
+                    continue
+                for fn in os.listdir(class_dir):
+                    if not any(fn.lower().endswith(e) for e in ('.jpg', '.jpeg', '.png', '.bmp')):
+                        continue
+                    img_path = os.path.join(class_dir, fn)
+                    img = cv2.imread(img_path, flag)
+                    if img is None:
+                        continue
+                    img = cv2.resize(img, (w, h))
+                    if grayscale and img.ndim == 2:
+                        img = np.expand_dims(img, axis=-1)
+                    elif not grayscale and img.ndim == 2:
+                        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+                    test_data.append((img, class_label, os.path.splitext(fn)[0]))
+
+    if not test_data:
         print("❌ No data loaded from any source")
         return []
-    
-    # Combine images and labels
-    test_data = list(zip(images, labels))
-    
-    # Shuffle the data
+
+    # Apply weight-based sampling per source (already mixed; use total weight approx)
     np.random.shuffle(test_data)
-    
-    # Limit samples only if num_samples > 0
+
     if num_samples > 0 and len(test_data) > num_samples:
         test_data = test_data[:num_samples]
         print(f"  Using {len(test_data)} test samples (limited by --test_images)")
     else:
         print(f"  Using ALL {len(test_data)} available test samples")
-    
+
     return test_data
+
 
 def configure_parameters_for_model(model_name_or_dir, override_classes=None, override_color=None):
     """
@@ -476,7 +541,7 @@ def configure_parameters_for_model(model_name_or_dir, override_classes=None, ove
         print(f"🔄 Reconfigured test environment for {params.NB_CLASSES} classes in {'Grayscale' if params.USE_GRAYSCALE else 'RGB'}")
 
 def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_datasets=True, 
-                         collect_failed=False, model_name=None):
+                         collect_failed=False, model_name=None, tolerance=0.1):
     """Test a model on random images from dataset and return accuracy and performance metrics"""
     
     predictor = TFLiteDigitPredictor(model_path)
@@ -495,7 +560,7 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
     
     # Warm-up run to avoid cold start timing issues
     if len(test_data) > 0:
-        warmup_image, _ = test_data[0]
+        warmup_image, _, _ = test_data[0]
         if warmup_image is not None:
             try:
                 predictor.predict(warmup_image, debug=False)
@@ -511,7 +576,7 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
         # Normal mode - use progress bar
         test_iterator = tqdm(test_data, desc=f"Testing {os.path.basename(model_path)}", leave=False)
     
-    for image, true_label in test_iterator:
+    for image, true_label, original_fname in test_iterator:
         if image is None:
             continue
         
@@ -524,11 +589,18 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
             inference_time = (end_time - start_time) * 1000
             total_inference_time += inference_time
             
-            # Check if prediction matches true label
-            if prediction == true_label:
+            # Model scale depends on its actual output classes
+            model_scale = predictor.num_classes / 10.0
+            pred_digit = float(prediction) / model_scale
+            true_digit = float(true_label) / model_scale
+            
+            diff = abs(true_digit - pred_digit) % 10.0
+            circular_diff = min(diff, 10.0 - diff)  # dial wraps: 0.0 and 9.9 are 0.1 apart
+            
+            if circular_diff <= tolerance:
                 correct_predictions += 1
                 if debug:
-                    print(f"✓ Correct: {prediction} (true: {true_label}, confidence: {confidence:.3f})")
+                    print(f"✓ Correct: {pred_digit:.1f} (true: {true_digit:.1f}, confidence: {confidence:.3f})")
             else:
                 if debug:
                     print(f"✗ Wrong: {prediction} (true: {true_label}, confidence: {confidence:.3f})")
@@ -540,7 +612,8 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
                     'predicted_label': prediction,
                     'confidence': confidence,
                     'model': model_name or os.path.basename(model_path),
-                    'image_source': 'dataset'
+                    'image_source': 'dataset',
+                    'original_fname': original_fname
                 })
             
             all_predictions_lite.append({
@@ -861,7 +934,7 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
 def test_all_models(num_test_images=0, quantized_only=False, debug=False, 
                     use_all_datasets=True, list_failed=False, save_failed=False,
                     subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None,
-                    override_classes=None, override_color=None, model_list=None):
+                    override_classes=None, override_color=None, model_list=None, tolerance=0.1):
     """Test all valid models with optional subfolder filtering and model exclusion
     
     Args:
@@ -928,7 +1001,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
             debug=debug,
             use_all_datasets=use_all_datasets,
             collect_failed=collect_failed,
-            model_name=model_info['name']
+            model_name=model_info['name'],
+            tolerance=tolerance
         )
         
         all_predictions.extend(all_predictions_lite)
@@ -1424,10 +1498,19 @@ def save_failed_images(failed_predictions, output_dir):
             predicted_label = failure['predicted_label']
             confidence = failure['confidence']
             
-            # Generate filename
-            filename = f"fail_{i:04d}_true{true_label}_pred{predicted_label}_conf{confidence:.3f}.png"
+            # Generate filename: use original filename as stable unique prefix
+            original_fname = failure.get('original_fname', 'unknown')
+            # The failed prediction was scaled by model_scale in the original loop
+            scale = predictor.num_classes / 10.0 if 'predictor' in locals() else params.NB_CLASSES / 10.0
+            filename = f"{original_fname}_{float(predicted_label)/scale:.1f}_conf_{confidence:.3f}.jpg"
             filepath = os.path.join(failed_dir, filename)
             
+            # If same name (collision), add random 3 digits
+            if os.path.exists(filepath):
+                import random
+                filename = f"{original_fname}_{float(predicted_label)/scale:.1f}_conf_{confidence:.3f}_{random.randint(100, 999)}.jpg"
+                filepath = os.path.join(failed_dir, filename)
+                
             # Handle different image data types
             if isinstance(image_data, np.ndarray):
                 # If it's a numpy array (from dataset)
@@ -1500,7 +1583,7 @@ def generate_failed_predictions_csv(failed_predictions, output_dir):
 
 def test_single_model(model_path, num_test_images=0, debug=False, use_all_datasets=True, 
                      list_failed=False, save_failed=False, output_dir=params.OUTPUT_DIR,
-                     override_classes=None, override_color=None):
+                     override_classes=None, override_color=None, tolerance=0.1):
     """Test a single model and optionally collect failed predictions"""
     predictor = TFLiteDigitPredictor(model_path)
     
@@ -1526,7 +1609,7 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
     
     # Warm-up run
     if len(test_data) > 0:
-        warmup_image, _ = test_data[0]
+        warmup_image, _, _ = test_data[0]
         if warmup_image is not None:
             try:
                 predictor.predict(warmup_image, debug=False)
@@ -1534,7 +1617,7 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
                 pass
     
     # Test the model - ALWAYS collect failed predictions for accurate counting
-    for i, (image, true_label) in enumerate(test_data):
+    for i, (image, true_label, original_fname) in enumerate(test_data):
         if image is None:
             continue
         
@@ -1546,10 +1629,21 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
             inference_time = (end_time - start_time) * 1000
             total_inference_time += inference_time
             
-            if prediction == true_label:
+            # Compare in digit space (0.0 - 9.9)
+            dataset_scale = params.NB_CLASSES / 10.0
+            true_digit = float(true_label) / dataset_scale
+            
+            # Model scale depends on its actual output classes
+            model_scale = predictor.num_classes / 10.0
+            pred_digit = float(prediction) / model_scale
+            
+            diff = abs(true_digit - pred_digit) % 10.0
+            circular_diff = min(diff, 10.0 - diff)  # dial wraps: 0.0 and 9.9 are 0.1 apart
+            
+            if circular_diff <= tolerance:
                 correct_predictions += 1
                 if debug:
-                    print(f"✓ {i:4d}: Correct - Pred: {prediction}, True: {true_label}, Conf: {confidence:.3f}")
+                    print(f"✓ {i:4d}: Correct - Pred: {pred_digit:.1f}, True: {true_digit:.1f}, Conf: {confidence:.3f}")
             else:
                 if debug:
                     print(f"✗ {i:4d}: Wrong - Pred: {prediction}, True: {true_label}, Conf: {confidence:.3f}")
@@ -1562,7 +1656,8 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
                     'confidence': confidence,
                     'model': os.path.basename(model_path),
                     'image_source': 'dataset',
-                    'index': i
+                    'index': i,
+                    'original_fname': original_fname
                 })
             
             all_predictions_lite.append({
@@ -1681,6 +1776,8 @@ def main():
                         help='Save images that were misclassified into a "failed-predictions" folder.')
     parser.add_argument('--debug', action='store_true', 
                         help='Enable verbose output for debugging model predictions and data loading.')
+    parser.add_argument('--tolerance', type=float, default=0.1, 
+                        help='Acceptable error tolerance in decimal scale (default: 0.1). E.g. +-0.1 allows +-1 class for 100 classes.')
     
     # Optional overrides for dataset configuration (auto-detected if omitted)
     parser.add_argument('--classes', type=int, choices=[10, 100], 
@@ -1718,7 +1815,8 @@ def main():
             save_failed=args.save_failed,
             output_dir=args.input_dir,
             override_classes=args.classes,
-            override_color=args.color
+            override_color=args.color,
+            tolerance=args.tolerance
         )
         return
     
@@ -1736,7 +1834,8 @@ def main():
             exclude_model=args.exclude_model,
             override_classes=args.classes,
             override_color=args.color,
-            model_list=args.model_list
+            model_list=args.model_list,
+            tolerance=args.tolerance
         )
         return
     
@@ -1761,7 +1860,8 @@ def main():
         input_dir=args.input_dir,
         override_classes=args.classes,
         override_color=args.color,
-        model_list=args.model_list
+        model_list=args.model_list,
+        tolerance=args.tolerance
     )
 
 if __name__ == "__main__":
