@@ -62,73 +62,74 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     
     # Learning rate scheduler — respects LR_SCHEDULER_TYPE from parameters.py
     scheduler_type = getattr(params, 'LR_SCHEDULER_TYPE', 'reduce_on_plateau')
+    use_dynamic_scheduler = getattr(params, 'USE_DYNAMIC_SCHEDULER', False)
 
-    if scheduler_type == 'onecycle':
+    if use_dynamic_scheduler:
+        # Dynamic mode: a proxy object holds the current schedule function.
+        # DynamicSchedulerController swaps it at runtime when thresholds are crossed.
+        from utils.train_helpers import DynamicLRProxy
+        lr_proxy = DynamicLRProxy()
+        # Phase-0 scheduler is activated in DynamicSchedulerController.on_train_begin;
+        # register the proxy as a LearningRateScheduler now so Keras picks it up.
+        callbacks.append(
+            tf.keras.callbacks.LearningRateScheduler(lr_proxy, verbose=0)
+        )
+        # Also keep ReduceLROnPlateau if the sequence contains it, so it still operates
+        # as an additional layer of decay within the reduce_on_plateau phases.
+        if 'reduce_on_plateau' in getattr(params, 'LR_SCHEDULER_SEQUENCE', []):
+            callbacks.append(
+                tf.keras.callbacks.ReduceLROnPlateau(
+                    monitor=params.LR_SCHEDULER_MONITOR,
+                    factor=params.LR_SCHEDULER_FACTOR,
+                    patience=params.LR_SCHEDULER_PATIENCE,
+                    min_lr=params.LR_SCHEDULER_MIN_LR,
+                    verbose=1 if debug else 0,
+                )
+            )
+        if debug:
+            print(f"🔀 DynamicSchedulerController mode (proxy registered, LR phases: "
+                  f"{getattr(params, 'LR_SCHEDULER_SEQUENCE', [])})")
+
+    elif scheduler_type == 'onecycle':
         # OneCycleLR: warm up to peak LR over 30% of total epochs,
         # then cosine-decay to near-zero over the remaining 70%.
-        # This is the 2024-2026 super-convergence standard for small models.
         warmup_frac = 0.3
         warmup_steps = max(1, int(total_epochs * warmup_frac))
         decay_steps  = max(1, total_epochs - warmup_steps)
-
         min_lr = getattr(params, 'COSINE_DECAY_ALPHA', 1e-6)
         peak_lr = params.LEARNING_RATE
-
-        # Phase 1: linear warm-up
         warmup_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
-            initial_learning_rate=peak_lr * 0.1,
-            decay_steps=warmup_steps,
-            end_learning_rate=peak_lr,
-            power=1.0,
+            initial_learning_rate=peak_lr * 0.1, decay_steps=warmup_steps,
+            end_learning_rate=peak_lr, power=1.0,
         )
-        # Phase 2: cosine decay from peak to floor
         cosine_schedule = tf.keras.optimizers.schedules.CosineDecay(
-            initial_learning_rate=peak_lr,
-            decay_steps=decay_steps,
-            alpha=min_lr / peak_lr,
+            initial_learning_rate=peak_lr, decay_steps=decay_steps, alpha=min_lr / peak_lr,
         )
-
         def _onecycle_lr(epoch):
-            if epoch < warmup_steps:
-                return float(warmup_schedule(epoch))
-            else:
-                return float(cosine_schedule(epoch - warmup_steps))
-
-        callbacks.append(
-            tf.keras.callbacks.LearningRateScheduler(_onecycle_lr, verbose=0)
-        )
+            return float(warmup_schedule(epoch) if epoch < warmup_steps
+                         else cosine_schedule(epoch - warmup_steps))
+        callbacks.append(tf.keras.callbacks.LearningRateScheduler(_onecycle_lr, verbose=0))
         if debug:
-            print(f"🔁 OneCycleLR scheduler added "
-                  f"(warmup={warmup_steps} epochs → peak {peak_lr:.2e}, "
-                  f"then cosine → {min_lr:.0e})")
+            print(f"🔁 OneCycleLR scheduler added (warmup={warmup_steps} epochs → "
+                  f"peak {peak_lr:.2e}, then cosine → {min_lr:.0e})")
 
     elif scheduler_type == 'cosine':
-        # CosineDecayRestarts: cyclic warm restarts that prevent LR hitting the noise floor.
-        # The model gets periodic "second chances" to escape local minima — avoids the
-        # 20-40 epoch stranded-plateau seen with ReduceLROnPlateau.
+        # CosineDecayRestarts: cyclic warm restarts to escape local minima.
         first_decay_steps = max(1, getattr(params, 'LR_WARMUP_EPOCHS', 10))
         lr_schedule = tf.keras.optimizers.schedules.CosineDecayRestarts(
             initial_learning_rate=params.LEARNING_RATE,
             first_decay_steps=first_decay_steps,
-            t_mul=2.0,      # each restart period doubles
-            m_mul=0.9,      # peak LR shrinks 10% each restart
-            alpha=getattr(params, 'COSINE_DECAY_ALPHA', 1e-6),  # minimum LR
+            t_mul=2.0, m_mul=0.9,
+            alpha=getattr(params, 'COSINE_DECAY_ALPHA', 1e-6),
         )
-        # LambdaCallback updates the optimizer LR each epoch from the schedule
-        import numpy as np
-        def _cosine_lr_setter(epoch, logs=None):
-            new_lr = float(lr_schedule(epoch))
-            if hasattr(params.model_optimizer if hasattr(params, 'model_optimizer') else None, 'assign'):
-                pass  # will be handled by the schedule
         callbacks.append(
             tf.keras.callbacks.LearningRateScheduler(
-                lambda epoch: float(lr_schedule(epoch)),
-                verbose=0,
+                lambda epoch: float(lr_schedule(epoch)), verbose=0,
             )
         )
         if debug:
             print(f"🌀 CosineDecayRestarts LR scheduler added "
-                  f"(first_decay={first_decay_steps} epochs, α={getattr(params, 'COSINE_DECAY_ALPHA', 1e-6):.0e})")
+                  f"(first_decay={first_decay_steps} epochs)")
 
     elif scheduler_type == 'exponential':
         callbacks.append(
@@ -225,6 +226,16 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         )
         if debug:
             print("🎯 IntelligentFocalLossController callback added")
+
+    # Dynamic Scheduler Controller — must come AFTER FocalLoss controller so
+    # both can read val_accuracy from the same logs dict in on_epoch_end.
+    if use_dynamic_scheduler:
+        from utils.train_helpers import DynamicSchedulerController
+        callbacks.append(
+            DynamicSchedulerController(lr_proxy=lr_proxy, debug=debug)
+        )
+        if debug:
+            print("🔀 DynamicSchedulerController callback added")
 
     # Per-Class Accuracy Callback
     if validation_data is not None:
