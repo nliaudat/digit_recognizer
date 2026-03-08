@@ -17,33 +17,35 @@ import tensorflow as tf
 # ==============================================================================
 
 AVAILABLE_MODELS = [
-    # "practical_tiny_depthwise",
-    # "simple_cnn", 
-    # "dig_class100_s2",
-    # "cnn32",
-    # "digit_recognizer_v1",
-    # "digit_recognizer_v2",
-    "digit_recognizer_v3",
-    "digit_recognizer_v4",
-    # "digit_recognizer_v5",
-    "digit_recognizer_v6",
-    "digit_recognizer_v7",
-    "digit_recognizer_v8",
-    "digit_recognizer_v9",
-    # "digit_recognizer_v10",
-    "digit_recognizer_v11",
-    "digit_recognizer_v12", #406.7	0.9925
-    "digit_recognizer_v15",   # IoT residual model — beats v4 accuracy at <100KB
-    "digit_recognizer_v16",   # IoT MobileNetV2 inverted residual — ESP-NN optimised
-    "digit_recognizer_v17",   # IoT GhostNet-inspired — ultra-efficient ~50KB
-    # "esp_quantization_ready",
+    # "practical_tiny_depthwise", # 150-300kB / 95%+ (10cls) | Fixed Depthwise Separable
+    # "simple_cnn", # Est: ~20-60K params | BatchNorm CNN Baseline
+    # "dig_class100_s2", # Est: ~500K+ params | Haverland Reference (100-Class)
+    # "cnn32", # Est: ~200-300K params | Haverland Original Reference (Matches original_haverland)
+    # "digit_recognizer_v1", # ~130kB | ESP-DL Compatible Baseline (Est: ~135K params)
+    # "digit_recognizer_v2", # ~50kB | ReLU6 Clip Baseline (Est: ~50K params)
+    "digit_recognizer_v3", # 45.1kB / 75.34%
+    "digit_recognizer_v4", # 87.1kB / 80.80%
+    # "digit_recognizer_v5", # ~55-130kB | Class-Count Adaptive CNN
+    "digit_recognizer_v6", # 160.8kB / 80.56%
+    # "digit_recognizer_v7", # 56.0kB / 73.35%
+    # "digit_recognizer_v8", # Est: ~300K+ params | SOTA Residual CNN with SE
+    # "digit_recognizer_v9", # Est: ~150-200K params | EfficientNet-Style MBConv
+    # "digit_recognizer_v10", # Est: ~700K+ params | Hybrid Transformer-Style CNN
+    # "digit_recognizer_v11", # Est: ~1M+ params | Modern SOTA CNN with GELU/Swish/SE/MBConv
+    "digit_recognizer_v12", # 415.4kB / 84.46%
+    # "digit_recognizer_v15", # 107.4kB / 79.78% | IoT residual model — beats v4 accuracy at <100KB
+    "digit_recognizer_v16", # 139.7kB / 82.81% | IoT MobileNetV2 inverted residual — ESP-NN optimised
+    "digit_recognizer_v17", # 80.5kB / 80.69% | IoT GhostNet-inspired — ultra-efficient ~50KB
+    "digit_recognizer_v18", 
+    "digit_recognizer_v19",
+    # "esp_quantization_ready", # ~70kB | Minimal Depthwise CNN for smooth INT8
     # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
     "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
-    "mnist_quantization", #63.6kB	0.9848
-    "original_haverland", #203.3	0.9822 & baseline
+    # "mnist_quantization", # 72.2kB / 76.55%
+    # "original_haverland", # 228.8kB / 79.10% | baseline
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v17" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "digit_recognizer_v19" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
@@ -157,10 +159,10 @@ def update_derived_parameters():
             'weight': 0.7,
         },
         {
-            'name': 'failed_predictions_{NB_CLASSES}',
+            'name': f'failed_predictions_{NB_CLASSES}',
             'type': 'label_file', 
             'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
-            'path': 'datasets/failed_predictions_{NB_CLASSES}', 
+            'path': f'datasets/failed_predictions_{NB_CLASSES}', 
             'weight': 1.3,
         },
         {
@@ -766,13 +768,13 @@ def validate_quantization_parameters():
     messages = []
     
     # Rule 0: high_accuracy_validator does not support quantization
-    if MODEL_ARCHITECTURE == "high_accuracy_validator":
-        if QUANTIZE_MODEL or USE_QAT or ESP_DL_QUANTIZE:
-            messages.append("❌ 'high_accuracy_validator' selected: Disabling all quantization flags (QUANTIZE_MODEL, USE_QAT, ESP_DL_QUANTIZE)")
-            corrected_params['QUANTIZE_MODEL'] = False
-            corrected_params['USE_QAT'] = False
-            corrected_params['ESP_DL_QUANTIZE'] = False
-            messages.append("✅ Auto-corrected: Set all quantization flags to False for 'high_accuracy_validator'")
+    # if MODEL_ARCHITECTURE == "high_accuracy_validator":
+    #     if QUANTIZE_MODEL or USE_QAT or ESP_DL_QUANTIZE:
+    #         messages.append("❌ 'high_accuracy_validator' selected: Disabling all quantization flags (QUANTIZE_MODEL, USE_QAT, ESP_DL_QUANTIZE)")
+    #         corrected_params['QUANTIZE_MODEL'] = False
+    #         corrected_params['USE_QAT'] = False
+    #         corrected_params['ESP_DL_QUANTIZE'] = False
+    #         messages.append("✅ Auto-corrected: Set all quantization flags to False for 'high_accuracy_validator'")
     
     # Rule 1: ESP_DL_QUANTIZE requires QUANTIZE_MODEL
     if ESP_DL_QUANTIZE and not QUANTIZE_MODEL:

@@ -16,3 +16,5 @@ generate_v17_report.py
 datasets/commands.txt
 exported_models/benchmark.py
 exported_models/summary_model_comparison_27.02.2026.csv
+dropbox_ignore.ps
+exported_models/summary_model_comparison_07.03.2026.csv

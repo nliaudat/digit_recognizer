@@ -613,7 +613,8 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
                     'confidence': confidence,
                     'model': model_name or os.path.basename(model_path),
                     'image_source': 'dataset',
-                    'original_fname': original_fname
+                    'original_fname': original_fname,
+                    'num_classes': predictor.num_classes
                 })
             
             all_predictions_lite.append({
@@ -1501,7 +1502,8 @@ def save_failed_images(failed_predictions, output_dir):
             # Generate filename: use original filename as stable unique prefix
             original_fname = failure.get('original_fname', 'unknown')
             # The failed prediction was scaled by model_scale in the original loop
-            scale = predictor.num_classes / 10.0 if 'predictor' in locals() else params.NB_CLASSES / 10.0
+            model_num_classes = failure.get('num_classes', params.NB_CLASSES)
+            scale = model_num_classes / 10.0
             filename = f"{original_fname}_{float(predicted_label)/scale:.1f}_conf_{confidence:.3f}.jpg"
             filepath = os.path.join(failed_dir, filename)
             

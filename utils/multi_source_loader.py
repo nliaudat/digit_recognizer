@@ -37,15 +37,16 @@ def _load_cache(source_configs: list):
     """Return (images, labels) from disk cache if valid, else None."""
     path = _cache_path(source_configs)
     if not os.path.exists(path):
+        print(f"ℹ️  No disk cache found at: {path} (Initial load required)")
         return None
     try:
-        data = np.load(path)
+        data = np.load(path, allow_pickle=True)
         images, labels = data["images"], data["labels"]
         print(f"⚡ Loaded dataset from disk cache: {path} "
               f"({len(images)} images, {os.path.getsize(path) / 1e6:.1f} MB)")
         return images, labels
     except Exception as e:
-        print(f"⚠️  Disk cache corrupted ({e}), rebuilding…")
+        print(f"⚠️  Disk cache exists but could not be loaded ({e}), rebuilding…")
         try:
             os.remove(path)
         except OSError:

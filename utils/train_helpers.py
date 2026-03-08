@@ -662,7 +662,7 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
         
         with tqdm(total=data_len, desc="Evaluating classes", leave=False) as pbar:
             for x_batch, y_batch in self.val_ds:
-                preds = self.model.predict(x_batch, verbose=0)
+                preds = self.model(x_batch, training=False).numpy()
                 y_pred_all.append(np.argmax(preds, axis=-1))
                 if len(y_batch.shape) > 1 and y_batch.shape[-1] > 1:
                     y_true_all.append(np.argmax(y_batch, axis=-1))
@@ -772,7 +772,7 @@ class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
 
         with tqdm(total=data_len, desc="Validation Report", leave=False) as pbar:
             for x_batch, y_batch in self.val_ds:
-                preds = self.model.predict(x_batch, verbose=0)
+                preds = self.model(x_batch, training=False).numpy()
                 y_pred_all.append(np.argmax(preds, axis=-1))
                 
                 # Handle both sparse and one-hot labels
