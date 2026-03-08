@@ -33,14 +33,28 @@ sys.stderr.reconfigure(encoding='utf-8')
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _read_last_epoch(log_path: Path) -> int | None:
-    """Return epoch number from last data row of training_log.csv, or None."""
+def _read_last_epoch_lr_and_target(log_path: Path) -> tuple[int, float, int] | None:
+    """Return epoch number, learning rate, and target epochs from last data row of training_log.csv."""
     try:
         with open(log_path, newline='', encoding='utf-8') as f:
             rows = list(csv.DictReader(f))
         if not rows:
             return None
-        return int(float(rows[-1]['epoch']))
+        last_epoch = int(float(rows[-1]['epoch']))
+        
+        # Try to read learning rate; default back to params if we can't
+        try:
+            last_lr = float(rows[-1]['learning_rate'])
+        except (KeyError, ValueError):
+            last_lr = None
+            
+        # Try to read original target epochs from the log (some loggers save 'epochs' or similar)
+        try:
+            target_epochs = int(float(rows[-1].get('total_epochs', 0))) # Usually not stored by default CSVLogger but we can check
+        except (KeyError, ValueError):
+            target_epochs = 0
+            
+        return last_epoch, last_lr, target_epochs
     except Exception as e:
         print(f"  ⚠️  Could not read {log_path}: {e}")
         return None
@@ -97,7 +111,9 @@ def _parse_folder(folder_name: str) -> tuple[str, int, int] | None:
     E.g. 'digit_recognizer_v17_10cls_RGB' -> ('digit_recognizer_v17', 10, 3)
     Returns None if pattern not matched.
     """
-    m = re.search(r'^(.+?)_(\d+)cls_(RGB|GRAY)$', folder_name)
+    # Match anything before _<N>cls_, then exactly <N>cls_, then any number of optional suffix blocks, 
+    # then precisely _RGB or _GRAY, and finally optional timestamp suffix
+    m = re.search(r'^(.+?)_(\d+)cls(?:_.*?)*?(?:_)(RGB|GRAY)(?:_.*)?$', folder_name)
     if not m:
         return None
     model_name = m.group(1)
@@ -126,9 +142,10 @@ def _discover_runs(base_dir: Path, classes_filter=None, color_filter=None) -> li
         color_str = 'RGB' if channels == 3 else 'GRAY'
         if color_filter is not None and color_str.lower() != color_filter.lower():
             continue
-        last_epoch = _read_last_epoch(log_path)
-        if last_epoch is None:
+        result = _read_last_epoch_lr_and_target(log_path)
+        if result is None:
             continue
+        last_epoch, last_lr, log_target_epochs = result
         initial_epoch = last_epoch + 1
         runs.append({
             'run_dir':       run_dir,
@@ -138,6 +155,8 @@ def _discover_runs(base_dir: Path, classes_filter=None, color_filter=None) -> li
             'nb_classes':    nb_classes,
             'channels':      channels,
             'initial_epoch': initial_epoch,
+            'last_lr':       last_lr,
+            'log_target_epochs': log_target_epochs,
         })
     return runs
 
@@ -152,10 +171,18 @@ def _build_cmd(run: dict, args) -> list[str]:
     ]
     if args.epochs is not None:
         cmd.extend(['--epochs', str(args.epochs)])
+    elif run.get('target_epochs') is not None and run['target_epochs'] > 0:
+        cmd.extend(['--epochs', str(run['target_epochs'])])
+        
     if args.batch is not None:
         cmd.extend(['--batch', str(args.batch)])
+    
+    # Priority: Command-line override > Log last LR
     if args.lr is not None:
         cmd.extend(['--lr', str(args.lr)])
+    elif run.get('last_lr') is not None:
+        cmd.extend(['--lr', str(run['last_lr'])])
+        
     if args.no_analysis:
         cmd.append('--no_analysis')
     if args.no_cleanup:
@@ -250,10 +277,11 @@ def main():
                   f"   Expected pattern: <model>_<N>cls_<RGB|GRAY>")
             sys.exit(1)
         model_name, nb_classes, channels = parsed
-        last_epoch = _read_last_epoch(log_path)
-        if last_epoch is None:
+        result = _read_last_epoch_lr_and_target(log_path)
+        if result is None:
             print("❌ training_log.csv is empty or unreadable.")
             sys.exit(1)
+        last_epoch, last_lr, log_target_epochs = result
         runs = [{
             'run_dir':       run_dir,
             'keras_path':    keras_path,
@@ -262,6 +290,8 @@ def main():
             'nb_classes':    nb_classes,
             'channels':      channels,
             'initial_epoch': last_epoch + 1,
+            'last_lr':       last_lr,
+            'log_target_epochs': log_target_epochs,
         }]
     else:
         # Discovery mode
@@ -277,24 +307,34 @@ def main():
         sys.exit(0)
 
     # Filter out already-finished runs
-    target_epochs = args.epochs
-    if target_epochs is None:
-        # Try to read from parameters.py
-        try:
-            import parameters as p
-            target_epochs = p.EPOCHS
-        except Exception:
-            target_epochs = 0
-
     pending = []
     skipped = []
     converged = []
+    
+    # Auto-detect epochs parameter if not provided
+    default_target_epochs = args.epochs
+    if default_target_epochs is None:
+        try:
+            import parameters as p
+            default_target_epochs = p.EPOCHS
+        except Exception:
+            default_target_epochs = 0
+            
     for run in runs:
+        # Final target epochs for this run
+        if args.epochs is not None:
+            target_epochs = args.epochs
+        elif run.get('log_target_epochs', 0) > 0:
+            target_epochs = run['log_target_epochs']
+        else:
+            target_epochs = default_target_epochs
+            
         if target_epochs > 0 and run['initial_epoch'] >= target_epochs:
             skipped.append(run)
         elif not args.force and _check_convergence(run['log_path'], patience):
             converged.append(run)
         else:
+            run['target_epochs'] = target_epochs
             pending.append(run)
 
     print(f"\n{'='*70}")
