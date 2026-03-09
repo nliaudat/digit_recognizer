@@ -32,20 +32,23 @@ AVAILABLE_MODELS = [
     # "digit_recognizer_v9", # Est: ~150-200K params | EfficientNet-Style MBConv
     # "digit_recognizer_v10", # Est: ~700K+ params | Hybrid Transformer-Style CNN
     # "digit_recognizer_v11", # Est: ~1M+ params | Modern SOTA CNN with GELU/Swish/SE/MBConv
-    "digit_recognizer_v12", # 415.4kB / 84.46%
-    # "digit_recognizer_v15", # 107.4kB / 79.78% | IoT residual model — beats v4 accuracy at <100KB
+    # "digit_recognizer_v12", # 415.4kB / 84.46%
+    "digit_recognizer_v15", # 107.4kB / 79.78% | IoT residual model — beats v4 accuracy at <100KB
     "digit_recognizer_v16", # 139.7kB / 82.81% | IoT MobileNetV2 inverted residual — ESP-NN optimised
     "digit_recognizer_v17", # 80.5kB / 80.69% | IoT GhostNet-inspired — ultra-efficient ~50KB
-    "digit_recognizer_v18", 
-    "digit_recognizer_v19",
+    "digit_recognizer_v18", # GhostNet 10-Class IoT optimized model pushing >90% accuracy <100KB INT8
+    "digit_recognizer_v19", # GhostNet scale-up hitting 92% accurate baseline for 100-class
+    "digit_recognizer_v20", # GhostNet 100-Class IoT limit-pusher (<1.5MB) with 2D Positional Encoding & Dual Attention
+    "digit_recognizer_v21", # PC/GPU-Only Rotary Positional Encoding & Adaptive Attention limit pusher (>99.5% target)
+    "digit_recognizer_v22", # IoT Spatial MobileNetV2 with 2D Positional Encoding (10-Class RGB <200KB limit)
     # "esp_quantization_ready", # ~70kB | Minimal Depthwise CNN for smooth INT8
     # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
-    "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
+    # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
     # "mnist_quantization", # 72.2kB / 76.55%
     # "original_haverland", # 228.8kB / 79.10% | baseline
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v19" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "digit_recognizer_v22" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
