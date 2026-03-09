@@ -801,6 +801,29 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             y_train_final = y_train_raw.copy()
             y_val_final = y_val_raw.copy()
             y_test_final = y_test_raw.copy()
+            
+        # -----------------------------------------------------------------
+        # MEMORY OPTIMIZATION: PUSH DATA TO GPU VRAM
+        # -----------------------------------------------------------------
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            print("🚀 Memory Optimization: Attempting to push float32 data to GPU VRAM...")
+            try:
+                # We attempt to allocate on GPU:0
+                with tf.device('/GPU:0'):
+                    x_train = tf.constant(x_train)
+                    x_val   = tf.constant(x_val)
+                    x_test  = tf.constant(x_test)
+                
+                # Immediately aggressively clean up system memory
+                import gc
+                gc.collect()
+                print("   ✅ Datasets successfully moved to GPU VRAM. System DDR4 RAM freed.")
+            except Exception as e:
+                print(f"⚠️ Could not push to GPU VRAM (perhaps Out-Of-Memory or fragmentation): {e}")
+                print("   Falling back to DDR4 system memory.")
+        else:
+            print("💡 No GPU detected for memory optimization. Using system DDR4 RAM.")
         
         # Create model with QAT if enabled
         use_qat = params.QUANTIZE_MODEL and params.USE_QAT and QAT_AVAILABLE
