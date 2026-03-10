@@ -348,7 +348,7 @@ def validate_qat_data_flow(
     if debug:
         print(
             f"   Sample – dtype:{sample.dtype} "
-            f"range:[{sample.min():.3f}, {sample.max():.3f}]"
+            f"range:[{np.min(sample):.3f}, {np.max(sample):.3f}]"
         )
 
     try:
@@ -675,8 +675,8 @@ def diagnose_qat_output_behavior(model, x_train, y_train):
     
     print("📊 Input Analysis:")
     print(f"   Input dtype: {sample_batch.dtype}")
-    print(f"   Input range: [{sample_batch.min():.3f}, {sample_batch.max():.3f}]")
-    print(f"   Input mean: {sample_batch.mean():.3f}")
+    print(f"   Input range: [{np.min(sample_batch):.3f}, {np.max(sample_batch):.3f}]")
+    print(f"   Input mean: {np.mean(sample_batch):.3f}")
     
     # Get model outputs
     with tf.GradientTape() as tape:
