@@ -39,6 +39,7 @@ import warnings
 import random
 import json
 import shutil
+import gc
 from datetime import datetime
 from contextlib import contextmanager
 from pathlib import Path
@@ -809,14 +810,15 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         if gpus:
             print("🚀 Memory Optimization: Attempting to push float32 data to GPU VRAM...")
             try:
-                # We attempt to allocate on GPU:0
-                with tf.device('/GPU:0'):
+                # Dynamically get the device name of the first GPU
+                # This works even if the system maps GPUs differently than /GPU:0
+                gpu_name = gpus[0].name.replace('physical_device:', '')
+                with tf.device(gpu_name):
                     x_train = tf.constant(x_train)
                     x_val   = tf.constant(x_val)
                     x_test  = tf.constant(x_test)
                 
                 # Immediately aggressively clean up system memory
-                import gc
                 gc.collect()
                 print("   ✅ Datasets successfully moved to GPU VRAM. System DDR4 RAM freed.")
             except Exception as e:
