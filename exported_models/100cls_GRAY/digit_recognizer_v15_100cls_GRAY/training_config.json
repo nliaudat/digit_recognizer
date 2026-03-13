@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-02-26 21:50:47",
-  "training_duration": "1:39:47.880164",
+  "timestamp": "2026-03-11 06:51:55",
+  "training_duration": "8:55:43.787310",
   "model_architecture": "digit_recognizer_v15",
   "input_shape": [
     32,
@@ -8,7 +8,7 @@
     1
   ],
   "num_classes": 100,
-  "epochs": 200,
+  "epochs": 250,
   "batch_size": 32,
   "learning_rate": 0.001,
   "quantization_enabled": true,
@@ -16,11 +16,28 @@
   "esp_dl_enabled": false,
   "data_augmentation": true,
   "grayscale": true,
-  "best_validation_accuracy": 0.8076002597808838,
-  "test_accuracy_keras": 0.8062238097190857,
-  "test_accuracy_tflite": 0.8004787552363855,
-  "model_size_keras_kb": 651.2822265625,
+  "loss_type": "IntelligentFocalLossController",
+  "label_smoothing": 0.05,
+  "optimizer_type": "nadam",
+  "weight_decay": 0.0,
+  "l1_reg": 0.0,
+  "l2_reg": 0.0,
+  "dropout_rate": 0.5,
+  "use_batch_norm": true,
+  "lr_scheduler": "reduce_on_plateau",
+  "dynamic_weighting": true,
+  "best_validation_accuracy": 0.7886307239532471,
+  "test_accuracy_keras": 0.7935307621955872,
+  "test_accuracy_tflite": 0.0,
+  "model_size_keras_kb": 929.234375,
   "model_size_tflite_kb": 86.0078125,
   "total_parameters": 69380,
-  "size_reduction_percent": 86.79407958759239
+  "focal_gamma": 2.0,
+  "focal_alpha": 0.27,
+  "focal_thresholds": [
+    0.88,
+    0.93,
+    0.97
+  ],
+  "size_reduction_percent": 90.74422827932942
 }

@@ -2,8 +2,8 @@ TRAINING CONFIGURATION AND RESULTS
 ==================================================
 
 📅 Training Information:
-   Timestamp: 2026-03-04 23:52:54
-   Duration: 3:56:27.679564
+   Timestamp: 2026-03-11 22:45:37
+   Duration: 8:26:47.395453
 
 🔧 Model Configuration:
    Architecture: digit_recognizer_v17
@@ -13,7 +13,7 @@ TRAINING CONFIGURATION AND RESULTS
 
 🧠 Learning Mode & Parameters:
    Loss Type: IntelligentFocalLossController
-   Optimizer: rmsprop
+   Optimizer: nadam
    Label Smoothing: 0.05
    Focal Gamma: 2.0
    Focal Alpha: 0.27
@@ -37,9 +37,9 @@ TRAINING CONFIGURATION AND RESULTS
    ESP-DL enabled: False
 
 📊 Results:
-   Best validation accuracy: 0.8088
-   Test accuracy (Keras): 0.8140
-   Test accuracy (TFLite): 0.8069
-   Keras model size: 649.5 KB
+   Best validation accuracy: 0.7806
+   Test accuracy (Keras): 0.7757
+   Test accuracy (TFLite): 0.0000
+   Keras model size: 810.2 KB
    TFLite model size: 80.5 KB
-   Size reduction: 87.6%
+   Size reduction: 90.1%
