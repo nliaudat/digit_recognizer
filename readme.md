@@ -36,7 +36,6 @@ The primary use case is 10-class recognition. The models perform exceptionally w
 | digit_recognizer_v19_10cls_RGB | 287200     | 132.2     | 0.988          | 3286           |
 | digit_recognizer_v4_10cls_RGB  | 104700     | 78.3      | 0.988          | 6121           |
 | digit_recognizer_v17_10cls_RGB | 175700     | 71.0      | 0.987          | 6256           |
-| digit_recognizer_v12_10cls_RGB | 493100     | 407.3     | 0.983          | 1942           |
 | digit_recognizer_v3_10cls_RGB  | 71200      | 38.4      | 0.973          | 4695           |
 | digit_recognizer_v7_10cls_RGB  | 78600      | 47.2      | 0.970          | 6423           |
 | original_haverland_10cls_RGB   | 240200     | 203.8     | 0.966          | 4286           |
@@ -56,7 +55,7 @@ When comparing the `original_haverland` baseline to newer models on the 10-class
 2.  **Dramatically Smaller Memory Footprint**: `v4` is only **78.3 KB**, making it roughly **2.6x smaller** than the original's **203.8 KB**, saving critical flash memory on ESP32 devices.
 3.  **Extremely Fast Inference**: `v4` processes **6121 inferences/second**, making it roughly **42% faster** than the original.
 
-## Benchmark on 24351 real images (100 Classes [0-99])
+## Benchmark on 56375 real images (100 Classes [0-99])
 
 To ensure a fair and comprehensive comparison between architectures under stress, the following benchmark utilizes the 100 classes (`0` to `99`) dataset, which represents a significantly harder classification task than the simple 0-9 digits.
 
@@ -68,7 +67,6 @@ To ensure a fair and comprehensive comparison between architectures under stress
 | digit_recognizer_v6_100cls_RGB | 209300     | 160.8     | 0.906          | 1965           |
 | digit_recognizer_v4_100cls_RGB | 111500     | 87.1      | 0.905          | 5766           |
 | digit_recognizer_v18_100cls_RGB| 223400     | 109.7     | 0.904          | 4200           |
-| digit_recognizer_v12_100cls_RGB| 499300     | 415.4     | 0.894          | 1470           |
 | digit_recognizer_v17_100cls_RGB| 183300     | 80.5      | 0.885          | 4626           |
 | original_haverland_100cls_RGB  | 263600     | 228.8     | 0.847          | 4190           |
 | digit_recognizer_v3_100cls_RGB | 75900      | 45.1      | 0.835          | 4541           |
@@ -175,8 +173,6 @@ The table below summarizes the trade-offs between accuracy and model size across
 | **v18** | 98.9% / 97.1KB | 99.0% / 97.4KB | 90.2% / 109.4KB | 90.4% / 109.7KB | New variant with very strong performance hovering around 100KB. |
 | **v19** | 98.9% / 131.9KB | 98.8% / 132.2KB | 91.6% / 145.6KB | 92.4% / 146.0KB | New high-capacity variant built for challenging 100-class scenarios. |
 | **original_haverland** | 98.2% / 203.3KB | 96.6% / 203.8KB | 81.7% / 228.2KB | 84.7% / 228.8KB | Legacy baseline, superseded by v16 and newer variants. |
-| **v12** | 99.3% / 406.7KB | 98.3% / 407.3KB | 89.2% / 414.8KB | 89.4% / 415.4KB | Best overall absolute accuracy under 1MB. Not suitable for constrained IoT. |
-| **high_accuracy_validator** | N/A | N/A | N/A | 91.9% / 3149.7KB | PC-only large model validator, highest absolute accuracy found. |
 
 ## Related Projects
 
