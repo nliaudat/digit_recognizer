@@ -3,8 +3,10 @@ import numpy as np
 import cv2
 import os
 import argparse
-from utils.preprocess import preprocess_for_inference
-import parameters as params
+
+# Deferred imports to prioritize CLI arguments
+params = None
+preprocess_for_inference = None
 
 try:
     from tabulate import tabulate
@@ -38,7 +40,6 @@ from pathlib import Path
 import pandas as pd
 from PIL import Image
 import shutil
-from utils.multi_source_loader import MultiSourceDataLoader, load_combined_dataset
 
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
@@ -157,8 +158,11 @@ def load_image_from_path(image_path, input_channels):
     
     return image
 
-def find_model_path(model_name=None, input_dir=params.OUTPUT_DIR):
+def find_model_path(model_name=None, input_dir=None):
     """Find the model path based on model name"""
+    if input_dir is None:
+        input_dir = params.OUTPUT_DIR
+        
     # Look for training directories - exclude test_results and other non-training dirs
     all_dirs = [d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))]
     
@@ -282,13 +286,13 @@ def is_quantized_model(model_path):
     except:
         return False
 
-def get_all_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None, debug=False, model_list=None):
+def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude_model=None, debug=False, model_list=None):
     """Get all available models with parameters count - with error handling
     
     Args:
         quantized_only: If True, only return quantized models
         subfolder: If specified, only look in this specific subfolder
-        input_dir: Base directory to search for models
+        input_dir: Base directory to search for models. If None, defaults to params.OUTPUT_DIR.
         exclude_model: Model name to exclude from testing
         debug: Enable debug output
         model_list: Optional list of specific models to include (names or directories)
@@ -399,24 +403,88 @@ def is_valid_tflite_model(model_path):
             print(f"❌ Invalid TFLite model {os.path.basename(model_path)}: {error_msg.split(chr(10))[0][:150]}...")
         return False
 
+def _decode_bench_image(image_path, label, fname, target_h, target_w, grayscale):
+    import cv2
+    import numpy as np
+    flag = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
+    img = cv2.imread(image_path, flag)
+    if img is None or img.size == 0:
+        return None
+    img = cv2.resize(img, (target_w, target_h))
+    if grayscale and img.ndim == 2:
+        img = np.expand_dims(img, axis=-1)
+    elif not grayscale and img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+    return (img, label, fname)
+
+_cached_test_data = None
+_cached_test_data_params = None
+
 def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     """
     Load test dataset with proper labels, tracking original filenames.
     Returns: list of (image_array, true_label, filename_no_ext) tuples
     """
-    print("📊 Loading test dataset with labels...")
+    global _cached_test_data, _cached_test_data_params
+    import json
+    import hashlib
+    import os
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     
-    test_data = []
+    current_params = (use_all_datasets, params.NB_CLASSES, params.INPUT_CHANNELS, params.INPUT_WIDTH, params.INPUT_HEIGHT)
     
+    if _cached_test_data is not None and _cached_test_data_params == current_params:
+        test_data = list(_cached_test_data)
+        
+        # Apply sampling if requested
+        if num_samples > 0 and len(test_data) > num_samples:
+            np.random.shuffle(test_data)
+            test_data = test_data[:num_samples]
+            print(f"📊 Using cached test dataset ({len(test_data)} test samples, limited by --test_images)")
+        else:
+            print(f"📊 Using cached test dataset (ALL {len(test_data)} available test samples)")
+        return test_data
+        
+    # Generate cache key based on sources and parameters
+    sources_fingerprint = json.dumps([{k: v for k, v in s.items()} for s in params.DATA_SOURCES], sort_keys=True)
+    cache_str = f"{sources_fingerprint}|classes={params.NB_CLASSES}|channels={params.INPUT_CHANNELS}|w={params.INPUT_WIDTH}|h={params.INPUT_HEIGHT}|all={use_all_datasets}"
+    cache_key = hashlib.md5(cache_str.encode()).hexdigest()[:12]
+    
+    cache_dir = getattr(params, "DATASET_CACHE_DIR", ".dataset_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"bench_cache_{cache_key}.npz")
+    
+    # Try loading from disk cache
+    if os.path.exists(cache_path):
+        try:
+            print(f"📊 Loading dataset from fast disk cache ({cache_path})...")
+            data = np.load(cache_path, allow_pickle=True)
+            images, labels, fnames = data["images"], data["labels"], data["fnames"]
+            test_data = list(zip(images, labels, fnames))
+            
+            _cached_test_data = list(test_data)
+            _cached_test_data_params = current_params
+            
+            if num_samples > 0 and len(test_data) > num_samples:
+                np.random.shuffle(test_data)
+                test_data = test_data[:num_samples]
+                print(f"  Using {len(test_data)} test samples (limited by --test_images)")
+            else:
+                print(f"  Using ALL {len(test_data)} available test samples")
+            return test_data
+        except Exception as e:
+            print(f"⚠️  Could not load disk cache: {e}. Rebuilding...")
+            
+    print("📊 Loading test dataset with labels from disk...")
+    
+    tasks = []
     h = params.INPUT_HEIGHT
     w = params.INPUT_WIDTH
     grayscale = params.USE_GRAYSCALE
-    flag = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
 
     for source_config in params.DATA_SOURCES:
         source_type = source_config.get('type', '')
         source_path = source_config.get('path', '')
-        source_weight = source_config.get('weight', 1.0)
 
         if source_type == 'label_file':
             labels_file = source_config.get('labels', 'labels.txt')
@@ -428,7 +496,6 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
             with open(label_file_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
             
-            valid_loaded = 0
             for raw in lines:
                 line = raw.strip()
                 if not line or line.startswith('#'):
@@ -446,17 +513,7 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
                 img_path = os.path.join(images_dir, fname)
                 if not os.path.exists(img_path):
                     continue
-                img = cv2.imread(img_path, flag)
-                if img is None:
-                    continue
-                img = cv2.resize(img, (w, h))
-                if grayscale and img.ndim == 2:
-                    img = np.expand_dims(img, axis=-1)
-                elif not grayscale and img.ndim == 2:
-                    img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-                test_data.append((img, label, os.path.splitext(fname)[0]))
-                valid_loaded += 1
-            # print(f"DEBUG: Source {source_path} loaded {valid_loaded} images.")
+                tasks.append((img_path, label, os.path.splitext(fname)[0]))
 
         elif source_type == 'folder_structure':
             for class_label in range(params.NB_CLASSES):
@@ -467,15 +524,24 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
                     if not any(fn.lower().endswith(e) for e in ('.jpg', '.jpeg', '.png', '.bmp')):
                         continue
                     img_path = os.path.join(class_dir, fn)
-                    img = cv2.imread(img_path, flag)
-                    if img is None:
-                        continue
-                    img = cv2.resize(img, (w, h))
-                    if grayscale and img.ndim == 2:
-                        img = np.expand_dims(img, axis=-1)
-                    elif not grayscale and img.ndim == 2:
-                        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-                    test_data.append((img, class_label, os.path.splitext(fn)[0]))
+                    tasks.append((img_path, class_label, os.path.splitext(fn)[0]))
+
+    test_data = []
+    if tasks:
+        n_workers = min(8, os.cpu_count() or 4)
+        print(f"  📂 Decoding {len(tasks)} images in parallel...")
+        
+        with ThreadPoolExecutor(max_workers=n_workers) as ex:
+            futures = [ex.submit(_decode_bench_image, path, lbl, fn, h, w, grayscale) for path, lbl, fn in tasks]
+            
+            done = 0
+            for f in as_completed(futures):
+                res = f.result()
+                if res is not None:
+                    test_data.append(res)
+                done += 1
+                if done % max(1, len(tasks) // 10) == 0:
+                    print(f"    {done}/{len(tasks)} loaded...")
 
     if not test_data:
         print("❌ No data loaded from any source")
@@ -483,6 +549,20 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
 
     # Apply weight-based sampling per source (already mixed; use total weight approx)
     np.random.shuffle(test_data)
+    
+    # Save to disk cache
+    try:
+        images = np.array([item[0] for item in test_data])
+        labels = np.array([item[1] for item in test_data])
+        fnames = np.array([item[2] for item in test_data])
+        np.savez_compressed(cache_path, images=images, labels=labels, fnames=fnames)
+        print(f"💾 Saved {len(test_data)} images to fast disk cache: {cache_path}")
+    except Exception as e:
+        print(f"⚠️  Could not save disk cache: {e}")
+
+    # Cache the fully loaded and shuffled dataset
+    _cached_test_data = list(test_data)
+    _cached_test_data_params = current_params
 
     if num_samples > 0 and len(test_data) > num_samples:
         test_data = test_data[:num_samples]
@@ -491,7 +571,6 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
         print(f"  Using ALL {len(test_data)} available test samples")
 
     return test_data
-
 
 def configure_parameters_for_model(model_name_or_dir, override_classes=None, override_color=None):
     """
@@ -620,7 +699,9 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
             all_predictions_lite.append({
                 'true_label': true_label,
                 'predicted_label': prediction,
-                'model': model_name or os.path.basename(model_path)
+                'model': model_name or os.path.basename(model_path),
+                'num_classes': predictor.num_classes,
+                'tolerance': tolerance
             })
             
             total_tested += 1
@@ -651,13 +732,16 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
     
     return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions, all_predictions_lite
 
-def generate_confusion_matrix(all_results, output_dir=params.OUTPUT_DIR):
+def generate_confusion_matrix(all_results, output_dir=None):
     """Generate a confusion matrix heatmap and per-class accuracy CSV from all predictions.
 
     Args:
         all_results: list of dicts with keys 'true_label', 'predicted_label', 'model'
         output_dir: directory where test_results/ will be written
     """
+    if output_dir is None:
+        output_dir = params.OUTPUT_DIR
+
     if not all_results:
         return {}
 
@@ -678,6 +762,8 @@ def generate_confusion_matrix(all_results, output_dir=params.OUTPUT_DIR):
     for model_name, m_results in model_results.items():
         y_true = [r['true_label'] for r in m_results]
         y_pred = [r['predicted_label'] for r in m_results]
+        num_classes = m_results[0].get('num_classes', params.NB_CLASSES)
+        tolerance = m_results[0].get('tolerance', 0.1)
 
         classes = sorted(set(y_true) | set(y_pred))
         n = len(classes)
@@ -718,7 +804,20 @@ def generate_confusion_matrix(all_results, output_dir=params.OUTPUT_DIR):
         for c in classes:
             ci = idx[c]
             total = cm[ci].sum()
-            correct = cm[ci, ci]
+            
+            # Count correct using circular_diff
+            correct = 0
+            scale = num_classes / 10.0
+            c_digit = float(c) / scale
+            
+            for yp_class in classes:
+                yp_digit = float(yp_class) / scale
+                diff = abs(c_digit - yp_digit) % 10.0
+                circular_diff = min(diff, 10.0 - diff)
+                
+                if circular_diff <= tolerance:
+                    correct += cm[ci, idx[yp_class]]
+
             per_class_rows.append({
                 'Class': c,
                 'Total': int(total),
@@ -739,8 +838,11 @@ def generate_confusion_matrix(all_results, output_dir=params.OUTPUT_DIR):
 
     return generated_files
 
-def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=True, output_dir=params.OUTPUT_DIR):
+def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=True, output_dir=None):
     """Generate separate comparison graphs for the benchmark results"""
+    if output_dir is None:
+        output_dir = params.OUTPUT_DIR
+        
     # Create graphs directory
     graphs_dir = os.path.join(output_dir, "test_results", "graphs")
     os.makedirs(graphs_dir, exist_ok=True)
@@ -934,7 +1036,7 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
 
 def test_all_models(num_test_images=0, quantized_only=False, debug=False, 
                     use_all_datasets=True, list_failed=False, save_failed=False,
-                    subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None,
+                    subfolder=None, input_dir=None, exclude_model=None,
                     override_classes=None, override_color=None, model_list=None, tolerance=0.1):
     """Test all valid models with optional subfolder filtering and model exclusion
     
@@ -946,12 +1048,11 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
         list_failed: Print a summary of failed predictions per class label
         save_failed: Save failed prediction images
         subfolder: Only test models from this specific subfolder
-        input_dir: Directory containing models to test
-        exclude_model: Model name to exclude from testing
-        override_classes: Manual override for NB_CLASSES
-        override_color: Manual override for color mode ('rgb' or 'gray')
         model_list: Optional list of specific model names or directories to test
     """
+    if input_dir is None:
+        input_dir = params.OUTPUT_DIR
+        
     models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, 
                             input_dir=input_dir, exclude_model=exclude_model, 
                             debug=debug, model_list=model_list)
@@ -1137,8 +1238,11 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
     
     return results, all_failed_predictions
 
-def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_images_count=0, output_dir=params.OUTPUT_DIR):
+def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_images_count=0, output_dir=None):
     """Save FULL results to CSV file with all information"""
+    if output_dir is None:
+        output_dir = params.OUTPUT_DIR
+        
     # Create results directory if it doesn't exist
     results_dir = os.path.join(output_dir, "test_results")
     os.makedirs(results_dir, exist_ok=True)
@@ -1397,8 +1501,10 @@ def generate_iot_recommendation_section(f, df):
     
     f.write("\n")
 
-def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True, use_all_datasets=True, test_images_count=0, output_dir=params.OUTPUT_DIR):
+def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True, use_all_datasets=True, test_images_count=0, output_dir=None):
     """Generate a comprehensive Markdown report from CSV results and graphs"""
+    if output_dir is None:
+        output_dir = params.OUTPUT_DIR
     
     # Read the CSV data
     df = pd.read_csv(csv_path)
@@ -1467,23 +1573,7 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
     return report_path
 
 
-def list_available_models(quantized_only=False, subfolder=None, input_dir=params.OUTPUT_DIR, exclude_model=None, model_list=None):
-    """List all available models found in the training directories"""
-    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, input_dir=input_dir, exclude_model=exclude_model, model_list=model_list)
-    
-    if not models:
-        if subfolder:
-            print(f"No models found in subfolder '{subfolder}'")
-        else:
-            print("No models found.")
-        return
-    
-    subfolder_info = f" in subfolder '{subfolder}'" if subfolder else ""
-    print(f"Available {'quantized ' if quantized_only else ''}models{subfolder_info}:")
-    print("-" * 50)
-    
-    for model in models:
-        print(f"{model['directory']}/{model['name']} ({model['type']}, {model['size_kb']:.1f} KB, {model['parameters']} params)")
+
 
 def save_failed_images(failed_predictions, output_dir):
     """Save failed prediction images to directory for manual review"""
@@ -1501,16 +1591,13 @@ def save_failed_images(failed_predictions, output_dir):
             
             # Generate filename: use original filename as stable unique prefix
             original_fname = failure.get('original_fname', 'unknown')
-            # The failed prediction was scaled by model_scale in the original loop
-            model_num_classes = failure.get('num_classes', params.NB_CLASSES)
-            scale = model_num_classes / 10.0
-            filename = f"{original_fname}_{float(predicted_label)/scale:.1f}_conf_{confidence:.3f}.jpg"
+            filename = f"{original_fname}_{predicted_label:.1f}_conf_{confidence:.3f}.jpg"
             filepath = os.path.join(failed_dir, filename)
             
             # If same name (collision), add random 3 digits
             if os.path.exists(filepath):
                 import random
-                filename = f"{original_fname}_{float(predicted_label)/scale:.1f}_conf_{confidence:.3f}_{random.randint(100, 999)}.jpg"
+                filename = f"{original_fname}_{predicted_label:.1f}_conf_{confidence:.3f}_{random.randint(100, 999)}.jpg"
                 filepath = os.path.join(failed_dir, filename)
                 
             # Handle different image data types
@@ -1584,7 +1671,7 @@ def generate_failed_predictions_csv(failed_predictions, output_dir):
     return csv_path
 
 def test_single_model(model_path, num_test_images=0, debug=False, use_all_datasets=True, 
-                     list_failed=False, save_failed=False, output_dir=params.OUTPUT_DIR,
+                     list_failed=False, save_failed=False, output_dir=None,
                      override_classes=None, override_color=None, tolerance=0.1):
     """Test a single model and optionally collect failed predictions"""
     predictor = TFLiteDigitPredictor(model_path)
@@ -1648,13 +1735,13 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
                     print(f"✓ {i:4d}: Correct - Pred: {pred_digit:.1f}, True: {true_digit:.1f}, Conf: {confidence:.3f}")
             else:
                 if debug:
-                    print(f"✗ {i:4d}: Wrong - Pred: {prediction}, True: {true_label}, Conf: {confidence:.3f}")
+                    print(f"✗ {i:4d}: Wrong - Pred: {pred_digit:.1f}, True: {true_digit:.1f}, Conf: {confidence:.3f}")
                 
                 # ALWAYS collect failed prediction for accurate counting
                 failed_predictions.append({
                     'image': image,
-                    'true_label': true_label,
-                    'predicted_label': prediction,
+                    'true_label': round(true_digit, 1),
+                    'predicted_label': round(pred_digit, 1),
                     'confidence': confidence,
                     'model': os.path.basename(model_path),
                     'image_source': 'dataset',
@@ -1663,9 +1750,11 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
                 })
             
             all_predictions_lite.append({
-                'true_label': true_label,
-                'predicted_label': prediction,
-                'model': os.path.basename(model_path)
+                'true_label': round(true_digit, 1),
+                'predicted_label': round(pred_digit, 1),
+                'model': os.path.basename(model_path), # model_name is not defined here, use os.path.basename(model_path)
+                'num_classes': predictor.num_classes,
+                'tolerance': tolerance
             })
             
             total_tested += 1
@@ -1741,6 +1830,12 @@ def main():
     """Main function with command line arguments"""
     parser = argparse.ArgumentParser(description='Digit Recognition Benchmarking System')
     
+    # Optional overrides for dataset configuration (auto-detected if omitted)
+    parser.add_argument('--classes', type=int, choices=[10, 100], 
+                        help='Force the number of classes (10 or 100). Auto-detected from folder name if omitted (e.g., 10cls).')
+    parser.add_argument('--color', type=str, choices=['rgb', 'gray'], 
+                        help='Force a specific color mode. Auto-detected from folder name if omitted (e.g., GRAY).')
+    
     # Mode selection
     parser.add_argument('--test_all', action='store_true', 
                         help='Perform a full benchmark of all available models in the input directory.')
@@ -1752,8 +1847,8 @@ def main():
                         help='List all compatible models found and exit without benchmarking.')
 
     # Filtering and Path Configuration
-    parser.add_argument('--input_dir', type=str, default=params.OUTPUT_DIR,
-                        help=f'Base directory to search for models (default: {params.OUTPUT_DIR})')
+    parser.add_argument('--input_dir', type=str, default='exported_models', # Changed default to 'exported_models' string
+                        help='Base directory to search for models (default: exported_models)')
     parser.add_argument('--subfolder', type=str, 
                         help='Restrict search to a specific subfolder within the input directory.')
     parser.add_argument('--exclude_model', type=str, default=None,
@@ -1781,13 +1876,29 @@ def main():
     parser.add_argument('--tolerance', type=float, default=0.1, 
                         help='Acceptable error tolerance in decimal scale (default: 0.1). E.g. +-0.1 allows +-1 class for 100 classes.')
     
-    # Optional overrides for dataset configuration (auto-detected if omitted)
-    parser.add_argument('--classes', type=int, choices=[10, 100], 
-                        help='Force the number of classes (10 or 100). Auto-detected from folder name if omitted (e.g., 10cls).')
-    parser.add_argument('--color', type=str, choices=['rgb', 'gray'], 
-                        help='Force a specific color mode. Auto-detected from folder name if omitted (e.g., GRAY).')
+    args, unknown = parser.parse_known_args()
     
-    args = parser.parse_args()
+    # We must explicitly define the environment before initializing `parameters.py`
+    # Otherwise `import parameters` will block awaiting standard IO.
+    if args.classes:
+        os.environ['DIGIT_NB_CLASSES'] = str(args.classes)
+    if args.color:
+        if args.color.lower() == 'gray':
+            os.environ['DIGIT_INPUT_CHANNELS'] = '1'
+        elif args.color.lower() == 'rgb':
+            os.environ['DIGIT_INPUT_CHANNELS'] = '3'
+            
+    # Now map the delayed imports globally
+    global params
+    global preprocess_for_inference
+    import parameters as p
+    from utils.preprocess import preprocess_for_inference as pfio
+    params = p
+    preprocess_for_inference = pfio
+    
+    # Use output dir from params if nothing was specified
+    if args.input_dir == 'exported_models':
+        args.input_dir = params.OUTPUT_DIR
     
     if args.list:
         list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, 

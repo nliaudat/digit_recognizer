@@ -415,7 +415,7 @@ if __name__ == "__main__":
         
         converter.representative_dataset = representative_dataset
         tflite_model = converter.convert()
-        print("âœ“ Model successfully quantized to TFLite INT8!")
+        print("✓ Model successfully quantized to TFLite INT8!")
         print(f"  Final Output Size: {len(tflite_model) / 1024 / 1024:.2f} MB")
     except Exception as e:
-        print(f"âœ— TFLite conversion failed: {e}")
+        print(f"✗ TFLite conversion failed: {e}")

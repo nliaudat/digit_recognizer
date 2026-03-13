@@ -364,9 +364,14 @@ def _multi_res_pyramid(x, name_prefix='mrp'):
 # Main Model Builder
 # ---------------------------------------------------------------------------
 
-def create_digit_recognizer_v21():
+def create_digit_recognizer_v21(input_shape=None, nb_classes=None):
     """Create advanced spatial-aware model for >99.5% accuracy PC operations."""
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    
+    # Use provided arguments, otherwise fallback to params
+    shape_to_use = input_shape if input_shape is not None else params.INPUT_SHAPE
+    classes_to_use = nb_classes if nb_classes is not None else params.NB_CLASSES
+
+    inputs = tf.keras.Input(shape=shape_to_use, name='input')
     
     # Rotary position encoding at input
     x = RotaryPositionalEncoding2D(name='input_rotary')(inputs)
@@ -447,7 +452,7 @@ def create_digit_recognizer_v21():
     
     # Output layer
     outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, activation='softmax', name='output'
+        classes_to_use, activation='softmax', name='output'
     )(x)
     
     return tf.keras.Model(inputs, outputs, name='digit_recognizer_v21')
@@ -486,18 +491,12 @@ def get_training_config():
 
 
 if __name__ == "__main__":
-    # Setup
-    if not hasattr(params, 'NB_CLASSES'):
-        params.NB_CLASSES = 100
-    if not hasattr(params, 'INPUT_SHAPE'):
-        params.INPUT_SHAPE = (32, 32, 3)
-    
     print("=" * 70)
     print("DIGIT RECOGNIZER V21 - ROTARY POSITIONAL ENCODING (PC OPTIMIZED)")
     print("=" * 70)
     
-    # Create model
-    model = create_digit_recognizer_v21()
+    # Create model explicitly with test parameters instead of mutating params
+    model = create_digit_recognizer_v21(input_shape=(32, 32, 3), nb_classes=100)
     model.summary()
     
     # Parameter count
