@@ -27,7 +27,7 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v4", # 87.1kB / 80.80%
     # "digit_recognizer_v5", # ~55-130kB | Class-Count Adaptive CNN
     "digit_recognizer_v6", # 160.8kB / 80.56%
-    # "digit_recognizer_v7", # 56.0kB / 73.35%
+    "digit_recognizer_v7", # 56.0kB / 73.35%
     # "digit_recognizer_v8", # Est: ~300K+ params | SOTA Residual CNN with SE
     # "digit_recognizer_v9", # Est: ~150-200K params | EfficientNet-Style MBConv
     # "digit_recognizer_v10", # Est: ~700K+ params | Hybrid Transformer-Style CNN
