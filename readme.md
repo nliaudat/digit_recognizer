@@ -14,7 +14,7 @@ Grayscale or RGB runs the same on test datasets, but RGB need more resources at 
 
 ## Model Performance
 
-![Accuracy vs Model Size](imgs/accuracy_vs_size.png)
+![Accuracy vs Model Size (10cls RGB)](exported_models/10cls_RGB/test_results/graphs/accuracy_vs_size_quantized_full.png)
 
 The graph above shows the relationship between model accuracy and model size across different neural network architectures. As demonstrated, the project explores how different model complexities affect recognition performance.
 
@@ -28,53 +28,64 @@ The exported models in the `exported_models/` directory are organized by classif
 
 The primary use case is 10-class recognition. The models perform exceptionally well on grayscale images, offering high accuracy for IoT deployment.
 
-| Model                          | Parameters | Size (KB) | Accuracy | Inferences/sec |
-| ------------------------------ | ---------- | --------- | -------- | -------------- |
-| digit_recognizer_v12_10cls_GRAY| 490000     | 406.7     | 0.993    | 1570           |
-| original_haverland_10cls_GRAY  | 234500     | 203.3     | 0.982    | 4513           |
-| digit_recognizer_v16_10cls_GRAY| 244000     | 128.6     | 0.992    | 3690           |
-| digit_recognizer_v15_10cls_GRAY| 109100     | 79.3      | 0.991    | 5184           |
-| digit_recognizer_v17_10cls_GRAY| 172900     | 70.7      | 0.990    | 4971           |
-| digit_recognizer_v3_10cls_GRAY | 118400     | 69.4      | 0.980    | 6359           |
-| mnist_quantization_10cls_GRAY  | 98700      | 63.6      | 0.970    | 4719           |
-| digit_recognizer_v4_10cls_GRAY | 79700      | 61.4      | 0.985    | 5834           |
-| digit_recognizer_v7_10cls_GRAY | 75600      | 46.7      | 0.966    | 6485           |
-| digit_recognizer_v6_10cls_GRAY | 61500      | 36.5      | 0.965    | 5167           |
+| Model                          | Parameters | Size (KB) | Accuracy (RGB) | Inferences/sec |
+| ------------------------------ | ---------- | --------- | -------------- | -------------- |
+| digit_recognizer_v16_10cls_RGB | 246800     | 128.8     | 0.992          | 4960           |
+| digit_recognizer_v18_10cls_RGB | 213000     | 97.4      | 0.990          | 4131           |
+| digit_recognizer_v15_10cls_RGB | 140000     | 100.0     | 0.989          | 5506           |
+| digit_recognizer_v19_10cls_RGB | 287200     | 132.2     | 0.988          | 3286           |
+| digit_recognizer_v4_10cls_RGB  | 104700     | 78.3      | 0.988          | 6121           |
+| digit_recognizer_v17_10cls_RGB | 175700     | 71.0      | 0.987          | 6256           |
+| digit_recognizer_v12_10cls_RGB | 493100     | 407.3     | 0.983          | 1942           |
+| digit_recognizer_v3_10cls_RGB  | 71200      | 38.4      | 0.973          | 4695           |
+| digit_recognizer_v7_10cls_RGB  | 78600      | 47.2      | 0.970          | 6423           |
+| original_haverland_10cls_RGB   | 240200     | 203.8     | 0.966          | 4286           |
+| digit_recognizer_v6_10cls_RGB  | 79500      | 46.9      | 0.963          | 4047           |
 
-### Pareto-Optimal Choice: `v4` vs `original_haverland`
+### Pareto-Optimal Choices: `v16` and `v4` vs `original_haverland`
 
-When comparing the `original_haverland` baseline to `digit_recognizer_v4` on the 10-class dataset, `v4` demonstrates strict superiority across all key edge-deployment metrics:
+When comparing the `original_haverland` baseline to newer models on the 10-class dataset (RGB), both `v16` and `v4` demonstrate strict superiority across key edge-deployment metrics:
 
-1.  **Higher Accuracy**: `v4` achieves **98.5%** accuracy compared to the original's **98.2%**.
-2.  **Dramatically Smaller Memory Footprint**: `v4` is only **61.4 KB**, making it roughly **3.3x smaller** than the original's **203.3 KB**, saving critical flash memory on ESP32 devices.
-3.  **Faster Inference**: `v4` processes **5834 inferences/second**, making it nearly **30% faster** than the original's **4513 inferences/second**.
-4.  **Fewer Parameters**: `v4` utilizes nearly 3 times fewer parameters (79k vs 234k), directly reducing the required RAM tensor arena size.
+**For Maximum Accuracy (`v16`):**
+1.  **Higher Accuracy**: `v16` achieves **99.2%** accuracy compared to the original's **96.6%**.
+2.  **Smaller Memory Footprint**: `v16` is **128.8 KB**, making it substantially smaller than the original's **203.8 KB**.
+3.  **Faster Inference**: `v16` processes **4960 inferences/second**, outperforming the original's **4286 inferences/second**.
+
+**For Maximum Efficiency (`v4`):**
+1.  **Higher Accuracy**: `v4` achieves **98.8%** accuracy compared to the original's **96.6%**.
+2.  **Dramatically Smaller Memory Footprint**: `v4` is only **78.3 KB**, making it roughly **2.6x smaller** than the original's **203.8 KB**, saving critical flash memory on ESP32 devices.
+3.  **Extremely Fast Inference**: `v4` processes **6121 inferences/second**, making it roughly **42% faster** than the original.
 
 ## Benchmark on 24351 real images (100 Classes [0-99])
 
 To ensure a fair and comprehensive comparison between architectures under stress, the following benchmark utilizes the 100 classes (`0` to `99`) dataset, which represents a significantly harder classification task than the simple 0-9 digits.
 
-| Model                          | Parameters | Size (KB) | Accuracy | Inferences/sec |
-| ------------------------------ | ---------- | --------- | -------- | -------------- |
-| digit_recognizer_v12_100cls_GRAY| 496100     | 414.8     | 0.892    | 1459           |
-| original_haverland_100cls_GRAY  | 257899     | 228.2     | 0.817    | 4395           |
-| digit_recognizer_v16_100cls_GRAY| 253000     | 139.5     | 0.884    | 3507           |
-| digit_recognizer_v6_100cls_GRAY | 171800     | 132.5     | 0.840    | 2437           |
-| digit_recognizer_v15_100cls_GRAY| 113700     | 86.0      | 0.854    | 4595           |
-| digit_recognizer_v17_100cls_GRAY| 180400     | 80.2      | 0.826    | 4730           |
-| digit_recognizer_v3_100cls_GRAY | 121600     | 74.6      | 0.765    | 6215           |
-| mnist_quantization_100cls_GRAY  | 104800     | 71.7      | 0.792    | 4497           |
-| digit_recognizer_v4_100cls_GRAY | 85800      | 69.5      | 0.829    | 5759           |
-| digit_recognizer_v7_100cls_GRAY | 82400      | 55.5      | 0.754    | 6692           |
+| Model                          | Parameters | Size (KB) | Accuracy (RGB) | Inferences/sec |
+| ------------------------------ | ---------- | --------- | -------------- | -------------- |
+| digit_recognizer_v16_100cls_RGB| 255800     | 139.7     | 0.942          | 3456           |
+| digit_recognizer_v19_100cls_RGB| 299100     | 146.0     | 0.924          | 3328           |
+| digit_recognizer_v15_100cls_RGB| 145400     | 107.4     | 0.914          | 4140           |
+| digit_recognizer_v6_100cls_RGB | 209300     | 160.8     | 0.906          | 1965           |
+| digit_recognizer_v4_100cls_RGB | 111500     | 87.1      | 0.905          | 5766           |
+| digit_recognizer_v18_100cls_RGB| 223400     | 109.7     | 0.904          | 4200           |
+| digit_recognizer_v12_100cls_RGB| 499300     | 415.4     | 0.894          | 1470           |
+| digit_recognizer_v17_100cls_RGB| 183300     | 80.5      | 0.885          | 4626           |
+| original_haverland_100cls_RGB  | 263600     | 228.8     | 0.847          | 4190           |
+| digit_recognizer_v3_100cls_RGB | 75900      | 45.1      | 0.835          | 4541           |
+| digit_recognizer_v7_100cls_RGB | 85500      | 56.0      | 0.806          | 6162           |
 
-### Performance under Stress: `v4` vs `original_haverland` (100-Class)
+### Performance under Stress: `v16` and `v4` vs `original_haverland` (100-Class)
 
-Even on the harder dataset, `v4` maintains its sheer edge over `original_haverland`:
+Even on the harder dataset (RGB), both `v16` and `v4` maintain their strong edge over `original_haverland`:
 
-1.  **Higher Accuracy**: `v4` achieves **82.9%** accuracy compared to the original's **81.7%**.
-2.  **Dramatically Smaller Memory Footprint**: `v4` drops to **69.5 KB** while the original is **228.2 KB**.
-3.  **Faster Inference**: `v4` processes **5759 inferences/second**, beating the original's **4395 inferences/second**.
-4.  **Fewer Parameters**: `v4` utilizes nearly 3 times fewer parameters (85k vs 257k).
+**`v16` under stress:**
+1.  **Higher Accuracy**: `v16` achieves **94.2%** accuracy compared to the original's **84.7%**.
+2.  **Smaller Memory Footprint**: `v16` drops to **139.7 KB** while the original is **228.8 KB**.
+
+**`v4` under stress:**
+1.  **Higher Accuracy**: `v4` achieves **90.5%** accuracy compared to the original's **84.7%**.
+2.  **Dramatically Smaller Memory Footprint**: `v4` drops to **87.1 KB** while the original is **228.8 KB**.
+3.  **Faster Inference**: `v4` processes **5766 inferences/second**, beating the original's **4190 inferences/second**.
 
 ## Usage
 
@@ -154,16 +165,17 @@ The table below summarizes the trade-offs between accuracy and model size across
 
 | Model Name | 10 cls Gray | 10 cls RGB | 100 cls Gray | 100 cls RGB | Application / Comment |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **v6** | 96.5% / 36.5KB | 96.1% / 46.9KB | 84.0% / 132.5KB | 85.7% / 160.8KB | Best balanced IoT model for 10cls Gray, extremely small memory footprint. |
-| **v3** | 98.0% / 69.4KB | 97.7% / 38.4KB | 76.5% / 74.6KB | 78.9% / 45.1KB | Fastest overall inference speed and best balanced for 100cls RGB. |
-| **v7** | 96.6% / 46.7KB | 96.7% / 47.2KB | 75.4% / 55.5KB | 75.0% / 56.0KB | Fastest inference speed under 100KB, optimal for speed-critical IoT. |
-| **v4** | 98.5% / 61.4KB | 98.7% / 78.3KB | 82.9% / 69.5KB | 86.1% / 87.1KB | Excellent accuracy while remaining under 100KB, great all-rounder. |
-| **mnist_quantization** | 97.0% / 63.6KB | 97.0% / 64.2KB | 79.2% / 71.7KB | 81.2% / 72.2KB | Standard quantization baseline model. |
-| **v15** | 99.1% / 79.3KB | 99.2% / 100.0KB | 85.4% / 86.0KB | 84.9% / 107.4KB | Best accuracy for models under 100KB in 10-class scenarios. |
-| **v17** | 99.0% / 70.7KB | 98.8% / 71.0KB | 82.6% / 80.2KB | 82.2% / 80.5KB | Ultra-efficient GhostNet-inspired alternative with solid accuracy. |
-| **v16** | 99.2% / 128.6KB | 99.2% / 128.8KB | 88.4% / 139.5KB | 89.5% / 139.7KB | High accuracy MobileNetV2-based model, but larger footprint. |
-| **original_haverland** | 98.2% / 203.3KB | 98.2% / 203.8KB | 81.7% / 228.2KB | 82.0% / 228.8KB | Legacy baseline, superseded by v4 and newer variants. |
-| **v12** | 99.3% / 406.7KB | 99.3% / 407.3KB | 89.2% / 414.8KB | 89.3% / 415.4KB | Best overall absolute accuracy under 1MB. Not suitable for constrained IoT. |
+| **v6** | 96.5% / 36.5KB | 96.3% / 46.9KB | 84.0% / 132.5KB | 90.5% / 160.8KB | Best balanced IoT model for 10cls Gray, extremely small memory footprint. |
+| **v3** | 98.0% / 69.4KB | 97.3% / 38.4KB | 76.5% / 74.6KB | 83.5% / 45.1KB | Fast overall inference speed and best balanced for 100cls RGB. |
+| **v7** | 96.6% / 46.7KB | 97.0% / 47.2KB | 75.4% / 55.5KB | 80.6% / 56.0KB | Fastest inference speed under 100KB, optimal for speed-critical IoT. |
+| **v4** | 98.5% / 61.4KB | 98.8% / 78.3KB | 82.9% / 69.5KB | 90.5% / 87.1KB | Excellent accuracy while remaining under 100KB, great all-rounder. |
+| **v15** | 99.1% / 79.3KB | 98.9% / 100.0KB | 85.4% / 86.0KB | 91.4% / 107.4KB | Best accuracy for models under 100KB in 10-class scenarios. |
+| **v17** | 99.0% / 70.7KB | 98.7% / 71.0KB | 82.6% / 80.2KB | 88.5% / 80.5KB | Ultra-efficient GhostNet-inspired alternative with solid accuracy. |
+| **v16** | 99.2% / 128.6KB | 99.2% / 128.8KB | 88.4% / 139.5KB | 94.2% / 139.7KB | High accuracy MobileNetV2-based model, excellent under stress. |
+| **v18** | 98.9% / 97.1KB | 99.0% / 97.4KB | 90.2% / 109.4KB | 90.4% / 109.7KB | New variant with very strong performance hovering around 100KB. |
+| **v19** | 98.9% / 131.9KB | 98.8% / 132.2KB | 91.6% / 145.6KB | 92.4% / 146.0KB | New high-capacity variant built for challenging 100-class scenarios. |
+| **original_haverland** | 98.2% / 203.3KB | 96.6% / 203.8KB | 81.7% / 228.2KB | 84.7% / 228.8KB | Legacy baseline, superseded by v16 and newer variants. |
+| **v12** | 99.3% / 406.7KB | 98.3% / 407.3KB | 89.2% / 414.8KB | 89.4% / 415.4KB | Best overall absolute accuracy under 1MB. Not suitable for constrained IoT. |
 | **high_accuracy_validator** | N/A | N/A | N/A | 91.9% / 3149.7KB | PC-only large model validator, highest absolute accuracy found. |
 
 ## Related Projects
