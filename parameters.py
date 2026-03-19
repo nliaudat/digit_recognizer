@@ -159,14 +159,14 @@ def update_derived_parameters():
             'type': 'label_file', 
             'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
             'path': 'datasets/real_integra', 
-            'weight': 0.7,
+            'weight': 1.0,
         },
         {
             'name': f'failed_predictions_{NB_CLASSES}',
             'type': 'label_file', 
             'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
             'path': f'datasets/failed_predictions_{NB_CLASSES}', 
-            'weight': 1.3,
+            'weight': 1.9,
         },
         {
             'name': 'static_augmentation',
@@ -175,6 +175,14 @@ def update_derived_parameters():
             'path': 'datasets/static_augmentation', 
             'weight': 0.6,
         },
+        {
+            'name': f'GWF_watermeter',
+            'type': 'label_file', 
+            'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
+            'path': f'datasets/GWF_watermeter', 
+            'weight': 1.0,
+        },
+               
     ]
 
 # Initial call to set defaults
