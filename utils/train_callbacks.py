@@ -211,7 +211,8 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     callbacks.append(csv_logger)
     
     # Intelligent Focal Loss Controller
-    if params.LOSS_TYPE in ["focal_loss", "IntelligentFocalLossController"]:
+    is_focal = params.LOSS_TYPE in ["focal_loss", "IntelligentFocalLossController"]
+    if is_focal and getattr(params, 'MODEL_ARCHITECTURE', '') != "original_haverland":
         from utils.train_helpers import IntelligentFocalLossController
         callbacks.append(
             IntelligentFocalLossController(
