@@ -43,6 +43,8 @@ AVAILABLE_MODELS = [
     # "digit_recognizer_v22", # IoT Spatial MobileNetV2 with 2D Positional Encoding (10-Class RGB <200KB limit)
     "digit_recognizer_v23", # Luminance Grayscale with Fixed Conv2D Weights (Auto convert to grayscale) (Train with RGB images)
     "digit_recognizer_v24", # v23 + Adaptive Contrast Normalization for Light/Dark Backgrounds
+    "digit_recognizer_v25", # 10 classes only ! v24 + Multi-head Transition-Aware (need to change the transition rule in C++ code)
+    "digit_recognizer_v26", # 10 classes only ! v25 + Learnable Soft-Binarization (threshold trained, sharpness=10, TFLite Micro compatible)
     # "esp_quantization_ready", # ~70kB | Minimal Depthwise CNN for smooth INT8
     # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
     # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
@@ -50,7 +52,7 @@ AVAILABLE_MODELS = [
     # "original_haverland", # 228.8kB / 79.10% | baseline
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v23" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "digit_recognizer_v25" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
