@@ -1,6 +1,6 @@
 # models/digit_recognizer_v25.py
 """
-digit_recognizer_v25 – Transition-Aware Water Meter Digit Recognizer
+digit_recognizer_v25 – 10 classes only ! Transition-Aware Water Meter Digit Recognizer
 ====================================================================
 Design goal: Recognize digits from water meters where the wheel can be
 between two numbers (e.g., 5.5 showing both 5 and 6). Uses transition
