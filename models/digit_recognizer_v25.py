@@ -62,8 +62,12 @@ try:
 except ImportError:
     QAT_AVAILABLE = False
 
-# Import adaptive contrast normalization from v24 (TFLite Micro compatible)
-from digit_recognizer_v24 import AdaptiveContrastNormalization
+# Support both: imported as 'models.digit_recognizer_v25' (model_factory / Docker)
+# and run directly as 'python digit_recognizer_v25.py' (local dev)
+try:
+    from .digit_recognizer_v24 import AdaptiveContrastNormalization
+except ImportError:
+    from digit_recognizer_v24 import AdaptiveContrastNormalization
 
 
 # ============================================================================
