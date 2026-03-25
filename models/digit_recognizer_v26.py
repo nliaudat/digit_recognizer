@@ -50,15 +50,26 @@ try:
 except ImportError:
     QAT_AVAILABLE = False
 
-# Reuse layers and utilities from v24/v25 (no code duplication)
-from digit_recognizer_v24 import AdaptiveContrastNormalization
-from digit_recognizer_v25 import (
-    _luminance_layer,
-    _build_v25_backbone,
-    TransitionAwareLoss,
-    generate_transitional_mnist,
-    create_transition_dataset,
-)
+# Support both: imported as 'models.digit_recognizer_v26' (model_factory / Docker)
+# and run directly as 'python digit_recognizer_v26.py' (local dev)
+try:
+    from .digit_recognizer_v24 import AdaptiveContrastNormalization
+    from .digit_recognizer_v25 import (
+        _luminance_layer,
+        _build_v25_backbone,
+        TransitionAwareLoss,
+        generate_transitional_mnist,
+        create_transition_dataset,
+    )
+except ImportError:
+    from digit_recognizer_v24 import AdaptiveContrastNormalization
+    from digit_recognizer_v25 import (
+        _luminance_layer,
+        _build_v25_backbone,
+        TransitionAwareLoss,
+        generate_transitional_mnist,
+        create_transition_dataset,
+    )
 
 
 # ============================================================================
