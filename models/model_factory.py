@@ -91,6 +91,47 @@ def get_model_info(model_name=None):
             all_info[model_name] = get_model_info(model_name)
         return all_info
 
+def _compile_multihead_model(model, optimizer):
+    """
+    Compile a multi-head transition model (v25, v26).
+    Detected automatically when the model has more than one output tensor.
+
+    Expected output names (by Keras layer name):
+        digit_probs      → sparse_categorical_crossentropy  (weight 1.0)
+        digit_confidence → binary_crossentropy              (weight 0.1)
+        transition_prob  → binary_crossentropy              (weight 0.5)
+        transition_dir   → binary_crossentropy              (weight 0.5)
+
+    Any output not in the map above gets binary_crossentropy with weight 0.1.
+    """
+    _LOSS_MAP = {
+        'digit_probs':      ('sparse_categorical_crossentropy', 1.0),
+        'digit_confidence': ('binary_crossentropy',             0.1),
+        'transition_prob':  ('binary_crossentropy',             0.5),
+        'transition_dir':   ('binary_crossentropy',             0.5),
+    }
+
+    output_names = model.output_names          # e.g. ['digit_probs', 'digit_confidence', ...]
+    loss_dict    = {}
+    weight_dict  = {}
+    for name in output_names:
+        loss_fn, weight = _LOSS_MAP.get(name, ('binary_crossentropy', 0.1))
+        loss_dict[name]   = loss_fn
+        weight_dict[name] = weight
+
+    model.compile(
+        optimizer=optimizer,
+        loss=loss_dict,
+        loss_weights=weight_dict,
+        metrics={'digit_probs': ['accuracy']},
+    )
+
+    print("✅ Multi-head model compiled:")
+    for name in output_names:
+        print(f"   - {name}: loss={loss_dict[name]}, weight={weight_dict[name]}")
+    return model
+
+
 def compile_model(model, loss_type='sparse'):
     """Compile model with comprehensive hyperparameter support"""
     
@@ -254,11 +295,16 @@ def compile_model(model, loss_type='sparse'):
     # COMPILE MODEL
     # ==========================================================================
     
-    model.compile(
-        optimizer=optimizer,
-        loss=loss,
-        metrics=metrics
-    )
+    # --- Multi-head detection (v25, v26 and future transition models) ---
+    if hasattr(model, 'outputs') and len(model.outputs) > 1:
+        print("🔀 Multi-head model detected — using per-output loss compilation")
+        _compile_multihead_model(model, optimizer)
+    else:
+        model.compile(
+            optimizer=optimizer,
+            loss=loss,
+            metrics=metrics
+        )
     
     print(f"✅ Model compiled successfully with:")
     print(f"   - Optimizer: {params.OPTIMIZER_TYPE}")
