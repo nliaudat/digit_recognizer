@@ -38,9 +38,11 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v17", # 80.5kB / 80.69% | IoT GhostNet-inspired — ultra-efficient ~50KB
     "digit_recognizer_v18", # GhostNet 10-Class IoT optimized model pushing >90% accuracy <100KB INT8
     "digit_recognizer_v19", # GhostNet scale-up hitting 92% accurate baseline for 100-class
-    "digit_recognizer_v20", # GhostNet 100-Class IoT limit-pusher (<1.5MB) with 2D Positional Encoding & Dual Attention
-    "digit_recognizer_v21", # PC/GPU-Only Rotary Positional Encoding & Adaptive Attention limit pusher (>99.5% target)
-    "digit_recognizer_v22", # IoT Spatial MobileNetV2 with 2D Positional Encoding (10-Class RGB <200KB limit)
+    # "digit_recognizer_v20", # GhostNet 100-Class IoT limit-pusher (<1.5MB) with 2D Positional Encoding & Dual Attention
+    # "digit_recognizer_v21", # PC/GPU-Only Rotary Positional Encoding & Adaptive Attention limit pusher (>99.5% target)
+    # "digit_recognizer_v22", # IoT Spatial MobileNetV2 with 2D Positional Encoding (10-Class RGB <200KB limit)
+    "digit_recognizer_v23", # Luminance Grayscale with Fixed Conv2D Weights (Auto convert to grayscale) (Train with RGB images)
+    "digit_recognizer_v24", # v23 + Adaptive Contrast Normalization for Light/Dark Backgrounds
     # "esp_quantization_ready", # ~70kB | Minimal Depthwise CNN for smooth INT8
     # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
     # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
@@ -48,7 +50,7 @@ AVAILABLE_MODELS = [
     # "original_haverland", # 228.8kB / 79.10% | baseline
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v22" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "digit_recognizer_v23" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
@@ -145,42 +147,42 @@ def update_derived_parameters():
             'type': 'label_file', 
             'labels': f'labels_{NB_CLASSES}_shuffle.txt',
             'path': 'datasets/Tenth-of-step-of-a-meter-digit', 
-            'weight': 1.0,
+            'weight': 1.0,  # ~22.6k images (Baseline)
         },
         {
             'name': 'real_integra_bad_predictions',
             'type': 'label_file', 
             'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
             'path': 'datasets/real_integra_bad_predictions', 
-            'weight': 1.9,
+            'weight': 4.0,  # ~1.8k images (Corrected bad predictions, highly weighted)
         },
         {
             'name': 'real_integra',
             'type': 'label_file', 
             'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
             'path': 'datasets/real_integra', 
-            'weight': 1.0,
+            'weight': 2.0,  # ~1.8k images (Small dataset, weighted for balance)
         },
         {
             'name': f'failed_predictions_{NB_CLASSES}',
             'type': 'label_file', 
             'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
             'path': f'datasets/failed_predictions_{NB_CLASSES}', 
-            'weight': 1.9,
+            'weight': 4.0,  # ~1k to 4.3k images (Corrected bad predictions, highly weighted)
         },
         {
             'name': 'static_augmentation',
             'type': 'label_file', 
             'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
             'path': 'datasets/static_augmentation', 
-            'weight': 0.6,
+            'weight': 0.8,  # ~29k images (Large dataset, slightly down-weighted)
         },
         {
             'name': f'GWF_watermeter',
             'type': 'label_file', 
             'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
             'path': f'datasets/GWF_watermeter', 
-            'weight': 1.0,
+            'weight': 2.5,  # ~0.8k images (Very small dataset, up-weighted)
         },
                
     ]
