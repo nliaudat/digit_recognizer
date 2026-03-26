@@ -246,20 +246,8 @@ def create_digit_recognizer_v23_adaptive():
     """
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
     
-    # Dynamically handle input based on static channel count
-    input_channels = params.INPUT_SHAPE[-1]
-    
-    if input_channels == 1:
-        x = inputs
-    elif input_channels == 3:
-        x = create_luminance_grayscale_conv(inputs)
-    else:
-        # Use Lambda layer for fallback to maintain functional API compatibility
-        print(f"Warning: {input_channels} channels, using average grayscale fallback")
-        x = tf.keras.layers.Lambda(
-            lambda t: tf.reduce_mean(t, axis=-1, keepdims=True),
-            name='dynamic_grayscale_fallback'
-        )(inputs)
+    # create_luminance_grayscale_conv handles 1-channel, 3-channel, and fallback robustly
+    x = create_luminance_grayscale_conv(inputs)
     
     # Apply common backbone
     x = _build_v23_backbone(x)
