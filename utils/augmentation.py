@@ -18,12 +18,21 @@ class PolarityInversionAugmentation(tf.keras.layers.Layer):
     def call(self, inputs, training=None):
         if not training:
             return inputs
-        batch_size = tf.shape(inputs)[0]
-        mask = tf.cast(
-            tf.random.uniform([batch_size, 1, 1, 1]) < self.probability,
-            tf.float32
-        )
-        return (1.0 - mask) * inputs + mask * (1.0 - inputs)
+        input_rank = inputs.shape.rank  # static rank if known
+        if input_rank is None:
+            input_rank = tf.rank(inputs)
+        if input_rank == 3:
+            # Single image (H, W, C) — from augmentation pipeline per-image mapping
+            flip = tf.cast(tf.random.uniform(()) < self.probability, tf.float32)
+            return (1.0 - flip) * inputs + flip * (1.0 - inputs)
+        else:
+            # Batched (B, H, W, C) — from model forward pass
+            batch_size = tf.shape(inputs)[0]
+            mask = tf.cast(
+                tf.random.uniform([batch_size, 1, 1, 1]) < self.probability,
+                tf.float32
+            )
+            return (1.0 - mask) * inputs + mask * (1.0 - inputs)
 
     def get_config(self):
         config = super().get_config()
