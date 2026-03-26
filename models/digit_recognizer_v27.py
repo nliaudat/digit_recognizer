@@ -58,6 +58,10 @@ except ImportError:
         def call(self, inputs, training=None):
             if not training:
                 return inputs
+            input_rank = inputs.shape.rank
+            if input_rank == 3:
+                flip = tf.cast(tf.random.uniform(()) < self.probability, tf.float32)
+                return (1.0 - flip) * inputs + flip * (1.0 - inputs)
             batch_size = tf.shape(inputs)[0]
             mask = tf.cast(
                 tf.random.uniform([batch_size, 1, 1, 1]) < self.probability,
