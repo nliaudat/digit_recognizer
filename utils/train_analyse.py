@@ -67,8 +67,11 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
     
     # Use tqdm for progress tracking
     for i in tqdm(range(total_samples), desc="Evaluating TFLite", leave=False):
-        # Prepare input
+        # Prepare input — convert TF tensor slice to numpy if needed
         input_data = x_test_analysis[i:i+1]
+        if hasattr(input_data, 'numpy'):
+            input_data = input_data.numpy()
+        input_data = np.array(input_data, dtype=np.float32)  # ensure float32 before conversion
         
         # Convert input based on model requirements
         if input_dtype == np.int8:
@@ -97,11 +100,14 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
         # Get prediction
         predicted_class = np.argmax(output_data)
         
-        # Get true class (handle both categorical and sparse)
+        # Get true class (handle both categorical and sparse, and TF tensors)
+        true_label = y_test_analysis[i]
+        if hasattr(true_label, 'numpy'):
+            true_label = true_label.numpy()
         if len(y_test_analysis.shape) > 1 and y_test_analysis.shape[1] > 1:
-            true_class = np.argmax(y_test_analysis[i])
+            true_class = int(np.argmax(true_label))
         else:
-            true_class = y_test_analysis[i]
+            true_class = int(true_label)
         
         if predicted_class == true_class:
             correct_predictions += 1
