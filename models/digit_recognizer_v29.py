@@ -260,14 +260,13 @@ def create_qat_model_v29(model=None):
 
 if __name__ == "__main__":
     print("=== Digit Recognizer v29 ===\n")
-    params.INPUT_SHAPE = (28, 28, 1)
     params.NB_CLASSES  = 100
 
     model = create_digit_recognizer_v29()
     model.summary()
 
     # Test dummy inference
-    x = np.random.rand(2, 28, 28, 1).astype(np.float32)
+    x = np.random.rand(2, *params.INPUT_SHAPE).astype(np.float32)
     pred = model.predict(x, verbose=0)
     
     # Check intermediate

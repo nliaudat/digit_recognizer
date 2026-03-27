@@ -175,21 +175,18 @@ class DoGEdgeDetection(tf.keras.layers.Layer):
 
 def create_digit_recognizer_v28(use_batch_norm=False, use_edge_fusion=False):
     """
-    Create v28 model.
-
+    Constructs the v28 model with direct binarization and polarity normalization.
+    
+    Pipeline:
+      1. Input: (32, 20, N) image (RGB, Grayscale, or Hybrid)
+      2. Preprocessing: Luminance -> AdaptiveMeanBinarization -> PolarityNormalization
+      3. Optional: DoGEdgeDetection (Edge Fusion)
+      4. Multi-branch feature extraction with shared weights
+      5. Softmax output for 10 or 100 classes
+      
     Args:
         use_batch_norm:  Add BatchNorm after each Conv (default False for ESP32)
         use_edge_fusion: Concatenate DoG edge map with binary image before backbone.
-                         Gives backbone both binary shape info AND edge positions.
-                         Adds ~50 frozen weights, ~0.5 KB. No accuracy risk.
-
-    Pipeline:
-        Input → Luminance → PolarityAug → SoftContrastNorm
-              → HardBinarization [→ DoGEdgeDetection → Concat(binary, edges)]
-              → AdaptiveBackbone → Dense(NB_CLASSES, softmax)
-
-    Frozen:   luminance_grayscale, soft_contrast, dog_edges (if enabled)
-    Trainable: hard_binarization.threshold, backbone, dense
     """
     filters, dense_units, _ = _get_adaptive_config()
     print(f"v28 config: classes={params.NB_CLASSES}  filters={filters}  "
@@ -287,7 +284,6 @@ def apply_transition_rule(class_100):
 
 if __name__ == "__main__":
     print("=== Digit Recognizer v28 — Hard Binarization ===\n")
-    params.INPUT_SHAPE = (28, 28, 1)
     params.NB_CLASSES  = 100
 
     for edge_fusion in [False, True]:
@@ -297,7 +293,7 @@ if __name__ == "__main__":
         model.summary()
 
         # Verify binarization: output should be ~{0,1}
-        x = np.random.rand(2, 28, 28, 1).astype(np.float32)
+        x = np.random.rand(2, *params.INPUT_SHAPE).astype(np.float32)
         pred = model.predict(x, verbose=0)
         cls  = int(np.argmax(pred[0]))
         digit, dec, up = apply_transition_rule(cls)

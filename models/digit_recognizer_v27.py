@@ -360,13 +360,13 @@ if __name__ == "__main__":
 
     for nb_cls in [10, 100]:
         print(f"\n{'─'*55}")
-        params.INPUT_SHAPE = (28, 28, 1)
+        # Use project standards
         params.NB_CLASSES  = nb_cls
 
         model = create_digit_recognizer_v27()
         model.summary()
 
-        x    = np.random.rand(2, 28, 28, 1).astype(np.float32)
+        x    = np.random.rand(2, *params.INPUT_SHAPE).astype(np.float32)
         pred = model.predict(x, verbose=0)
         cls  = int(np.argmax(pred[0]))
 

@@ -1,16 +1,8 @@
 import os
 import sys
 
-# 1. Remove the local 'utils' directory from sys.path to prevent 'logging.py'
-#    from shadowing Python's standard 'logging' library when TF is imported.
-utils_dir = os.path.dirname(os.path.abspath(__file__))
-if sys.path and sys.path[0] == utils_dir:
-    sys.path.pop(0)
-while utils_dir in sys.path:
-    sys.path.remove(utils_dir)
-
-# 2. Ensure the project root is in PYTHONPATH for absolute imports
-project_root = os.path.dirname(utils_dir)
+# Ensure project root is in sys.path when running from within utils/
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
@@ -24,6 +16,36 @@ import argparse
 from models.model_factory import create_model, compile_model
 from utils.preprocess import preprocess_for_inference
 
+
+# ============================================================================
+# CUSTOM LAYERS (Copied from models to avoid dependencies)
+# ============================================================================
+
+class AdaptiveHybridBinarization(tf.keras.layers.Layer):
+    """
+    Hybrid approach: outputs both binary (for shape) AND soft gradient (for transition).
+    Copied from models.digit_recognizer_v29 to avoid circular or missing dependencies.
+    """
+    def __init__(self, preserve_gradient=True, **kwargs):
+        super().__init__(**kwargs)
+        self.preserve_gradient = preserve_gradient
+
+    def call(self, inputs):
+        mean = tf.reduce_mean(inputs, axis=[1, 2, 3], keepdims=True)
+        binary_hard = tf.cast(inputs > mean, tf.float32)
+        binary_ste  = inputs + tf.stop_gradient(binary_hard - inputs)
+        
+        if not self.preserve_gradient:
+            return binary_ste
+            
+        std = tf.math.reduce_std(inputs, axis=[1, 2, 3], keepdims=True)
+        soft_gradient = tf.sigmoid((inputs - mean) / (std + 1e-2))
+        return tf.concat([binary_ste, soft_gradient], axis=-1)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"preserve_gradient": self.preserve_gradient})
+        return config
 
 
 class GradCAM:
@@ -216,10 +238,9 @@ def load_model_and_weights(model_arch, weights_path=None):
         # Prepare custom objects
         custom_objects = {}
         try:
-            from models.digit_recognizer_v29 import AdaptiveHybridBinarization, LuminanceGrayscale
             from utils.losses import DynamicSparseFocalLoss, sparse_focal_loss
+            # Use the local class definition to avoid dependency on v29 model file
             custom_objects['AdaptiveHybridBinarization'] = AdaptiveHybridBinarization
-            custom_objects['LuminanceGrayscale'] = LuminanceGrayscale
             custom_objects['DynamicSparseFocalLoss'] = DynamicSparseFocalLoss
             custom_objects['sparse_focal_loss'] = sparse_focal_loss
             
