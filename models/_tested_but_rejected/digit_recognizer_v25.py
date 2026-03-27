@@ -244,13 +244,14 @@ class TransitionAwareLoss(tf.keras.losses.Loss):
     For Keras .compile(), use separate losses per output (see docstring above).
     """
 
-    def __init__(self, digit_weight=1.0, transition_weight=0.5, **kwargs):
+    def __init__(self, digit_weight=1.0, transition_weight=0.5, confidence_weight=0.1, **kwargs):
         super().__init__(**kwargs)
         self.digit_weight = digit_weight
         self.transition_weight = transition_weight
+        self.confidence_weight = confidence_weight
 
     def call(self, y_true, y_pred):
-        digit_probs, _, transition_prob, transition_dir = y_pred
+        digit_probs, digit_confidence, transition_prob, transition_dir = y_pred
 
         digit_target = tf.cast(y_true[..., 0], tf.int32)
         trans_target = y_true[..., 1]
@@ -267,16 +268,24 @@ class TransitionAwareLoss(tf.keras.losses.Loss):
             tf.expand_dims(dir_target, -1), transition_dir
         )
         dir_loss = dir_loss * trans_target  # Mask non-transitional samples
+        
+        # Confidence target: 1.0 if not in transition, 0.0 if in transition
+        conf_target = 1.0 - trans_target
+        conf_loss = tf.keras.losses.binary_crossentropy(
+            tf.expand_dims(conf_target, -1), digit_confidence
+        )
 
-        return (self.digit_weight   * digit_loss +
+        return (self.digit_weight      * digit_loss +
                 self.transition_weight * trans_loss +
-                self.transition_weight * dir_loss)
+                self.transition_weight * dir_loss +
+                self.confidence_weight * conf_loss)
 
     def get_config(self):
         config = super().get_config()
         config.update({
             'digit_weight': self.digit_weight,
             'transition_weight': self.transition_weight,
+            'confidence_weight': self.confidence_weight,
         })
         return config
 

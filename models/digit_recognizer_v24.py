@@ -79,7 +79,7 @@ class AdaptiveContrastNormalization(tf.keras.layers.Layer):
     - Added support for dynamic batch size
     """
     
-    def __init__(self, invert_threshold=0.5, stretch_contrast=True, epsilon=1e-6, **kwargs):
+    def __init__(self, invert_threshold=0.5, stretch_contrast=True, epsilon=1e-2, **kwargs):
         super().__init__(**kwargs)
         self.invert_threshold = invert_threshold
         self.stretch_contrast = stretch_contrast
@@ -151,7 +151,7 @@ class RobustContrastNormalization(tf.keras.layers.Layer):
     - Added proper build() implementation
     """
     
-    def __init__(self, lower_percentile=10, upper_percentile=90, epsilon=1e-6, **kwargs):
+    def __init__(self, lower_percentile=10, upper_percentile=90, epsilon=1e-2, **kwargs):
         super().__init__(**kwargs)
         self.lower_percentile = lower_percentile
         self.upper_percentile = upper_percentile
@@ -213,7 +213,7 @@ class ContrastAwareInput(tf.keras.layers.Layer):
     - Added epsilon for numerical stability
     """
     
-    def __init__(self, invert_threshold=0.5, stretch_contrast=True, epsilon=1e-6, **kwargs):
+    def __init__(self, invert_threshold=0.5, stretch_contrast=True, epsilon=1e-2, **kwargs):
         super().__init__(**kwargs)
         self.invert_threshold = invert_threshold
         self.stretch_contrast = stretch_contrast
@@ -289,64 +289,67 @@ class ContrastAwareInput(tf.keras.layers.Layer):
 
 def _build_v24_backbone(x, use_batch_norm=False):
     """
-    Enhanced backbone with proper name scoping to avoid conflicts
+    Enhanced backbone with adaptive capacity based on NB_CLASSES.
+    10cls: [20,36,48,56] dense=64  |  100cls: [32,58,77,90] dense=102
     """
-    # Use name_scope for better graph organization
     with tf.name_scope('backbone'):
+        # Adaptive capacity
+        scale = max(1.0, (params.NB_CLASSES / 10) ** 0.45)
+        f     = [max(int(fi * scale), fi) for fi in [20, 36, 48, 56]]
+        d     = max(int(64 * scale), 64)
+
         # Layer 1
         x = tf.keras.layers.Conv2D(
-            20, (3, 3), padding='same',
+            f[0], (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
-            name='conv1_20f'
+            name='conv1_{}f'.format(f[0])
         )(x)
         if use_batch_norm:
             x = tf.keras.layers.BatchNormalization(name='bn1')(x)
         x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
         x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
-        
+
         # Layer 2
         x = tf.keras.layers.Conv2D(
-            36, (3, 3), padding='same',
+            f[1], (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
-            name='conv2_36f'
+            name='conv2_{}f'.format(f[1])
         )(x)
         if use_batch_norm:
             x = tf.keras.layers.BatchNormalization(name='bn2')(x)
         x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
         x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
-        
+
         # Layer 3
         x = tf.keras.layers.Conv2D(
-            48, (3, 3), padding='same',
+            f[2], (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
-            name='conv3_48f'
+            name='conv3_{}f'.format(f[2])
         )(x)
         if use_batch_norm:
             x = tf.keras.layers.BatchNormalization(name='bn3')(x)
         x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
-        
+
         # Layer 4
         x = tf.keras.layers.Conv2D(
-            56, (3, 3), padding='same',
+            f[3], (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
-            name='conv4_56f'
+            name='conv4_{}f'.format(f[3])
         )(x)
         if use_batch_norm:
             x = tf.keras.layers.BatchNormalization(name='bn4')(x)
         x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
-        
-        # Global pooling
+
+        # Global pooling + dense
         x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
-        
-        # Dense layer with dropout
-        x = tf.keras.layers.Dense(64, activation=None, name='feature_dense')(x)
+        x = tf.keras.layers.Dense(d, activation=None, name='feature_dense')(x)
         x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
         x = tf.keras.layers.Dropout(0.25, name='dropout')(x)
-    
+
     return x
 
 

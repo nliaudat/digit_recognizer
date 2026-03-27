@@ -369,22 +369,35 @@ class TFLiteModelManager:
             correct = 0
             total = min(100, len(x_test))  # Quick test with 100 samples
             
+            # Pre-detect x_test dtype so we know if it's already quantized
+            x_test_arr = np.array(x_test[:total]) if hasattr(x_test, '__len__') else x_test[:total]
+            x_is_float = x_test_arr.dtype in [np.float32, np.float64]
+            
             for i in range(total):
                 # Prepare input based on model requirements
-                input_data = x_test[i:i+1]
-                if input_details[0]['dtype'] == np.int8:
-                    input_data = (input_data * 255 - 128).astype(np.int8)
-                elif input_details[0]['dtype'] == np.uint8:
-                    input_data = (input_data * 255).astype(np.uint8)
+                input_data = x_test_arr[i:i+1].astype(np.float32)  # work in float first
+                if x_is_float and input_data.max() <= 1.0:
+                    # float [0,1] input — convert as needed
+                    if input_details[0]['dtype'] == np.int8:
+                        input_data = (input_data * 255.0 - 128.0).astype(np.int8)
+                    elif input_details[0]['dtype'] == np.uint8:
+                        input_data = (input_data * 255.0).astype(np.uint8)
                 else:
-                    input_data = input_data.astype(np.float32)
+                    # already uint8 [0,255] — just cast to expected dtype
+                    if input_details[0]['dtype'] == np.int8:
+                        input_data = (input_data - 128.0).astype(np.int8)
+                    elif input_details[0]['dtype'] == np.uint8:
+                        input_data = input_data.astype(np.uint8)
                 
                 interpreter.set_tensor(input_details[0]['index'], input_data)
                 interpreter.invoke()
                 output = interpreter.get_tensor(output_details[0]['index'])
                 
                 pred = np.argmax(output)
-                true = np.argmax(y_test[i]) if len(y_test.shape) > 1 else y_test[i]
+                true_label = y_test[i]
+                if hasattr(true_label, 'numpy'):
+                    true_label = true_label.numpy()
+                true = int(np.argmax(true_label)) if len(y_test.shape) > 1 else int(true_label)
                 
                 if pred == true:
                     correct += 1

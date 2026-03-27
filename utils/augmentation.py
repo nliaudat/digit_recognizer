@@ -4,6 +4,41 @@ import numpy as np
 import parameters as params
 from utils.data_pipeline import create_tf_dataset_from_arrays
 
+
+class PolarityInversionAugmentation(tf.keras.layers.Layer):
+    """
+    Random per-sample polarity inversion: output = 1 - input (with 50% probability).
+    Applies per image in the batch independently, training only — no-op at inference.
+    Helps all models handle both light-on-dark and dark-on-light images.
+    """
+    def __init__(self, probability=0.5, **kwargs):
+        super().__init__(**kwargs)
+        self.probability = probability
+
+    def call(self, inputs, training=None):
+        if not training:
+            return inputs
+        input_rank = inputs.shape.rank  # static rank if known
+        if input_rank is None:
+            input_rank = tf.rank(inputs)
+        if input_rank == 3:
+            # Single image (H, W, C) — from augmentation pipeline per-image mapping
+            flip = tf.cast(tf.random.uniform(()) < self.probability, tf.float32)
+            return (1.0 - flip) * inputs + flip * (1.0 - inputs)
+        else:
+            # Batched (B, H, W, C) — from model forward pass
+            batch_size = tf.shape(inputs)[0]
+            mask = tf.cast(
+                tf.random.uniform([batch_size, 1, 1, 1]) < self.probability,
+                tf.float32
+            )
+            return (1.0 - mask) * inputs + mask * (1.0 - inputs)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({'probability': self.probability})
+        return config
+
 # # -------------------------------------------------------------
 # #  NEW helper that augments a *batched* tensor image by image
 # # -------------------------------------------------------------
@@ -59,6 +94,15 @@ def create_augmentation_pipeline():
         )
     )
     
+    # Polarity inversion — 50% chance of flipping pixel polarity (1 - x)
+    if getattr(params, 'AUGMENTATION_POLARITY_INVERSION', False):
+        augmentation_layers.append(
+            PolarityInversionAugmentation(
+                probability=0.5,
+                name='polarity_inversion'
+            )
+        )
+
     # Rotation
     if params.AUGMENTATION_ROTATION_RANGE > 0:
         rotation_factor = params.AUGMENTATION_ROTATION_RANGE / 360.0
@@ -209,6 +253,7 @@ def get_augmentation_summary():
         'contrast_range': params.AUGMENTATION_CONTRAST_RANGE,
         'horizontal_flip': params.AUGMENTATION_HORIZONTAL_FLIP,
         'vertical_flip': params.AUGMENTATION_VERTICAL_FLIP,
+        'polarity_inversion': getattr(params, 'AUGMENTATION_POLARITY_INVERSION', False),
         'enabled': params.USE_DATA_AUGMENTATION
     }
     
@@ -241,7 +286,10 @@ def print_augmentation_summary():
     
     if summary['contrast_range'] > 0:
         print(f"   ✓ Contrast: {summary['contrast_range']}")
-    
+
+    if summary.get('polarity_inversion'):
+        print(f"   ✓ Polarity Inversion: Enabled (p=0.5)")
+
     if summary['horizontal_flip']:
         print(f"   ✓ Horizontal Flip: Enabled")
     
