@@ -291,6 +291,48 @@ def get_binarization_overlap(model, image_input):
     return None
 
 
+def find_best_weights(model_name):
+    """
+    Search for the best weights (.keras or .h5) for a given model architecture.
+    Looks in exported_models/ and finds the latest training directory.
+    """
+    import parameters as params
+    
+    # We want to check both the class-specific output dir and the general one
+    search_dirs = [params.OUTPUT_DIR, "exported_models"]
+    
+    found_weights = []
+    
+    for base_dir in search_dirs:
+        if not os.path.exists(base_dir):
+            continue
+            
+        # List all subdirectories
+        try:
+            subdirs = [os.path.join(base_dir, d) for d in os.listdir(base_dir) 
+                      if os.path.isdir(os.path.join(base_dir, d))]
+        except Exception:
+            continue
+        
+        for subdir in subdirs:
+            # Check if model_name is in the directory name
+            if model_name in os.path.basename(subdir):
+                # Look for best_model.keras or best_model.h5
+                for f in ['best_model.keras', 'best_model.h5']:
+                    f_path = os.path.join(subdir, f)
+                    if os.path.exists(f_path):
+                        # Use modification time to find the newest
+                        mtime = os.path.getmtime(f_path)
+                        found_weights.append((f_path, mtime))
+                        
+    if not found_weights:
+        return None
+        
+    # Sort by modification time descending
+    found_weights.sort(key=lambda x: x[1], reverse=True)
+    return found_weights[0][0]
+
+
 def visualize_attention(image_path, model, class_names=None, save_path=None):
     """
     Generate comprehensive attention visualization.
@@ -428,7 +470,17 @@ def main():
             class_names = json.load(f)
     
     print(f"Loading model: {args.model}")
-    model = load_model_and_weights(args.model, args.weights)
+    
+    weights_path = args.weights
+    if not weights_path:
+        print(f"No weights provided, searching for best weights for {args.model}...")
+        weights_path = find_best_weights(args.model)
+        if weights_path:
+            print(f"Auto-discovered weights: {weights_path}")
+        else:
+            print("No weights found in exported_models/. Using initialized weights.")
+            
+    model = load_model_and_weights(args.model, weights_path)
     
     result = visualize_attention(
         args.image, model, class_names, args.save
