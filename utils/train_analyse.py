@@ -310,6 +310,12 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
     x_train_analysis, y_train_analysis = get_analysis_samples(x_train, y_train)
     x_val_analysis, y_val_analysis = get_analysis_samples(x_val, y_val)
     
+    # Ensure numpy arrays for analysis functions like .min(), .max(), .sum()
+    if hasattr(x_train_analysis, 'numpy'): x_train_analysis = x_train_analysis.numpy()
+    if hasattr(y_train_analysis, 'numpy'): y_train_analysis = y_train_analysis.numpy()
+    if hasattr(x_val_analysis, 'numpy'): x_val_analysis = x_val_analysis.numpy()
+    if hasattr(y_val_analysis, 'numpy'): y_val_analysis = y_val_analysis.numpy()
+    
     # Check data shapes and types
     print("📊 Data Diagnostics:")
     print(f"   x_train shape: {x_train_analysis.shape}, dtype: {x_train_analysis.dtype}")
