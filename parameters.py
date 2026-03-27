@@ -256,9 +256,16 @@ DATASET_CACHE_DIR = os.environ.get("DATASET_CACHE_DIR", ".dataset_cache")
 
 # Data pipeline configuration
 USE_TF_DATA_PIPELINE = False
-TF_DATA_PARALLEL_CALLS = -1 if not hasattr(tf, 'data') else tf.data.AUTOTUNE
+
+try:
+    import tensorflow as tf
+    TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
+    TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
+except (ImportError, NameError, AttributeError):
+    TF_DATA_PARALLEL_CALLS = -1
+    TF_DATA_PREFETCH_SIZE = -1
+
 TF_DATA_SHUFFLE_BUFFER = 1000
-TF_DATA_PREFETCH_SIZE = -1 if not hasattr(tf, 'data') else tf.data.AUTOTUNE
 QUANTIZE_NUM_SAMPLES = 22000
 # TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
 # FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
