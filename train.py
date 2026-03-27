@@ -63,7 +63,7 @@ from utils.preprocess import (
     get_preprocessing_info,
 )
 from utils.data_pipeline import create_tf_dataset_from_arrays
-from utils.logging import log_print
+from utils.custom_logger import log_print
 from utils.multi_source_loader import clear_cache
 
 from utils.augmentation import (

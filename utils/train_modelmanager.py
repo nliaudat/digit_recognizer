@@ -16,7 +16,7 @@ from utils import (
     get_calibration_data,
     suppress_all_output,
 )
-from utils.logging import log_print
+from utils.custom_logger import log_print
 
 
 class TFLiteModelManager:

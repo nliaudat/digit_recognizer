@@ -8,7 +8,7 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.model_selection import train_test_split
 import parameters as params
-from utils.logging import log_print
+from utils.custom_logger import log_print
 
 # Global variable to cache loaded data (in-memory, single process)
 _loaded_data = None
