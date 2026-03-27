@@ -79,7 +79,7 @@ class AdaptiveContrastNormalization(tf.keras.layers.Layer):
     - Added support for dynamic batch size
     """
     
-    def __init__(self, invert_threshold=0.5, stretch_contrast=True, epsilon=1e-6, **kwargs):
+    def __init__(self, invert_threshold=0.5, stretch_contrast=True, epsilon=1e-2, **kwargs):
         super().__init__(**kwargs)
         self.invert_threshold = invert_threshold
         self.stretch_contrast = stretch_contrast
@@ -151,7 +151,7 @@ class RobustContrastNormalization(tf.keras.layers.Layer):
     - Added proper build() implementation
     """
     
-    def __init__(self, lower_percentile=10, upper_percentile=90, epsilon=1e-6, **kwargs):
+    def __init__(self, lower_percentile=10, upper_percentile=90, epsilon=1e-2, **kwargs):
         super().__init__(**kwargs)
         self.lower_percentile = lower_percentile
         self.upper_percentile = upper_percentile
@@ -213,7 +213,7 @@ class ContrastAwareInput(tf.keras.layers.Layer):
     - Added epsilon for numerical stability
     """
     
-    def __init__(self, invert_threshold=0.5, stretch_contrast=True, epsilon=1e-6, **kwargs):
+    def __init__(self, invert_threshold=0.5, stretch_contrast=True, epsilon=1e-2, **kwargs):
         super().__init__(**kwargs)
         self.invert_threshold = invert_threshold
         self.stretch_contrast = stretch_contrast

@@ -158,7 +158,7 @@ class DoGEdgeDetection(tf.keras.layers.Layer):
         mag    = tf.abs(dog)           # unsigned magnitude
         # Normalize per-image to [0, 1]
         max_val = tf.reduce_max(mag, axis=[1, 2, 3], keepdims=True)
-        return mag / (max_val + 1e-6)
+        return mag / (max_val + 1e-2)
 
     def compute_output_shape(self, input_shape):
         return input_shape

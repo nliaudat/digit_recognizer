@@ -91,7 +91,7 @@ class SoftContrastNormalization(tf.keras.layers.Layer):
     - TFLite Micro compatible: reduce_mean, reduce_std, sub, div, sigmoid
     """
 
-    def __init__(self, eps=1e-5, **kwargs):
+    def __init__(self, eps=1e-2, **kwargs):
         super().__init__(**kwargs)
         self.eps_val = eps
 

@@ -94,7 +94,7 @@ class AdaptiveHybridBinarization(tf.keras.layers.Layer):
         # We'll just pass the normalized continuous image centered around 0.5
         # so it's bounded similarly to the binary channel.
         std = tf.math.reduce_std(inputs, axis=[1, 2, 3], keepdims=True)
-        soft_gradient = tf.sigmoid((inputs - mean) / (std + 1e-5))
+        soft_gradient = tf.sigmoid((inputs - mean) / (std + 1e-2))
         
         # Concatenate binary + soft gradient
         # Shape: [batch, H, W, 2]
