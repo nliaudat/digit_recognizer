@@ -381,7 +381,7 @@ def visualize_attention(image_path, model, class_names=None, save_path=None):
     
     # Plotting
     cols = 3 if binarized is None else 4
-    fig, axes = plt.subplots(2, cols, figsize=(5 * cols, 10))
+    fig, axes = plt.subplots(2, cols, figsize=(2.5 * cols, 5))
     
     # Row 1: Original, Heatmap, Overlay, [Binarized CH0/CH1]
     axes[0, 0].imshow(original_img_rgb)
@@ -432,10 +432,8 @@ def visualize_attention(image_path, model, class_names=None, save_path=None):
     
     plt.tight_layout()
     
-    plt.tight_layout()
-    
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.savefig(save_path, dpi=100, bbox_inches='tight')
         print(f"Visualization saved to {save_path}")
     else:
         plt.show()
@@ -495,3 +493,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+# python utils/gradcam.py --model digit_recognizer_v4 --image "datasets/sample.jpg"
