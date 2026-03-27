@@ -43,6 +43,9 @@ AVAILABLE_MODELS = [
     # "digit_recognizer_v22", # IoT Spatial MobileNetV2 with 2D Positional Encoding (10-Class RGB <200KB limit)
     "digit_recognizer_v23", # Luminance Grayscale with Fixed Conv2D Weights (Auto convert to grayscale) (Train with RGB images)
     "digit_recognizer_v24", # v23 + Adaptive Contrast Normalization for Light/Dark Backgrounds
+    "digit_recognizer_v27", # v24 improvements: adaptive backbone + soft norm + soft binarize + polarity augmentation
+    "digit_recognizer_v28", # v27 + hard binarization (STE) + optional DoG edge fusion
+    "digit_recognizer_v29", # v28 + 2-channel hybrid processing (hard binarization + soft gradient preservation)
     # "digit_recognizer_v25", # 10 classes only ! v24 + Multi-head Transition-Aware (need to change the transition rule in C++ code)
     # "digit_recognizer_v26", # 10 classes only ! v25 + Learnable Soft-Binarization (threshold trained, sharpness=10, TFLite Micro compatible)
     # "esp_quantization_ready", # ~70kB | Minimal Depthwise CNN for smooth INT8
@@ -52,7 +55,7 @@ AVAILABLE_MODELS = [
     # "original_haverland", # 228.8kB / 79.10% | baseline
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v25" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "digit_recognizer_v29" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
@@ -253,9 +256,9 @@ DATASET_CACHE_DIR = os.environ.get("DATASET_CACHE_DIR", ".dataset_cache")
 
 # Data pipeline configuration
 USE_TF_DATA_PIPELINE = False
-TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
+TF_DATA_PARALLEL_CALLS = -1 if not hasattr(tf, 'data') else tf.data.AUTOTUNE
 TF_DATA_SHUFFLE_BUFFER = 1000
-TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
+TF_DATA_PREFETCH_SIZE = -1 if not hasattr(tf, 'data') else tf.data.AUTOTUNE
 QUANTIZE_NUM_SAMPLES = 22000
 # TFLITE_FILENAME = f"{MODEL_FILENAME}.tflite"
 # FLOAT_TFLITE_FILENAME = f"{MODEL_FILENAME}_float.tflite"
