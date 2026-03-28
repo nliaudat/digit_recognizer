@@ -69,14 +69,38 @@ def create_digit_recognizer_v31_teacher(
         x = tf.keras.layers.Resizing(target_h, target_w, name="spatial_upscale")(x)
 
     # ── ResNet50 backbone ─────────────────────────────────────────────────────
-    backbone = tf.keras.applications.ResNet50(
-        include_top=False,
-        weights="imagenet" if pretrained else None,
-        input_tensor=x,
-        pooling=None,
-    )
+    # We instantiate the backbone independently and call it on x to prevent
+    # Keras from walking up the graph and inferring the wrong input shape.
+    input_shape_resnet = (target_h, target_w, 3)
+    try:
+        backbone = tf.keras.applications.ResNet50(
+            include_top=False,
+            weights="imagenet" if pretrained else None,
+            input_shape=input_shape_resnet,
+            pooling=None,
+        )
+    except ValueError as e:
+        if "conv1" in str(e).lower() and pretrained:
+            print("⚠️ TFMoT / Keras 3 conflict detected. Applying tf_keras fallback...")
+            import tf_keras
+            fallback_model = tf_keras.applications.ResNet50(
+                include_top=False,
+                weights="imagenet",
+                input_shape=input_shape_resnet,
+                pooling=None,
+            )
+            backbone = tf.keras.applications.ResNet50(
+                include_top=False,
+                weights=None,
+                input_shape=input_shape_resnet,
+                pooling=None,
+            )
+            backbone.set_weights(fallback_model.get_weights())
+            print("✅ Fallback weights loaded securely.")
+        else:
+            raise
     backbone.trainable = not freeze_backbone
-    features = backbone.output
+    features = backbone(x)
 
     # ── Classification head ───────────────────────────────────────────────────
     x = tf.keras.layers.GlobalAveragePooling2D(name="gap")(features)

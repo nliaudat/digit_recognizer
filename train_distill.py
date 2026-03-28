@@ -63,7 +63,7 @@ if "DIGIT_INPUT_CHANNELS" not in os.environ:
     os.environ["DIGIT_INPUT_CHANNELS"] = "1"
 
 import parameters as params
-from utils.train_distillation import (
+from utils.train_distill_helper import (
     TEACHERS,
     STUDENTS,
     run_distillation_pipeline,
@@ -378,7 +378,7 @@ if __name__ == "__main__":
 python train_distill.py --phase teacher --teacher v30 --classes 10 --color gray
 
 # Phase 1 — Train teacher (100 classes, RGB)
-python train_distill.py --phase teacher --teacher v30 --classes 100 --color rgb --teacher-epochs 100
+python train_distill.py --phase teacher --teacher v30 --classes 100 --color rgb --teacher-epochs 150
 
 # Phase 2 — Distill student from saved teacher
 python train_distill.py --phase student --teacher v30 --student v30_medium \

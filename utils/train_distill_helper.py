@@ -165,6 +165,7 @@ def train_teacher(
     Returns:
         Trained teacher model.
     """
+    tf.keras.backend.clear_session()
     channels = 1 if color_mode == "gray" else 3
     input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, channels)
 
@@ -173,6 +174,7 @@ def train_teacher(
     logger.info("=" * 60)
 
     builder = TEACHERS[teacher_type]
+    logger.info(f"DEBUG train_teacher: calling {builder.__name__} with input_shape={input_shape}, pretrained={pretrained}")
     teacher = builder(
         num_classes=num_classes,
         input_shape=input_shape,
