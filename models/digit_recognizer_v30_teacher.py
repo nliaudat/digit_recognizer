@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
+import parameters as params
 
 try:
     import tensorflow_model_optimization as tfmot
@@ -37,8 +38,8 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 def create_digit_recognizer_v30_teacher(
-    num_classes: int = 10,
-    input_shape: Tuple[int, int, int] = (32, 20, 1),
+    num_classes: int = None,
+    input_shape: Tuple[int, int, int] = None,
     pretrained: bool = True,
     freeze_backbone: bool = False,
 ) -> tf.keras.Model:
@@ -58,6 +59,12 @@ def create_digit_recognizer_v30_teacher(
         Keras functional model. Output is softmax probabilities.
         Use SparseCategoricalCrossentropy(from_logits=False) to compile.
     """
+    # Use project parameters as defaults if not provided (needed for train.py / model_factory)
+    if num_classes is None:
+        num_classes = params.NB_CLASSES
+    if input_shape is None:
+        input_shape = params.INPUT_SHAPE
+
     h, w, c = input_shape
     inputs = tf.keras.Input(shape=input_shape, name="input")
 

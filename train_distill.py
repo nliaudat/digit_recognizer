@@ -10,10 +10,15 @@ Phase 1 (--phase teacher):
     The trained weights are saved to the checkpoint directory and reused
     in Phase 2.
 
+    Can be trained the normal way using train.py.
+
 Phase 2 (--phase student):
     Load the pre-trained teacher (auto-detected from checkpoint dir) and
     train a lightweight student via knowledge distillation. The student
     is exported as a quantized TFLite model for edge deployment.
+
+# Distill from your high-performance teacher
+#python train_distill.py --phase student --teacher v30 --student v30_medium --classes 100 --color rgb --load-teacher "exported_models/100cls_RGB/digit_recognizer_v30_teacher_100cls_TIMESTAMP/model/best_model.keras" --epochs 80
 
 Full pipeline (--phase all):
     Runs Phase 1 then Phase 2 sequentially.
