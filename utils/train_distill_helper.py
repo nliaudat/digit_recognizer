@@ -191,6 +191,10 @@ def train_teacher(
     )
 
     os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    # Standardize checkpoint path to follow project pattern: exported_models/xxx/model/
+    # If checkpoint_dir doesn't end in 'model', we add it if appropriate, 
+    # but for teacher training we'll rely on the caller to provide the full path.
     ckpt_path = os.path.join(
         checkpoint_dir,
         f"teacher_{teacher_type}_{num_classes}cls_{color_mode}.keras"
@@ -387,12 +391,24 @@ def run_distillation_pipeline(
     if output_dir is None:
         color_label = color_mode.upper()
         timestamp   = datetime.now().strftime("%m%d_%H%M")
-        output_dir  = os.path.join(
+        
+        # Consistent with train.py's directory structure in exported_models
+        run_folder = f"distilled_{teacher_type}_to_{student_variant}_{num_classes}cls_{color_label}_{timestamp}"
+        
+        # Base directory for this training run
+        output_dir = os.path.join(
             "exported_models",
             f"{num_classes}cls_{color_label}",
-            f"distilled_{teacher_type}_to_{student_variant}_{timestamp}",
+            run_folder
         )
-    os.makedirs(output_dir, exist_ok=True)
+    
+    # All model assets go into a 'model' subdirectory as requested
+    model_dir = os.path.join(output_dir, "model")
+    os.makedirs(model_dir, exist_ok=True)
+    
+    # We use model_dir for core model assets and checkpoints
+    if checkpoint_dir == "checkpoints": # default
+        checkpoint_dir = model_dir
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     logger.info("=" * 60)
@@ -482,7 +498,8 @@ def run_distillation_pipeline(
     logger.info(f"Compression ratio:  {comparison['comparison']['compression_ratio']:.1f}×")
 
     # ── 5. Export ─────────────────────────────────────────────────────────
-    export_path = os.path.join(output_dir, f"student_{student_variant}")
+    # Save student artifacts into the model subdirectory
+    export_path = os.path.join(model_dir, f"student_{student_variant}")
     if export_quantized:
         tflite_path = export_student_for_edge(
             student,
@@ -526,8 +543,9 @@ def run_distillation_pipeline(
         "timestamp": datetime.now().isoformat(),
     }
 
+    # Save training report / summary into output_dir (like train.py)
     results_path = os.path.join(
-        checkpoint_dir,
+        output_dir,
         f"distillation_{teacher_type}_to_{student_variant}_{num_classes}cls.json"
     )
     with open(results_path, "w") as f:

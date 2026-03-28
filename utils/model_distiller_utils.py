@@ -115,8 +115,8 @@ def export_student_for_edge(
         f.write(tflite_model)
     
     # Also save as H5 for compatibility
-    h5_path = f"{export_path}.h5"
-    student.save(h5_path)
+    keras_path = f"{export_path}.keras"
+    student.save(keras_path)
     
     size_kb = os.path.getsize(tflite_path) / 1024
     logger.info(f"Exported student to {tflite_path} ({size_kb:.1f} KB)")

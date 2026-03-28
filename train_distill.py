@@ -47,6 +47,7 @@ import os
 import sys
 import argparse
 import logging
+from datetime import datetime
 from pathlib import Path
 
 # ── ensure project root is on sys.path ────────────────────────────────────
@@ -285,6 +286,21 @@ def main() -> None:
             num_classes=num_classes,
             color_mode=color_mode,
         )
+        # ── Output directory logic (similar to train.py) ───────────────────
+        color_label = color_mode.upper()
+        timestamp = datetime.now().strftime("%m%d_%H%M")
+        run_folder = f"teacher_{args.teacher}_{num_classes}cls_{color_label}_{timestamp}"
+        
+        # Base directory consistent with train.py
+        output_dir = os.path.join(
+            "exported_models",
+            f"{num_classes}cls_{color_label}",
+            run_folder
+        )
+        # Main model assets go into 'model' subdirectory
+        model_dir = os.path.join(output_dir, "model")
+        os.makedirs(model_dir, exist_ok=True)
+
         train_teacher(
             teacher_type=args.teacher,
             num_classes=num_classes,
@@ -296,10 +312,11 @@ def main() -> None:
             epochs=args.teacher_epochs,
             batch_size=args.batch,
             learning_rate=args.teacher_lr,
-            checkpoint_dir=args.checkpoint_dir,
+            checkpoint_dir=model_dir, # Save in model/ folder
             pretrained=pretrained,
             freeze_backbone=args.freeze_backbone,
         )
+        logger.info(f"Teacher training session saved to: {output_dir}")
 
     elif args.phase == "student":
         # ── Distill student from existing teacher ─────────────────────────
