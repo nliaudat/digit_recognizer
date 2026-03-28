@@ -126,14 +126,21 @@ def parse_args() -> argparse.Namespace:
         "--teacher",
         type=str,
         default="v30",
-        choices=list(TEACHERS.keys()),
+        choices=params.get_available_model_names(),
         help="Teacher backbone (default: v30 = EfficientNetB0)"
+    )
+    parser.add_argument(
+        "--teacher-color",
+        type=str,
+        default=None,
+        choices=["gray", "rgb"],
+        help="Teacher color mode (defaults to student color)"
     )
     parser.add_argument(
         "--student",
         type=str,
         default="v30_medium",
-        choices=list(STUDENTS.keys()),
+        choices=list(STUDENTS.keys()) + params.get_available_model_names(),
         help="Student variant (default: v30_medium)"
     )
 
@@ -282,7 +289,7 @@ def parse_args() -> argparse.Namespace:
         "--existing-model",
         type=str,
         default=None,
-        choices=["v3", "v4", "v6", "v7", "v15", "v16", "v17", "v18", "v19"],
+        choices=params.get_available_model_names(),
         help="Existing edge model to retrain (requires --retrain-existing)"
     )
     
@@ -304,6 +311,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     
+    # ── Param sync ──────────────────────────────────────────────────────────
+    # Ensure parameters.py reflects CLI args before any models are created
+    params.NB_CLASSES = args.classes
+    params.INPUT_CHANNELS = 1 if args.color == "gray" else 3
+    params.update_derived_parameters()
+
     # Validate retraining doesn't conflict with phase
     if args.retrain_existing and args.existing_model:
         if args.phase != "all":
@@ -312,7 +325,7 @@ def main() -> None:
         from utils.retrain_with_teacher import main as retrain_main
         
         # Redirect arguments to retrain_with_teacher
-        sys.argv = [
+        redirect_args = [
             sys.argv[0],
             "--model", args.existing_model,
             "--teacher", args.teacher,
@@ -321,18 +334,25 @@ def main() -> None:
             "--temperature", str(args.temperature),
             "--alpha", str(args.alpha),
             "--mode", args.mode,
-            "--progressive" if args.progressive else "",
             "--epochs", str(args.epochs),
             "--lr", str(args.lr),
             "--batch-size", str(args.batch),
-            "--load-checkpoint", args.load_model_checkpoint if args.load_model_checkpoint else "",
-            "--teacher-checkpoint", args.load_teacher if args.load_teacher else "",
-            "--quantize" if not args.no_quantize else "",
-            "--output-dir", args.output_dir if args.output_dir else "",
         ]
-        # Remove empty strings
-        sys.argv = [arg for arg in sys.argv if arg]
         
+        if args.progressive:
+            redirect_args.append("--progressive")
+        if args.load_model_checkpoint:
+            redirect_args.extend(["--load-checkpoint", args.load_model_checkpoint])
+        if args.load_teacher:
+            redirect_args.extend(["--teacher-checkpoint", args.load_teacher])
+        if args.teacher_color:
+            redirect_args.extend(["--teacher-color", args.teacher_color])
+        if not args.no_quantize:
+            redirect_args.append("--quantize")
+        if args.output_dir:
+            redirect_args.extend(["--output-dir", args.output_dir])
+        
+        sys.argv = redirect_args
         retrain_main()
         return
 
@@ -398,10 +418,11 @@ def main() -> None:
         # ── Distill student from existing teacher ─────────────────────────
         run_distillation_pipeline(
             teacher_type=args.teacher,
+            teacher_checkpoint=args.load_teacher,
+            teacher_color=args.teacher_color if args.teacher_color else args.color,
             student_variant=args.student,
             num_classes=num_classes,
             color_mode=color_mode,
-            teacher_checkpoint=args.load_teacher,
             # Skip teacher training
             teacher_epochs=0,
             teacher_lr=args.teacher_lr,

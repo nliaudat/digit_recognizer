@@ -97,12 +97,32 @@ def export_student_for_edge(
         
         # Provide representative dataset if available
         if representative_dataset is not None:
-            converter.representative_dataset = lambda: representative_dataset
+            if isinstance(representative_dataset, np.ndarray):
+                def rep_data_gen():
+                    # Use a subset of provided data
+                    num_samples = min(100, len(representative_dataset))
+                    for i in range(num_samples):
+                        # Ensure batch dimension of 1
+                        sample = representative_dataset[i:i+1].astype(np.float32)
+                        yield [sample]
+                converter.representative_dataset = rep_data_gen
+            else:
+                converter.representative_dataset = lambda: representative_dataset
         else:
-            # Create dummy representative dataset
+            # Create dummy representative dataset with correct shape
+            # Get input shape from model (excluding batch dim)
+            input_shape = student.input_shape
+            if isinstance(input_shape, list):
+                input_shape = input_shape[0]
+            
+            # Ensure shape is a tuple of (height, width, channels)
+            # student.input_shape can be (None, 32, 20, 3)
+            shape_with_batch = list(input_shape)
+            shape_with_batch[0] = 1 # Force batch size 1
+            
             def dummy_dataset():
                 for _ in range(100):
-                    dummy_input = np.random.randn(1, 32, 20, 1).astype(np.float32)
+                    dummy_input = np.random.randn(*shape_with_batch).astype(np.float32)
                     yield [dummy_input]
             converter.representative_dataset = dummy_dataset
     

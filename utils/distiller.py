@@ -159,17 +159,16 @@ class Distiller(tf.keras.Model):
         grads = tape.gradient(loss, trainable_vars)
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
 
-        # Update metrics
-        self.compiled_metrics.update_state(y, student_probs)
-
-        self.current_epoch += 1
-
-        return {
+        # Return results including our custom losses
+        # self.compute_metrics returns a dict of results
+        results = self.compute_metrics(x, y, student_probs)
+        results.update({
             "loss": loss,
             "student_loss": student_loss,
             "distill_loss": distill_loss,
-            **{m.name: m.result() for m in self.metrics},
-        }
+        })
+        self.current_epoch += 1
+        return results
     
     def test_step(self, data: Tuple[tf.Tensor, tf.Tensor]) -> Dict[str, tf.Tensor]:
         """Single test/validation step."""
@@ -177,9 +176,11 @@ class Distiller(tf.keras.Model):
         student_probs = self.student(x, training=False)
 
         loss = self.student_loss_fn(y, student_probs)
-        self.compiled_metrics.update_state(y, student_probs)
-
-        return {"loss": loss, **{m.name: m.result() for m in self.metrics}}
+        
+        # self.compute_metrics returns a dict of results
+        results = self.compute_metrics(x, y, student_probs)
+        results["loss"] = loss
+        return results
 
     def call(self, inputs: tf.Tensor, training: bool = False) -> tf.Tensor:
         """Forward pass through student (returns softmax probabilities)."""
@@ -439,14 +440,108 @@ class EnsembleDistiller(Distiller):
         grads = tape.gradient(loss, trainable_vars)
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
         
-        # Update metrics
-        self.compiled_metrics.update_state(y, student_logits)
+        # 9. Update metrics
+        results = self.compute_metrics(x, y, student_logits)
         
         self.current_epoch += 1
         
-        return {
+        # Return results including our custom losses
+        results.update({
             'loss': loss,
             'student_loss': student_loss,
             'distill_loss': distill_loss,
-            **{m.name: m.result() for m in self.metrics}
-        }
+        })
+        return results
+
+
+class MixedInputDistiller(Distiller):
+    """
+    Distiller that handles different input shapes for teacher and student.
+    Commonly used when distilling an RGB teacher into a Grayscale student.
+    """
+
+    def __init__(
+        self,
+        student: tf.keras.Model,
+        teacher: tf.keras.Model,
+        teacher_input_fn: Optional[Callable] = None,
+        **kwargs
+    ):
+        """
+        Initialize the mixed-input distiller.
+
+        Args:
+            student:          Student model (e.g. grayscale)
+            teacher:          Teacher model (e.g. RGB)
+            teacher_input_fn: Function to convert student input to teacher input
+                             (e.g., lambda x: tf.image.grayscale_to_rgb(x))
+        """
+        super().__init__(student, teacher, **kwargs)
+        self.teacher_input_fn = teacher_input_fn
+
+    def train_step(self, data: Tuple[tf.Tensor, tf.Tensor]) -> Dict[str, tf.Tensor]:
+        """Single training step with input conversion."""
+        x_student, y = data
+
+        # 1. Convert student input to teacher input (e.g., grayscale -> RGB)
+        if self.teacher_input_fn:
+            x_teacher = self.teacher_input_fn(x_student)
+        else:
+            x_teacher = x_student
+
+        # 2. Get teacher predictions (frozen)
+        teacher_probs = self.teacher(x_teacher, training=False)
+
+        # 3. Temperature scheduling
+        temp = self.temperature
+        if self.temperature_schedule:
+            temp = self.temperature_schedule(self.current_epoch)
+
+        with tf.GradientTape() as tape:
+            # 4. Get student predictions
+            student_probs = self.student(x_student, training=True)
+
+            # 5. Hard-label loss
+            student_loss = self.student_loss_fn(y, student_probs)
+
+            # 6. Distillation loss
+            distill_loss = self._compute_distillation_loss(
+                teacher_probs, student_probs, temp
+            )
+
+            # 7. Combined loss
+            loss = self.alpha * student_loss + (1 - self.alpha) * distill_loss
+
+        # 8. Apply gradients
+        trainable_vars = self.student.trainable_variables
+        grads = tape.gradient(loss, trainable_vars)
+        self.optimizer.apply_gradients(zip(grads, trainable_vars))
+
+        # 9. Update metrics
+        results = self.compute_metrics(x_student, y, student_probs)
+
+        # Return results including our custom losses
+        results.update({
+            "loss": loss,
+            "student_loss": student_loss,
+            "distill_loss": distill_loss,
+        })
+        return results
+
+    def test_step(self, data: Tuple[tf.Tensor, tf.Tensor]) -> Dict[str, tf.Tensor]:
+        """Standard test step using student's native input."""
+        x_student, y = data
+        student_probs = self.student(x_student, training=False)
+
+        loss = self.student_loss_fn(y, student_probs)
+        
+        # self.compute_metrics returns a dict of results
+        results = self.compute_metrics(x_student, y, student_probs)
+        results["loss"] = loss
+        return results
+
+    def get_config(self) -> Dict[str, Any]:
+        """Get configuration for serialization."""
+        config = super().get_config()
+        # Note: teacher_input_fn is generally not serializable if it's a lambda
+        return config

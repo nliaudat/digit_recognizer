@@ -772,6 +772,19 @@ def get_tflite_filename():
 def get_float_tflite_filename():
     return f"{get_model_filename()}_float.tflite"
 
+def get_available_model_names():
+    """Return a list of all available model names, including short versions (e.g., 'v16' for 'digit_recognizer_v16')."""
+    names = []
+    for m in AVAILABLE_MODELS:
+        names.append(m)
+        if m.startswith("digit_recognizer_"):
+            short = m.replace("digit_recognizer_", "")
+            if short.endswith("_teacher"):
+                short = short.replace("_teacher", "")
+            if short not in names:
+                names.append(short)
+    return sorted(list(set(names)))
+
 
 # ==============================================================================
 # VALIDATION FUNCTIONS

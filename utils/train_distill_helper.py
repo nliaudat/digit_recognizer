@@ -36,7 +36,7 @@ import tensorflow as tf
 # ── project imports ────────────────────────────────────────────────────────
 import parameters as params
 from utils import get_data_splits, preprocess_for_training, preprocess_for_inference
-from utils.distiller import Distiller, ProgressiveDistiller
+from utils.distiller import Distiller, ProgressiveDistiller, MixedInputDistiller
 from utils.model_distiller_utils import (
     export_student_for_edge,
     evaluate_distilled_model,
@@ -173,14 +173,23 @@ def train_teacher(
     logger.info(f"Training Teacher: {teacher_type} | {num_classes} classes | {color_mode.upper()}")
     logger.info("=" * 60)
 
-    builder = TEACHERS[teacher_type]
-    logger.info(f"DEBUG train_teacher: calling {builder.__name__} with input_shape={input_shape}, pretrained={pretrained}")
-    teacher = builder(
-        num_classes=num_classes,
-        input_shape=input_shape,
-        pretrained=pretrained,
-        freeze_backbone=freeze_backbone,
-    )
+    if teacher_type in TEACHERS:
+        builder = TEACHERS[teacher_type]
+        teacher = builder(
+            num_classes=num_classes,
+            input_shape=input_shape,
+            pretrained=pretrained,
+            freeze_backbone=freeze_backbone,
+        )
+    else:
+        from models.model_factory import create_model_by_name
+        teacher = create_model_by_name(
+            teacher_type,
+            num_classes=num_classes,
+            input_shape=input_shape,
+            pretrained=pretrained,
+            freeze_backbone=freeze_backbone,
+        )
     teacher.summary(print_fn=logger.info)
 
     teacher.compile(
@@ -279,36 +288,74 @@ def train_student_distillation(
     logger.info("=" * 60)
 
     # ── Build student ──────────────────────────────────────────────────────
-    builder = STUDENTS[student_variant]
-    student = builder(num_classes=num_classes, input_shape=input_shape)
+    if student_variant in STUDENTS:
+        builder = STUDENTS[student_variant]
+        student = builder(num_classes=num_classes, input_shape=input_shape)
+    else:
+        from models.model_factory import create_model_by_name
+        student = create_model_by_name(student_variant, num_classes=num_classes, input_shape=input_shape)
     logger.info(f"Student parameters: {student.count_params():,}")
     logger.info(f"Estimated INT8 size: {get_model_size_kb(student):.1f} KB")
 
     # ── Build distiller ────────────────────────────────────────────────────
+    
+    # Check for channel mismatch (e.g. Grayscale student, RGB teacher)
+    teacher_channels = teacher.input_shape[-1]
+    student_channels = student.input_shape[-1]
+    
+    teacher_input_fn = None
+    if student_channels == 1 and teacher_channels == 3:
+        logger.info("Detected mismatched channels: Grayscale student -> RGB teacher. Using MixedInputDistiller.")
+        teacher_input_fn = lambda x: tf.image.grayscale_to_rgb(x)
+    
     if use_progressive:
-        distiller = ProgressiveDistiller(
-            student=student,
-            teacher=teacher,
-            initial_temperature=8.0,
-            final_temperature=2.0,
-            initial_alpha=0.3,
-            final_alpha=0.8,
-            total_epochs=epochs,
-            mode=mode,
-        )
+        if teacher_input_fn:
+            logger.warning("ProgressiveDistiller does not natively support MixedInputDistiller logic yet. Using standard MixedInputDistiller.")
+            distiller = MixedInputDistiller(
+                student=student,
+                teacher=teacher,
+                teacher_input_fn=teacher_input_fn,
+                temperature=temperature,
+                alpha=alpha,
+                mode=mode,
+            )
+        else:
+            distiller = ProgressiveDistiller(
+                student=student,
+                teacher=teacher,
+                initial_temperature=8.0,
+                final_temperature=2.0,
+                initial_alpha=0.3,
+                final_alpha=0.8,
+                total_epochs=epochs,
+                mode=mode,
+            )
     else:
-        distiller = Distiller(
-            student=student,
-            teacher=teacher,
-            temperature=temperature,
-            alpha=alpha,
-            mode=mode,
-        )
+        if teacher_input_fn:
+            distiller = MixedInputDistiller(
+                student=student,
+                teacher=teacher,
+                teacher_input_fn=teacher_input_fn,
+                temperature=temperature,
+                alpha=alpha,
+                mode=mode,
+            )
+        else:
+            distiller = Distiller(
+                student=student,
+                teacher=teacher,
+                temperature=temperature,
+                alpha=alpha,
+                mode=mode,
+            )
 
     distiller.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
         metrics=["accuracy"],
     )
+    
+    # Build to initialize weights and avoid warnings
+    distiller.build((None,) + input_shape)
 
     # ── Callbacks ──────────────────────────────────────────────────────────
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -354,6 +401,7 @@ def run_distillation_pipeline(
     student_variant: str = "v30_medium",
     num_classes: int = 10,
     color_mode: str = "gray",
+    teacher_color: Optional[str] = None,
     # Teacher training
     teacher_epochs: int = 50,
     teacher_lr: float = 1e-3,
@@ -392,15 +440,9 @@ def run_distillation_pipeline(
         color_label = color_mode.upper()
         timestamp   = datetime.now().strftime("%m%d_%H%M")
         
-        # Consistent with train.py's directory structure in exported_models
+        # Match train.py naming convention: exported_models/distilled_v30_to_v4_10cls_GRAY_0328_1910
         run_folder = f"distilled_{teacher_type}_to_{student_variant}_{num_classes}cls_{color_label}_{timestamp}"
-        
-        # Base directory for this training run
-        output_dir = os.path.join(
-            "exported_models",
-            f"{num_classes}cls_{color_label}",
-            run_folder
-        )
+        output_dir = os.path.join(params.OUTPUT_DIR, run_folder)
     
     # All model assets go into a 'model' subdirectory as requested
     model_dir = os.path.join(output_dir, "model")
@@ -425,12 +467,13 @@ def run_distillation_pipeline(
     )
 
     # ── 2. Teacher ────────────────────────────────────────────────────────
-    channels    = 1 if color_mode == "gray" else 3
-    input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, channels)
+    teacher_color = teacher_color or color_mode
+    teacher_channels = 1 if teacher_color == "gray" else 3
+    teacher_input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, teacher_channels)
 
     auto_ckpt = os.path.join(
         checkpoint_dir,
-        f"teacher_{teacher_type}_{num_classes}cls_{color_mode}.keras"
+        f"teacher_{teacher_type}_{num_classes}cls_{teacher_color}.keras"
     )
     if teacher_checkpoint and os.path.exists(teacher_checkpoint):
         logger.info(f"Loading teacher from: {teacher_checkpoint}")
@@ -439,15 +482,15 @@ def run_distillation_pipeline(
         logger.info(f"Found existing teacher checkpoint: {auto_ckpt}")
         teacher = tf.keras.models.load_model(auto_ckpt)
     else:
-        logger.info("Training teacher from scratch …")
+        logger.info(f"Training teacher from scratch in {teacher_color} mode …")
         teacher = train_teacher(
             teacher_type=teacher_type,
             num_classes=num_classes,
-            color_mode=color_mode,
-            x_train=x_train,
-            y_train=y_train,
-            x_val=x_val,
-            y_val=y_val,
+            color_mode=teacher_color,
+            x_train=preprocess_for_training(get_data_splits()[0][0]) if teacher_color != color_mode else x_train, # Simplified for example
+            y_train=get_data_splits()[0][1],
+            x_val=preprocess_for_training(get_data_splits()[1][0]) if teacher_color != color_mode else x_val,
+            y_val=get_data_splits()[1][1],
             epochs=teacher_epochs,
             batch_size=batch_size,
             learning_rate=teacher_lr,
@@ -505,6 +548,7 @@ def run_distillation_pipeline(
             student,
             export_path,
             quantize=True,
+            representative_dataset=x_test[:100],
             target_hardware=target_hardware,
         )
         logger.info(f"Student TFLite → {tflite_path}")

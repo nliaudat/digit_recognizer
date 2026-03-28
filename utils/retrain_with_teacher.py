@@ -21,7 +21,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import parameters as params
-from utils.distiller import Distiller, ProgressiveDistiller
+from utils.distiller import Distiller, ProgressiveDistiller, MixedInputDistiller
 from utils.model_distiller_utils import (
     export_student_for_edge,
     evaluate_distilled_model,
@@ -30,115 +30,19 @@ from utils.model_distiller_utils import (
 )
 from utils.train_distill_helper import load_distillation_data
 
-# Import teacher models directly
-from models.digit_recognizer_v30_teacher import create_v30_teacher
-from models.digit_recognizer_v31_teacher import create_v31_teacher
-
-# Import existing edge models directly (no __init__.py modification)
-try:
-    from models.digit_recognizer_v3 import create_digit_recognizer_v3
-except ImportError:
-    create_digit_recognizer_v3 = None
-
-try:
-    from models.digit_recognizer_v4 import create_digit_recognizer_v4
-except ImportError:
-    create_digit_recognizer_v4 = None
-
-try:
-    from models.digit_recognizer_v7 import create_digit_recognizer_v7
-except ImportError:
-    create_digit_recognizer_v7 = None
-
-try:
-    from models.digit_recognizer_v15 import create_digit_recognizer_v15
-except ImportError:
-    create_digit_recognizer_v15 = None
-
-try:
-    from models.digit_recognizer_v16 import create_digit_recognizer_v16
-except ImportError:
-    create_digit_recognizer_v16 = None
-
-try:
-    from models.digit_recognizer_v17 import create_digit_recognizer_v17
-except ImportError:
-    create_digit_recognizer_v17 = None
-
-try:
-    from models.digit_recognizer_v18 import create_digit_recognizer_v18
-except ImportError:
-    create_digit_recognizer_v18 = None
-
-try:
-    from models.digit_recognizer_v19 import create_digit_recognizer_v19
-except ImportError:
-    create_digit_recognizer_v19 = None
-
-# Registry for existing edge models
+# Registry for existing edge models (now dynamic metadata)
 EXISTING_EDGE_MODELS = {
-    "v3": {
-        "model_fn": create_digit_recognizer_v3,
-        "description": "Fast overall inference speed",
-        "size_kb": 38.4,
-        "default_input_shape": (32, 20, 3),
-        "available": create_digit_recognizer_v3 is not None,
-    },
-    "v4": {
-        "model_fn": create_digit_recognizer_v4,
-        "description": "Excellent accuracy under 100KB",
-        "size_kb": 78.3,
-        "default_input_shape": (32, 20, 3),
-        "available": create_digit_recognizer_v4 is not None,
-    },
-    "v7": {
-        "model_fn": create_digit_recognizer_v7,
-        "description": "Fastest inference speed",
-        "size_kb": 47.2,
-        "default_input_shape": (32, 20, 3),
-        "available": create_digit_recognizer_v7 is not None,
-    },
-    "v15": {
-        "model_fn": create_digit_recognizer_v15,
-        "description": "Best accuracy under 100KB",
-        "size_kb": 100.0,
-        "default_input_shape": (32, 20, 3),
-        "available": create_digit_recognizer_v15 is not None,
-    },
-    "v16": {
-        "model_fn": create_digit_recognizer_v16,
-        "description": "High accuracy MobileNetV2-based",
-        "size_kb": 128.8,
-        "default_input_shape": (32, 20, 3),
-        "available": create_digit_recognizer_v16 is not None,
-    },
-    "v17": {
-        "model_fn": create_digit_recognizer_v17,
-        "description": "GhostNet-inspired alternative",
-        "size_kb": 71.0,
-        "default_input_shape": (32, 20, 3),
-        "available": create_digit_recognizer_v17 is not None,
-    },
-    "v18": {
-        "model_fn": create_digit_recognizer_v18,
-        "description": "New variant with strong performance",
-        "size_kb": 97.4,
-        "default_input_shape": (32, 20, 3),
-        "available": create_digit_recognizer_v18 is not None,
-    },
-    "v19": {
-        "model_fn": create_digit_recognizer_v19,
-        "description": "High-capacity variant",
-        "size_kb": 132.2,
-        "default_input_shape": (32, 20, 3),
-        "available": create_digit_recognizer_v19 is not None,
-    },
+    m.replace("digit_recognizer_", "").replace("_teacher", ""): {
+        "available": True,
+        "full_name": m
+    } for m in params.AVAILABLE_MODELS
 }
 
-TEACHERS = {
-    "v30": create_v30_teacher,
-    "v31": create_v31_teacher,
-}
+# Add full names too
+for m in params.AVAILABLE_MODELS:
+    EXISTING_EDGE_MODELS[m] = {"available": True, "full_name": m}
+
+TEACHERS = EXISTING_EDGE_MODELS # Any model can be a teacher
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
@@ -154,14 +58,22 @@ def parse_args():
         "--model",
         type=str,
         required=True,
-        help=f"Existing edge model to retrain. Available: {list(EXISTING_EDGE_MODELS.keys())}"
+        choices=params.get_available_model_names(),
+        help="Existing edge model to retrain."
     )
     parser.add_argument(
         "--teacher",
         type=str,
         default="v30",
-        choices=list(TEACHERS.keys()),
+        choices=params.get_available_model_names(),
         help="Teacher model for distillation"
+    )
+    parser.add_argument(
+        "--teacher-color",
+        type=str,
+        default=None,
+        choices=["gray", "rgb"],
+        help="Teacher color mode (defaults to student color)"
     )
     
     # Dataset
@@ -272,37 +184,20 @@ def load_or_create_model(
     """
     Load existing model or create new one.
     """
-    # Validate model exists
-    if model_name not in EXISTING_EDGE_MODELS:
-        raise ValueError(f"Unknown model: {model_name}. Available: {list(EXISTING_EDGE_MODELS.keys())}")
-    
-    model_info = EXISTING_EDGE_MODELS[model_name]
-    
-    if not model_info["available"]:
-        raise ImportError(f"Model {model_name} cannot be imported. Check if the model file exists.")
+    from models.model_factory import create_model_by_name
     
     channels = 1 if color_mode == "gray" else 3
     input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, channels)
     
-    model_fn = model_info["model_fn"]
-    
-    # Create model
-    try:
-        model = model_fn(num_classes=num_classes, input_shape=input_shape)
-    except TypeError:
-        # Fallback for models that don't accept input_shape parameter
-        logger.warning(f"{model_name} may not accept input_shape parameter, trying without...")
-        model = model_fn(num_classes=num_classes)
+    # Create model dynamically
+    model = create_model_by_name(model_name, num_classes=num_classes, input_shape=input_shape)
     
     # Load weights if provided
     if load_path and os.path.exists(load_path):
         logger.info(f"Loading weights from {load_path}")
         model.load_weights(load_path)
-    else:
-        logger.info(f"Creating new {model_name} model with random weights")
     
     logger.info(f"Model: {model_name}, params: {model.count_params():,}")
-    
     return model
 
 
@@ -326,32 +221,67 @@ def retrain_with_teacher(
     # Freeze teacher
     teacher = freeze_teacher_model(teacher)
     
+    # Check for channel mismatch (e.g. Grayscale student, RGB teacher)
+    # Most teachers expect 3 channels if they are standard pre-trained models
+    teacher_channels = teacher.input_shape[-1]
+    student_channels = model.input_shape[-1]
+    
+    teacher_input_fn = None
+    if student_channels == 1 and teacher_channels == 3:
+        logger.info("Detected mismatched channels: Grayscale student -> RGB teacher. Using MixedInputDistiller.")
+        teacher_input_fn = lambda x: tf.image.grayscale_to_rgb(x)
+    
     # Create distiller
     if args.progressive:
-        distiller = ProgressiveDistiller(
-            student=model,
-            teacher=teacher,
-            initial_temperature=8.0,
-            final_temperature=2.0,
-            initial_alpha=0.3,
-            final_alpha=0.8,
-            total_epochs=args.epochs,
-            mode=args.mode,
-        )
+        if teacher_input_fn:
+            logger.warning("ProgressiveDistiller does not natively support MixedInputDistiller logic yet. Using standard MixedInputDistiller.")
+            distiller = MixedInputDistiller(
+                student=model,
+                teacher=teacher,
+                teacher_input_fn=teacher_input_fn,
+                temperature=args.temperature,
+                alpha=args.alpha,
+                mode=args.mode,
+            )
+        else:
+            distiller = ProgressiveDistiller(
+                student=model,
+                teacher=teacher,
+                initial_temperature=8.0,
+                final_temperature=2.0,
+                initial_alpha=0.3,
+                final_alpha=0.8,
+                total_epochs=args.epochs,
+                mode=args.mode,
+            )
     else:
-        distiller = Distiller(
-            student=model,
-            teacher=teacher,
-            temperature=args.temperature,
-            alpha=args.alpha,
-            mode=args.mode,
-        )
+        if teacher_input_fn:
+            distiller = MixedInputDistiller(
+                student=model,
+                teacher=teacher,
+                teacher_input_fn=teacher_input_fn,
+                temperature=args.temperature,
+                alpha=args.alpha,
+                mode=args.mode,
+            )
+        else:
+            distiller = Distiller(
+                student=model,
+                teacher=teacher,
+                temperature=args.temperature,
+                alpha=args.alpha,
+                mode=args.mode,
+            )
     
-    # Compile with lower learning rate for fine-tuning
     distiller.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=args.lr),
         metrics=["accuracy"],
     )
+    
+    # Build to initialize weights and avoid warnings
+    channels = model.input_shape[-1]
+    input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, channels)
+    distiller.build((None,) + input_shape)
     
     # Callbacks
     checkpoint_dir = "checkpoints/retrain"
@@ -395,6 +325,12 @@ def retrain_with_teacher(
 def main():
     args = parse_args()
     
+    # ── Param sync ──────────────────────────────────────────────────────────
+    # Ensure parameters.py reflects CLI args before any models are created
+    params.NB_CLASSES = args.classes
+    params.INPUT_CHANNELS = 1 if args.color == "gray" else 3
+    params.update_derived_parameters()
+    
     # Validate model exists and is available
     if args.model not in EXISTING_EDGE_MODELS:
         logger.error(f"Model '{args.model}' not found.")
@@ -432,13 +368,18 @@ def main():
     )
     
     # Load or create teacher
+    from models.model_factory import create_model_by_name
+    
+    teacher_color = args.teacher_color if args.teacher_color else args.color
+    teacher_channels = 1 if teacher_color == "gray" else 3
+    teacher_input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, teacher_channels)
+    
     if args.teacher_checkpoint and os.path.exists(args.teacher_checkpoint):
         logger.info(f"Loading teacher from {args.teacher_checkpoint}")
         teacher = tf.keras.models.load_model(args.teacher_checkpoint)
     else:
-        teacher_builder = TEACHERS[args.teacher]
-        teacher_input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, channels)
-        teacher = teacher_builder(
+        teacher = create_model_by_name(
+            args.teacher,
             num_classes=args.classes,
             input_shape=teacher_input_shape,
             pretrained=args.teacher_pretrained,
@@ -479,11 +420,10 @@ def main():
     if args.quantize:
         color_label = args.color.upper()
         timestamp = datetime.now().strftime("%m%d_%H%M")
-        export_dir = os.path.join(
-            args.output_dir,
-            f"{args.classes}cls_{color_label}",
-            f"{args.model}_retrained_{timestamp}"
-        )
+        
+        # Match train.py naming convention: exported_models/retrained_v4_10cls_GRAY_0328_1910
+        folder_name = f"retrained_{args.model}_{args.classes}cls_{color_label}_{timestamp}"
+        export_dir = os.path.join(params.OUTPUT_DIR, folder_name)
         os.makedirs(export_dir, exist_ok=True)
         
         export_path = os.path.join(export_dir, "model", args.model)
@@ -491,9 +431,12 @@ def main():
             retrained_model,
             export_path,
             quantize=True,
+            representative_dataset=x_test[:100],
             target_hardware="esp32"
         )
         logger.info(f"Exported to: {tflite_path}")
+    else:
+        tflite_path = None
     
     # Save results
     results = {

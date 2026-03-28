@@ -64,6 +64,82 @@ def get_available_models():
             available.append(model_name)
     return available
 
+def resolve_model_name(name):
+    """Map short names (v16) to full available model names (digit_recognizer_v16)."""
+    if name in params.AVAILABLE_MODELS:
+        return name
+    
+    # Try digit_recognizer_ prefix
+    full_name = f"digit_recognizer_{name}"
+    if full_name in params.AVAILABLE_MODELS:
+        return full_name
+    
+    # Try digit_recognizer_ with _teacher suffix
+    teacher_name = f"digit_recognizer_{name}_teacher"
+    if teacher_name in params.AVAILABLE_MODELS:
+        return teacher_name
+    
+    # Still not found? Check if any available model matches the short name
+    for m in params.AVAILABLE_MODELS:
+        if m.replace("digit_recognizer_", "").replace("_teacher", "") == name:
+            return m
+            
+    return name
+
+def create_model_by_name(model_name, num_classes=None, input_shape=None, **kwargs):
+    """
+    Flexibly create any registered model by name.
+    
+    Args:
+        model_name:  Short (v16) or full (digit_recognizer_v16) name.
+        num_classes: Optional override for NB_CLASSES.
+        input_shape: Optional override for INPUT_SHAPE.
+        **kwargs:    Passed to the model creator function.
+    """
+    full_name = resolve_model_name(model_name)
+    creator   = _import_model_creator(full_name)
+    
+    if not creator:
+        raise ValueError(f"Unknown model: {model_name} (resolved to {full_name})")
+    
+    # Temporarily override globals because many models still use params.NB_CLASSES
+    _prev_classes = params.NB_CLASSES
+    _prev_shape   = params.INPUT_SHAPE
+    _prev_channels = params.INPUT_CHANNELS
+    
+    try:
+        if num_classes is not None:
+            params.NB_CLASSES = num_classes
+        if input_shape is not None:
+            params.INPUT_SHAPE = input_shape
+            params.INPUT_CHANNELS = input_shape[-1]
+        
+        params.update_derived_parameters()
+        
+        print(f"🏗️ Building model: {full_name} | {params.NB_CLASSES} classes | {params.INPUT_SHAPE}")
+        
+        # Call creator. Handle functions that may or may not accept args.
+        try:
+            # First try passing num_classes and input_shape explicitly
+            model = creator(num_classes=params.NB_CLASSES, input_shape=params.INPUT_SHAPE, **kwargs)
+        except TypeError:
+            # Fallback to no-arg call (it will use the overridden params.NB_CLASSES)
+            try:
+                model = creator(**kwargs)
+            except TypeError:
+                 model = creator()
+        
+        # Build to ensure input shape is fixed
+        model.build((None,) + params.INPUT_SHAPE)
+        return model
+        
+    finally:
+        # Restore globals
+        params.NB_CLASSES     = _prev_classes
+        params.INPUT_SHAPE    = _prev_shape
+        params.INPUT_CHANNELS = _prev_channels
+        params.update_derived_parameters()
+
 def get_model_info(model_name=None):
     """Get information about a specific model or all models"""
     if model_name:
