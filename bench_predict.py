@@ -623,7 +623,12 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
                          collect_failed=False, model_name=None, tolerance=0.1):
     """Test a model on random images from dataset and return accuracy and performance metrics"""
     
-    predictor = TFLiteDigitPredictor(model_path)
+    try:
+        predictor = TFLiteDigitPredictor(model_path)
+    except Exception as e:
+        print(f"❌ Skipping model {model_path}: {e}")
+        return 0.0, 0, 0.0, 0.0, [], []
+        
     correct_predictions = 0
     total_tested = 0
     total_inference_time = 0.0
@@ -635,7 +640,7 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
     
     if not test_data:
         print("❌ No test data available")
-        return 0.0, 0, 0.0, 0.0, failed_predictions
+        return 0.0, 0, 0.0, 0.0, [], []
     
     # Warm-up run to avoid cold start timing issues
     if len(test_data) > 0:
@@ -1097,7 +1102,7 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
         # Pass collect_failed=True if either list_failed or save_failed is enabled
         collect_failed = list_failed or save_failed
         
-        accuracy, tested_count, avg_inference_time, inferences_per_second, failed_predictions, all_predictions_lite = test_model_on_dataset(
+        results_data = test_model_on_dataset(
             model_info['path'], 
             num_test_images=num_test_images,
             debug=debug,
@@ -1106,6 +1111,13 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
             model_name=model_info['name'],
             tolerance=tolerance
         )
+        
+        if results_data is None or results_data[1] == 0:
+            if debug:
+                print(f"⚠️  Skipping results for {model_info['name']} due to failure")
+            continue
+            
+        accuracy, tested_count, avg_inference_time, inferences_per_second, failed_predictions, all_predictions_lite = results_data
         
         all_predictions.extend(all_predictions_lite)
         
