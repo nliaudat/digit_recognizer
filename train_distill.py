@@ -388,11 +388,7 @@ def main() -> None:
         run_folder = f"teacher_{args.teacher}_{num_classes}cls_{color_label}_{timestamp}"
         
         # Base directory consistent with train.py
-        output_dir = os.path.join(
-            "exported_models",
-            f"{num_classes}cls_{color_label}",
-            run_folder
-        )
+        output_dir = os.path.join(params.OUTPUT_DIR, run_folder)
         # Main model assets go into 'model' subdirectory
         model_dir = os.path.join(output_dir, "model")
         os.makedirs(model_dir, exist_ok=True)

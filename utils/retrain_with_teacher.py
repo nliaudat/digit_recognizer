@@ -416,12 +416,9 @@ def main():
     timestamp = datetime.now().strftime("%m%d_%H%M")
     
     # User-requested folder structure: exported_models/10cls_RGB/retrained_v4_10cls_RGB_0328_2152
+    # params.OUTPUT_DIR already includes 'exported_models/10cls_RGB'
     folder_name = f"retrained_{args.model}_{args.classes}cls_{color_label}_{timestamp}"
-    export_dir = os.path.join(
-        args.output_dir, # Default 'exported_models/'
-        f"{args.classes}cls_{color_label}",
-        folder_name
-    )
+    export_dir = os.path.join(params.OUTPUT_DIR, folder_name)
     os.makedirs(export_dir, exist_ok=True)
     
     # Redirect intermediate checkpoints to this folder

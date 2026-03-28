@@ -361,7 +361,7 @@ def train_student_distillation(
     os.makedirs(checkpoint_dir, exist_ok=True)
     ckpt_path = os.path.join(
         checkpoint_dir,
-        f"student_{student_variant}_{num_classes}cls_{color_mode}.keras"
+        f"best_student_model.keras"
     )
     callbacks = [
         DistillationProgressCallback(),  # Sync current_epoch for schedules
@@ -443,11 +443,7 @@ def run_distillation_pipeline(
         
         # Match train.py naming convention: exported_models/10cls_RGB/distilled_v30_to_v4_10cls_RGB_0328_1910
         run_folder = f"distilled_{teacher_type}_to_{student_variant}_{num_classes}cls_{color_label}_{timestamp}"
-        output_dir = os.path.join(
-            params.OUTPUT_DIR, 
-            f"{num_classes}cls_{color_label}",
-            run_folder
-        )
+        output_dir = os.path.join(params.OUTPUT_DIR, run_folder)
     
     os.makedirs(output_dir, exist_ok=True)
     
