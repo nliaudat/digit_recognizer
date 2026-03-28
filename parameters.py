@@ -53,6 +53,9 @@ AVAILABLE_MODELS = [
     # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
     # "mnist_quantization", # 72.2kB / 76.55%
     # "original_haverland", # 228.8kB / 79.10% | baseline
+    # ── Distillation: Teacher models (PC-only, large backbone, not for ESP32) ──
+    # "digit_recognizer_v30_teacher", # EfficientNetB0 teacher (train first, then distill students)
+    # "digit_recognizer_v31_teacher", # ResNet50 teacher (alternative backbone for ensemble distillation)
 ]
 
 MODEL_ARCHITECTURE = "digit_recognizer_v29" # one of the models in AVAILABLE_MODELS
@@ -727,6 +730,33 @@ TUNER_BATCH_SIZES = [16, 32, 64, 128]  # More options
 # Early Stopping for Tuning
 TUNER_EARLY_STOPPING_PATIENCE = 10
 TUNER_MIN_DELTA = 0.001
+
+# ==============================================================================
+# Distillation parameters
+# ==============================================================================
+
+# ── Core distillation hyperparameters (used by train_distill.py) ──────────────
+DISTILLATION_TEMPERATURE = 4.0    # Softening temperature for KL divergence
+DISTILLATION_ALPHA = 0.7          # Hard-label weight: 0 = all teacher, 1 = all hard
+DISTILLATION_MODE = "soft"        # "soft" | "hard" | "hybrid"
+USE_PROGRESSIVE_DISTILLATION = False  # Dynamic temperature + alpha scheduling
+
+# ── Teacher training defaults ─────────────────────────────────────────────────
+DISTILLATION_TEACHER_EPOCHS = 60       # Epochs to train teacher from scratch
+DISTILLATION_TEACHER_LR = 1e-3        # Teacher learning rate
+DISTILLATION_TEACHER_PRETRAINED = True # Use ImageNet weights for backbone
+DISTILLATION_FREEZE_BACKBONE = False   # Freeze backbone during teacher training
+
+# ── Student distillation defaults ─────────────────────────────────────────────
+DISTILLATION_STUDENT_EPOCHS = 60      # Epochs for student distillation training
+DISTILLATION_STUDENT_LR = 1e-3       # Student learning rate
+DISTILLATION_STUDENT_VARIANT = "v30_medium"  # Default student architecture
+DISTILLATION_TEACHER_TYPE = "v30"     # Default teacher ("v30" or "v31")
+
+# ── Export / hardware ─────────────────────────────────────────────────────────
+DISTILLATION_TARGET_HARDWARE = "esp32"  # "esp32" | "raspberry_pi" | "generic"
+DISTILLATION_EXPORT_QUANTIZED = True   # Export student as INT8 TFLite
+
 
 # ==============================================================================
 # output FUNCTIONS
