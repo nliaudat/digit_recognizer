@@ -36,7 +36,7 @@ import tensorflow as tf
 # ── project imports ────────────────────────────────────────────────────────
 import parameters as params
 from utils import get_data_splits, preprocess_for_training, preprocess_for_inference
-from utils.distiller import Distiller, ProgressiveDistiller, MixedInputDistiller
+from utils.distiller import Distiller, ProgressiveDistiller, MixedInputDistiller, DistillationProgressCallback
 from utils.model_distiller_utils import (
     export_student_for_edge,
     evaluate_distilled_model,
@@ -120,7 +120,7 @@ def load_distillation_data(
 
         x_train = preprocess_for_training(x_train_raw)
         x_val   = preprocess_for_training(x_val_raw)
-        x_test  = preprocess_for_inference(x_test_raw)
+        x_test  = preprocess_for_training(x_test_raw)  # USE TRAINING PREPROCESS FOR EVAL OF KERAS MODEL
 
         logger.info(
             f"Dataset loaded — train: {len(x_train)}, "
@@ -364,6 +364,7 @@ def train_student_distillation(
         f"student_{student_variant}_{num_classes}cls_{color_mode}.keras"
     )
     callbacks = [
+        DistillationProgressCallback(),  # Sync current_epoch for schedules
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor="val_accuracy", factor=0.5, patience=5, min_lr=1e-6, verbose=1
         ),
@@ -440,18 +441,22 @@ def run_distillation_pipeline(
         color_label = color_mode.upper()
         timestamp   = datetime.now().strftime("%m%d_%H%M")
         
-        # Match train.py naming convention: exported_models/distilled_v30_to_v4_10cls_GRAY_0328_1910
+        # Match train.py naming convention: exported_models/10cls_RGB/distilled_v30_to_v4_10cls_RGB_0328_1910
         run_folder = f"distilled_{teacher_type}_to_{student_variant}_{num_classes}cls_{color_label}_{timestamp}"
-        output_dir = os.path.join(params.OUTPUT_DIR, run_folder)
+        output_dir = os.path.join(
+            params.OUTPUT_DIR, 
+            f"{num_classes}cls_{color_label}",
+            run_folder
+        )
     
-    # All model assets go into a 'model' subdirectory as requested
-    model_dir = os.path.join(output_dir, "model")
-    os.makedirs(model_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     
-    # We use model_dir for core model assets and checkpoints
-    if checkpoint_dir == "checkpoints": # default
-        checkpoint_dir = model_dir
-    os.makedirs(checkpoint_dir, exist_ok=True)
+    # Use output_dir for checkpoints to keep things contained
+    actual_checkpoint_dir = output_dir
+    os.makedirs(actual_checkpoint_dir, exist_ok=True)
+    
+    # Path where Keras/TFLite models will be saved (flat like train.py)
+    export_path = os.path.join(output_dir, student_variant)
 
     logger.info("=" * 60)
     logger.info("🚀 Starting Distillation Pipeline")
@@ -523,7 +528,7 @@ def run_distillation_pipeline(
         alpha=alpha,
         mode=mode,
         use_progressive=use_progressive,
-        checkpoint_dir=checkpoint_dir,
+        checkpoint_dir=actual_checkpoint_dir,
     )
 
     student = distiller.get_student()
@@ -541,8 +546,8 @@ def run_distillation_pipeline(
     logger.info(f"Compression ratio:  {comparison['comparison']['compression_ratio']:.1f}×")
 
     # ── 5. Export ─────────────────────────────────────────────────────────
-    # Save student artifacts into the model subdirectory
-    export_path = os.path.join(model_dir, f"student_{student_variant}")
+    # Save student artifacts into the output_dir
+    export_path = os.path.join(output_dir, student_variant)
     if export_quantized:
         tflite_path = export_student_for_edge(
             student,

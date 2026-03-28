@@ -24,6 +24,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+class DistillationProgressCallback(tf.keras.callbacks.Callback):
+    """
+    Keras callback to update the distiller's current epoch.
+    Crucial for ProgressiveDistiller temperature and alpha scheduling.
+    """
+    def on_epoch_begin(self, epoch, logs=None):
+        if hasattr(self.model, "current_epoch"):
+            self.model.current_epoch = epoch
+            logger.info(f"Distiller epoch updated to {epoch}")
+
+
 class Distiller(tf.keras.Model):
     """
     Knowledge distillation wrapper with multiple distillation modes.
@@ -167,7 +178,6 @@ class Distiller(tf.keras.Model):
             "student_loss": student_loss,
             "distill_loss": distill_loss,
         })
-        self.current_epoch += 1
         return results
     
     def test_step(self, data: Tuple[tf.Tensor, tf.Tensor]) -> Dict[str, tf.Tensor]:
@@ -319,6 +329,9 @@ class ProgressiveDistiller(Distiller):
         self.initial_alpha = initial_alpha
         self.final_alpha = final_alpha
         self.total_epochs = total_epochs
+        
+        # Estimate total steps if we want to switch to a step-based schedule later
+        self.total_steps = 0  
     
     def _update_schedule(self):
         """Update temperature and alpha based on progress."""
@@ -428,9 +441,15 @@ class EnsembleDistiller(Distiller):
             student_loss = self.student_loss_fn(y, student_logits)
             
             # Distillation loss
-            teacher_probs = tf.nn.softmax(weighted_logits / temp)
-            student_probs = tf.nn.softmax(student_logits / temp)
-            distill_loss = self.distillation_loss_fn(teacher_probs, student_probs)
+            EPS = 1e-7
+            # Recover pseudo-logits via log, apply temperature, re-normalise
+            teacher_T = tf.nn.softmax(
+                tf.math.log(tf.clip_by_value(weighted_logits, EPS, 1.0)) / temp
+            )
+            student_T = tf.nn.softmax(
+                tf.math.log(tf.clip_by_value(student_logits, EPS, 1.0)) / temp
+            )
+            distill_loss = self.distillation_loss_fn(teacher_T, student_T)
             
             # Combined loss
             loss = self.alpha * student_loss + (1 - self.alpha) * distill_loss
