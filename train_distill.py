@@ -10,7 +10,7 @@ Phase 1 (--phase teacher):
     The trained weights are saved to the checkpoint directory and reused
     in Phase 2.
 
-    Can be trained the normal way using train.py.
+    BETTER to train the teacher the normal way using train.py. It has augmentation and learning rate scheduler.
 
 Phase 2 (--phase student):
     Load the pre-trained teacher (auto-detected from checkpoint dir) and
@@ -22,6 +22,10 @@ Phase 2 (--phase student):
 
 Full pipeline (--phase all):
     Runs Phase 1 then Phase 2 sequentially.
+
+Retrain existing models (--retrain-existing):
+    Retrain existing edge models (v4, v16, etc.) using teacher guidance.
+    Preserves model architecture while improving accuracy.
 
 Examples
 ────────
@@ -42,10 +46,22 @@ python train_distill.py --phase student --teacher v30 --student v30_medium \\
 python train_distill.py --phase all --teacher v30 --student v30_medium \\
     --classes 10 --color gray --teacher-epochs 60 --epochs 60
 
+# Retrain existing model with teacher
+python train_distill.py --retrain-existing --existing-model v4 --teacher v30 \\
+    --classes 10 --color gray --epochs 30
+
+# Retrain v16 from checkpoint
+python train_distill.py --retrain-existing --existing-model v16 \\
+    --load-model-checkpoint checkpoints/v16_best.keras --teacher v30 --progressive
+
 Available students
 ──────────────────
 v30_micro, v30_small, v30_medium, v30_large  (depthwise separable)
 v31_micro, v31_small, v31_medium, v31_large  (inverted residual + SE)
+
+Available existing models for retraining
+────────────────────────────────────────
+v3, v4, v6, v7, v15, v16, v17, v18, v19
 """
 
 import os
@@ -255,6 +271,29 @@ def parse_args() -> argparse.Namespace:
         help="Target hardware for TFLite quantization (default: esp32)"
     )
 
+    # ── Retrain existing model ────────────────────────────────────────────
+    parser.add_argument(
+        "--retrain-existing",
+        action="store_true",
+        help="Retrain an existing edge model (v4, v16) with teacher"
+    )
+
+    parser.add_argument(
+        "--existing-model",
+        type=str,
+        default=None,
+        choices=["v3", "v4", "v6", "v7", "v15", "v16", "v17", "v18", "v19"],
+        help="Existing edge model to retrain (requires --retrain-existing)"
+    )
+    
+    parser.add_argument(
+        "--load-model-checkpoint",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Path to existing model weights for retraining"
+    )
+
     return parser.parse_args()
 
 
@@ -264,6 +303,38 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    
+    # Validate retraining doesn't conflict with phase
+    if args.retrain_existing and args.existing_model:
+        if args.phase != "all":
+            logger.info("--retrain-existing overrides --phase. Running retraining pipeline.")
+        
+        from utils.retrain_with_teacher import main as retrain_main
+        
+        # Redirect arguments to retrain_with_teacher
+        sys.argv = [
+            sys.argv[0],
+            "--model", args.existing_model,
+            "--teacher", args.teacher,
+            "--classes", str(args.classes),
+            "--color", args.color,
+            "--temperature", str(args.temperature),
+            "--alpha", str(args.alpha),
+            "--mode", args.mode,
+            "--progressive" if args.progressive else "",
+            "--epochs", str(args.epochs),
+            "--lr", str(args.lr),
+            "--batch-size", str(args.batch),
+            "--load-checkpoint", args.load_model_checkpoint if args.load_model_checkpoint else "",
+            "--teacher-checkpoint", args.load_teacher if args.load_teacher else "",
+            "--quantize" if not args.no_quantize else "",
+            "--output-dir", args.output_dir if args.output_dir else "",
+        ]
+        # Remove empty strings
+        sys.argv = [arg for arg in sys.argv if arg]
+        
+        retrain_main()
+        return
 
     pretrained    = args.pretrained and not args.no_pretrained
     color_mode    = args.color
@@ -394,23 +465,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-""" # Phase 1 — Train teacher (10 classes, grayscale, EfficientNetB0 pretrained)
-python train_distill.py --phase teacher --teacher v30 --classes 10 --color gray
-
-# Phase 1 — Train teacher (100 classes, RGB)
-python train_distill.py --phase teacher --teacher v30 --classes 100 --color rgb --teacher-epochs 150
-
-# Phase 2 — Distill student from saved teacher
-python train_distill.py --phase student --teacher v30 --student v30_medium \
-    --classes 10 --color gray --temperature 4 --alpha 0.7 --mode soft
-
-# Full pipeline (teacher + student in one shot)
-python train_distill.py --phase all --teacher v30 --student v30_medium \
-    --classes 100 --color rgb --teacher-epochs 80 --epochs 60
-
-# Use progressive distillation (dynamic T + alpha)
-python train_distill.py --phase all --teacher v31 --student v31_small \
-    --classes 10 --color rgb --progressive
- """
