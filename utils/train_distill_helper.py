@@ -206,7 +206,7 @@ def train_teacher(
     # but for teacher training we'll rely on the caller to provide the full path.
     ckpt_path = os.path.join(
         checkpoint_dir,
-        f"teacher_{teacher_type}_{num_classes}cls_{color_mode}.keras"
+        f"best_model.keras"
     )
     callbacks = [
         tf.keras.callbacks.ReduceLROnPlateau(
@@ -361,7 +361,7 @@ def train_student_distillation(
     os.makedirs(checkpoint_dir, exist_ok=True)
     ckpt_path = os.path.join(
         checkpoint_dir,
-        f"best_student_model.keras"
+        f"best_model.keras"
     )
     callbacks = [
         DistillationProgressCallback(),  # Sync current_epoch for schedules

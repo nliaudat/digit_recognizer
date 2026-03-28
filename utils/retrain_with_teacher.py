@@ -333,7 +333,7 @@ def retrain_with_teacher(
     # Standardize checkpoint name
     ckpt_path = os.path.join(
         checkpoint_dir,
-        f"best_retrained_model.keras"
+        f"best_model.keras"
     )
     
     callbacks = [
