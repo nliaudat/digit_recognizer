@@ -78,6 +78,20 @@ def export_student_for_edge(
     os.makedirs(os.path.dirname(export_path), exist_ok=True)
     
     # Convert to TensorFlow Lite
+    
+    # CRITICAL: Re-build/clone student to ensure we capture actual session weights.
+    # Keras sub-models inside a wrapper can sometimes have stale or un-initialized 
+    # weight views when accessed via their own save/convert methods.
+    try:
+        from tensorflow.keras.models import clone_model
+        clean_student = clone_model(student)
+        clean_student.set_weights(student.get_weights())
+        student = clean_student
+        logger.info("  Synthesized clean student for export (weight-sync OK)")
+    except Exception as e:
+        logger.warning(f"  Student cloning failed ({e}), continuing with original object.")
+
+    # 1. Create converter
     converter = tf.lite.TFLiteConverter.from_keras_model(student)
     
     if quantize:

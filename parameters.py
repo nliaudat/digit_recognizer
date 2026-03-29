@@ -50,7 +50,7 @@ AVAILABLE_MODELS = [
     # "digit_recognizer_v26", # 10 classes only ! v25 + Learnable Soft-Binarization (threshold trained, sharpness=10, TFLite Micro compatible)
     # "esp_quantization_ready", # ~70kB | Minimal Depthwise CNN for smooth INT8
     # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
-    # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
+    "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
     # "mnist_quantization", # 72.2kB / 76.55%
     # "original_haverland", # 228.8kB / 79.10% | baseline
     # ── Distillation: Teacher models (PC-only, large backbone, not for ESP32) ──
