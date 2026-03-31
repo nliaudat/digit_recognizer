@@ -58,6 +58,7 @@ Available students
 ──────────────────
 v30_micro, v30_small, v30_medium, v30_large  (depthwise separable)
 v31_micro, v31_small, v31_medium, v31_large  (inverted residual + SE)
+v32_small, v32_medium, v32_large, v32_xl     (V32 super-teachers trained via ensemble)
 
 Available existing models for retraining
 ────────────────────────────────────────

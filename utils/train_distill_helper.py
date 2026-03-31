@@ -60,6 +60,12 @@ from models.digit_recognizer_v31_student import (
     create_v31_student_medium,
     create_v31_student_large,
 )
+from models.digit_recognizer_v32_teacher import (
+    create_v32_teacher_small,
+    create_v32_teacher_medium,
+    create_v32_teacher_large,
+    create_v32_teacher_xl,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -82,6 +88,10 @@ STUDENTS: Dict[str, Any] = {
     "v31_small":  create_v31_student_small,
     "v31_medium": create_v31_student_medium,
     "v31_large":  create_v31_student_large,
+    "v32_small":  create_v32_teacher_small,
+    "v32_medium": create_v32_teacher_medium,
+    "v32_large":  create_v32_teacher_large,
+    "v32_xl":     create_v32_teacher_xl,
 }
 
 
@@ -600,7 +610,7 @@ def run_distillation_pipeline(
             "batch_size":   batch_size,
             "teacher_lr":   teacher_lr,
             "student_lr":   student_lr,
-            "input_shape":  list(input_shape),
+            "input_shape":  list(params.INPUT_SHAPE),
         },
         "timestamp": datetime.now().isoformat(),
     }
