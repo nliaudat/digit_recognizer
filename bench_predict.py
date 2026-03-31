@@ -56,10 +56,20 @@ class TFLiteDigitPredictor:
             self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
             self.interpreter.allocate_tensors()
         except Exception as e:
-            print(f"❌ Failed to load TFLite model: {e}")
             if "XNNPACK" in str(e):
-                print("💡 This often indicates a corrupted or incompatible quantized model.")
-            raise e
+                print("💡 XNNPACK failed, falling back to basic interpreter without delegates...")
+                try:
+                    self.interpreter = tf.lite.Interpreter(
+                        model_path=self.model_path, 
+                        experimental_op_resolver_type=tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+                    )
+                    self.interpreter.allocate_tensors()
+                except Exception as fallback_e:
+                    print(f"❌ Fallback failed to load TFLite model: {fallback_e}")
+                    raise fallback_e
+            else:
+                print(f"❌ Failed to load TFLite model: {e}")
+                raise e
         
         self.input_details = self.interpreter.get_input_details()
         self.output_details = self.interpreter.get_output_details()
@@ -252,7 +262,17 @@ def get_model_parameters_count(model_path):
     """Get the number of parameters in a TFLite model"""
     try:
         interpreter = tf.lite.Interpreter(model_path=model_path)
-        interpreter.allocate_tensors()
+        try:
+            interpreter.allocate_tensors()
+        except Exception as e:
+            if "XNNPACK" in str(e):
+                interpreter = tf.lite.Interpreter(
+                    model_path=model_path,
+                    experimental_op_resolver_type=tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+                )
+                interpreter.allocate_tensors()
+            else:
+                raise e
         
         total_params = 0
         for tensor in interpreter.get_tensor_details():
@@ -277,7 +297,17 @@ def is_quantized_model(model_path):
             return True
             
         interpreter = tf.lite.Interpreter(model_path=model_path)
-        interpreter.allocate_tensors()
+        try:
+            interpreter.allocate_tensors()
+        except Exception as e:
+            if "XNNPACK" in str(e):
+                interpreter = tf.lite.Interpreter(
+                    model_path=model_path,
+                    experimental_op_resolver_type=tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+                )
+                interpreter.allocate_tensors()
+            else:
+                raise e
         input_details = interpreter.get_input_details()
         input_dtype = input_details[0]['dtype']
         
@@ -397,6 +427,17 @@ def is_valid_tflite_model(model_path):
         return True
     except Exception as e:
         error_msg = str(e)
+        if "XNNPACK" in error_msg:
+            try:
+                interpreter = tf.lite.Interpreter(
+                    model_path=model_path, 
+                    experimental_op_resolver_type=tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+                )
+                interpreter.allocate_tensors()
+                return True
+            except:
+                pass
+        
         if "Flex" in error_msg or "Select TensorFlow op(s)" in error_msg:
             print(f"⚠️  Skipping GPU-only or Flex-dependent model {os.path.basename(model_path)}")
         else:
