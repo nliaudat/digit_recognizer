@@ -2,7 +2,7 @@ services:
   digit-recognizer:
     build: .
     container_name: digit-recognizer-gpu
-    runtime: nvidia
+#    runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
     volumes:
