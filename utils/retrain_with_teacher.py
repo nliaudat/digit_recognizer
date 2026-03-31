@@ -9,6 +9,7 @@ import sys
 import argparse
 import logging
 import json
+import re
 import tensorflow as tf
 import numpy as np
 from pathlib import Path
@@ -204,15 +205,27 @@ def find_best_checkpoint(
         for sub_dir in base_dir.iterdir():
             if not sub_dir.is_dir():
                 continue
-                
-            if model_name in sub_dir.name or short_name in sub_dir.name:
+            
+            # Use regex for strict matching: must be preceded/followed by underscores, 
+            # start/end of string, or other boundaries. This prevents "v3" matching "v30".
+            # We check both full name and the short "vX" variant.
+            patterns = [
+                rf"(^|_){re.escape(model_name)}(_|$)",
+                rf"(^|_){re.escape(short_name)}(_|$)"
+            ]
+            
+            if any(re.search(p, sub_dir.name) for p in patterns):
                 best_model = sub_dir / "best_model.keras"
                 if best_model.exists():
                     return str(best_model)
                 
         # 2. Search for direct files
         for f in base_dir.glob("*.keras"):
-            if model_name in f.name or short_name in f.name:
+            patterns = [
+                rf"(^|_){re.escape(model_name)}(_|$)",
+                rf"(^|_){re.escape(short_name)}(_|$)"
+            ]
+            if any(re.search(p, f.name) for p in patterns):
                 return str(f)
                 
     return None
@@ -356,7 +369,7 @@ def retrain_with_teacher(
         epochs=args.epochs,
         batch_size=args.batch_size,
         callbacks=callbacks,
-        verbose=1,
+        verbose=2,
     )
     
     best_val_acc = max(history.history.get("val_accuracy", [0.0]))

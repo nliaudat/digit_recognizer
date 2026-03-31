@@ -23,7 +23,7 @@ import logging
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 
 # ── make sure the project root is on sys.path ──────────────────────────────
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -226,7 +226,7 @@ def train_teacher(
         epochs=epochs,
         batch_size=batch_size,
         callbacks=callbacks,
-        verbose=1,
+        verbose=2,
     )
 
     best_val_acc = max(history.history.get("val_accuracy", [0.0]))
@@ -383,7 +383,7 @@ def train_student_distillation(
         epochs=epochs,
         batch_size=batch_size,
         callbacks=callbacks,
-        verbose=1,
+        verbose=2,
     )
 
     best_val_acc = max(history.history.get("val_accuracy", [0.0]))
@@ -398,7 +398,7 @@ def train_student_distillation(
 # ---------------------------------------------------------------------------
 
 def run_distillation_pipeline(
-    teacher_type: str = "v30",
+    teacher_types: List[str] = ["v16"],
     student_variant: str = "v30_medium",
     num_classes: int = 10,
     color_mode: str = "gray",
@@ -408,7 +408,8 @@ def run_distillation_pipeline(
     teacher_lr: float = 1e-3,
     teacher_pretrained: bool = True,
     teacher_freeze_backbone: bool = False,
-    teacher_checkpoint: Optional[str] = None,
+    teacher_checkpoints: Optional[List[str]] = None,
+    teacher_weights: Optional[List[float]] = None,
     # Student distillation
     student_epochs: int = 50,
     student_lr: float = 1e-3,
@@ -437,12 +438,14 @@ def run_distillation_pipeline(
         results dict with teacher + student metrics and paths.
     """
     # ── Output directory ───────────────────────────────────────────────────
+    teacher_type_str = "+".join(teacher_types)
+
     if output_dir is None:
         color_label = color_mode.upper()
         timestamp   = datetime.now().strftime("%m%d_%H%M")
         
         # Match train.py naming convention: exported_models/10cls_RGB/distilled_v30_to_v4_10cls_RGB_0328_1910
-        run_folder = f"distilled_{teacher_type}_to_{student_variant}_{num_classes}cls_{color_label}_{timestamp}"
+        run_folder = f"distilled_{teacher_type_str}_to_{student_variant}_{num_classes}cls_{color_label}_{timestamp}"
         output_dir = os.path.join(params.OUTPUT_DIR, run_folder)
     
     os.makedirs(output_dir, exist_ok=True)
@@ -456,7 +459,7 @@ def run_distillation_pipeline(
 
     logger.info("=" * 60)
     logger.info("🚀 Starting Distillation Pipeline")
-    logger.info(f"   Teacher:  {teacher_type}  →  Student: {student_variant}")
+    logger.info(f"   Teachers: {teacher_type_str}  →  Student: {student_variant}")
     logger.info(f"   Classes:  {num_classes}   |  Color: {color_mode.upper()}")
     logger.info(f"   Mode:     {mode}          |  T={temperature}  α={alpha}")
     logger.info("=" * 60)
@@ -472,36 +475,50 @@ def run_distillation_pipeline(
     teacher_channels = 1 if teacher_color == "gray" else 3
     teacher_input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, teacher_channels)
 
-    auto_ckpt = os.path.join(
-        checkpoint_dir,
-        f"teacher_{teacher_type}_{num_classes}cls_{teacher_color}.keras"
-    )
-    if teacher_checkpoint and os.path.exists(teacher_checkpoint):
-        logger.info(f"Loading teacher from: {teacher_checkpoint}")
-        teacher = tf.keras.models.load_model(teacher_checkpoint)
-    elif os.path.exists(auto_ckpt):
-        logger.info(f"Found existing teacher checkpoint: {auto_ckpt}")
-        teacher = tf.keras.models.load_model(auto_ckpt)
-    else:
-        logger.info(f"Training teacher from scratch in {teacher_color} mode …")
-        teacher = train_teacher(
-            teacher_type=teacher_type,
-            num_classes=num_classes,
-            color_mode=teacher_color,
-            x_train=preprocess_for_training(get_data_splits()[0][0]) if teacher_color != color_mode else x_train, # Simplified for example
-            y_train=get_data_splits()[0][1],
-            x_val=preprocess_for_training(get_data_splits()[1][0]) if teacher_color != color_mode else x_val,
-            y_val=get_data_splits()[1][1],
-            epochs=teacher_epochs,
-            batch_size=batch_size,
-            learning_rate=teacher_lr,
-            checkpoint_dir=checkpoint_dir,
-            pretrained=teacher_pretrained,
-            freeze_backbone=teacher_freeze_backbone,
+    loaded_teachers = []
+    
+    for i, t_type in enumerate(teacher_types):
+        t_checkpoint = teacher_checkpoints[i] if teacher_checkpoints and i < len(teacher_checkpoints) else None
+        
+        auto_ckpt = os.path.join(
+            checkpoint_dir,
+            f"teacher_{t_type}_{num_classes}cls_{teacher_color}.keras"
         )
+        if t_checkpoint and os.path.exists(t_checkpoint):
+            logger.info(f"Loading teacher {t_type} from: {t_checkpoint}")
+            t_model = tf.keras.models.load_model(t_checkpoint)
+        elif os.path.exists(auto_ckpt):
+            logger.info(f"Found existing teacher checkpoint for {t_type}: {auto_ckpt}")
+            t_model = tf.keras.models.load_model(auto_ckpt)
+        else:
+            logger.info(f"Training teacher {t_type} from scratch in {teacher_color} mode …")
+            t_model = train_teacher(
+                teacher_type=t_type,
+                num_classes=num_classes,
+                color_mode=teacher_color,
+                x_train=preprocess_for_training(get_data_splits()[0][0]) if teacher_color != color_mode else x_train, # Simplified for example
+                y_train=get_data_splits()[0][1],
+                x_val=preprocess_for_training(get_data_splits()[1][0]) if teacher_color != color_mode else x_val,
+                y_val=get_data_splits()[1][1],
+                epochs=teacher_epochs,
+                batch_size=batch_size,
+                learning_rate=teacher_lr,
+                checkpoint_dir=checkpoint_dir,
+                pretrained=teacher_pretrained,
+                freeze_backbone=teacher_freeze_backbone,
+            )
 
-    # Freeze teacher for distillation
-    teacher = freeze_teacher_model(teacher)
+        # Freeze teacher for distillation
+        t_model = freeze_teacher_model(t_model)
+        loaded_teachers.append(t_model)
+
+    if len(loaded_teachers) > 1:
+        from utils.ensemble_teacher import EnsembleTeacher
+        teacher = EnsembleTeacher(loaded_teachers, teacher_weights=teacher_weights)
+        teacher_size = sum(get_model_size_kb(t) for t in loaded_teachers)
+    else:
+        teacher = loaded_teachers[0]
+        teacher_size = get_model_size_kb(teacher)
 
     # Quick teacher evaluation
     teacher_metrics = evaluate_distilled_model(teacher, (x_test, y_test))
@@ -560,9 +577,9 @@ def run_distillation_pipeline(
     # ── 6. Save results ───────────────────────────────────────────────────
     results = {
         "teacher": {
-            "type":     teacher_type,
+            "type":     teacher_type_str,
             "accuracy": teacher_metrics["accuracy"],
-            "size_kb":  get_model_size_kb(teacher),
+            "size_kb":  teacher_size,
         },
         "student": {
             "type":        student_variant,
@@ -591,7 +608,7 @@ def run_distillation_pipeline(
     # Save training report / summary into output_dir (like train.py)
     results_path = os.path.join(
         output_dir,
-        f"distillation_{teacher_type}_to_{student_variant}_{num_classes}cls.json"
+        f"distillation_{teacher_type_str}_to_{student_variant}_{num_classes}cls.json"
     )
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
