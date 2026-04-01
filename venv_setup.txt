@@ -1,6 +1,8 @@
-py -m venv venv_digreco
+python -m venv venv_digreco
 
 venv_digreco\Scripts\activate
+## linux
+source venv_digreco/bin/activate
 
 pip install -r requirements.txt
 

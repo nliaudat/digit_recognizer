@@ -58,6 +58,7 @@ Available students
 ──────────────────
 v30_micro, v30_small, v30_medium, v30_large  (depthwise separable)
 v31_micro, v31_small, v31_medium, v31_large  (inverted residual + SE)
+v32_small, v32_medium, v32_large, v32_xl     (V32 super-teachers trained via ensemble)
 
 Available existing models for retraining
 ────────────────────────────────────────
@@ -65,6 +66,8 @@ v3, v4, v6, v7, v15, v16, v17, v18, v19
 """
 
 import os
+# Silence TensorFlow C++ and XLA PTX diagnostic warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 import sys
 import argparse
 import logging
@@ -123,11 +126,11 @@ def parse_args() -> argparse.Namespace:
 
     # ── Model selection ────────────────────────────────────────────────────
     parser.add_argument(
-        "--teacher",
+        "--teachers",
         type=str,
-        default="v30",
-        choices=params.get_available_model_names(),
-        help="Teacher backbone (default: v30 = EfficientNetB0)"
+        nargs="+",
+        default=["v30"],
+        help="Teacher backbone(s) (default: ['v30'])"
     )
     parser.add_argument(
         "--teacher-color",
@@ -192,11 +195,20 @@ def parse_args() -> argparse.Namespace:
         help="Freeze teacher backbone during training"
     )
     parser.add_argument(
-        "--load-teacher",
+        "--load-teachers",
         type=str,
+        nargs="+",
         default=None,
         metavar="PATH",
-        help="Path to an existing teacher .keras file (skip teacher training)"
+        help="Paths to existing teacher .keras files (skip teacher training)"
+    )
+    
+    parser.add_argument(
+        "--teacher-weights",
+        type=float,
+        nargs="+",
+        default=None,
+        help="Weights for each teacher in the ensemble"
     )
 
     # ── Distillation ───────────────────────────────────────────────────────
@@ -328,7 +340,7 @@ def main() -> None:
         redirect_args = [
             sys.argv[0],
             "--model", args.existing_model,
-            "--teacher", args.teacher,
+            "--teacher", args.teachers[0],
             "--classes", str(args.classes),
             "--color", args.color,
             "--temperature", str(args.temperature),
@@ -343,8 +355,8 @@ def main() -> None:
             redirect_args.append("--progressive")
         if args.load_model_checkpoint:
             redirect_args.extend(["--load-checkpoint", args.load_model_checkpoint])
-        if args.load_teacher:
-            redirect_args.extend(["--teacher-checkpoint", args.load_teacher])
+        if args.load_teachers:
+            redirect_args.extend(["--teacher-checkpoint", args.load_teachers[0]])
         if args.teacher_color:
             redirect_args.extend(["--teacher-color", args.teacher_color])
         if not args.no_quantize:
@@ -365,7 +377,7 @@ def main() -> None:
     logger.info("🚀  Distillation Configuration")
     logger.info("=" * 60)
     logger.info(f"  Phase:           {args.phase}")
-    logger.info(f"  Teacher:         {args.teacher}")
+    logger.info(f"  Teachers:        {args.teachers}")
     logger.info(f"  Student:         {args.student}")
     logger.info(f"  Classes:         {num_classes}")
     logger.info(f"  Color mode:      {color_mode.upper()}")
@@ -382,39 +394,42 @@ def main() -> None:
             num_classes=num_classes,
             color_mode=color_mode,
         )
-        # ── Output directory logic (similar to train.py) ───────────────────
-        color_label = color_mode.upper()
-        timestamp = datetime.now().strftime("%m%d_%H%M")
-        run_folder = f"teacher_{args.teacher}_{num_classes}cls_{color_label}_{timestamp}"
         
-        # Base directory consistent with train.py
-        output_dir = os.path.join(params.OUTPUT_DIR, run_folder)
-        # Main model assets go into 'model' subdirectory
-        model_dir = os.path.join(output_dir, "model")
-        os.makedirs(model_dir, exist_ok=True)
+        for t_type in args.teachers:
+            # ── Output directory logic (similar to train.py) ───────────────────
+            color_label = color_mode.upper()
+            timestamp = datetime.now().strftime("%m%d_%H%M")
+            run_folder = f"teacher_{t_type}_{num_classes}cls_{color_label}_{timestamp}"
+            
+            # Base directory consistent with train.py
+            output_dir = os.path.join(params.OUTPUT_DIR, run_folder)
+            # Main model assets go into 'model' subdirectory
+            model_dir = os.path.join(output_dir, "model")
+            os.makedirs(model_dir, exist_ok=True)
 
-        train_teacher(
-            teacher_type=args.teacher,
-            num_classes=num_classes,
-            color_mode=color_mode,
-            x_train=x_train,
-            y_train=y_train,
-            x_val=x_val,
-            y_val=y_val,
-            epochs=args.teacher_epochs,
-            batch_size=args.batch,
-            learning_rate=args.teacher_lr,
-            checkpoint_dir=model_dir, # Save in model/ folder
-            pretrained=pretrained,
-            freeze_backbone=args.freeze_backbone,
-        )
-        logger.info(f"Teacher training session saved to: {output_dir}")
+            train_teacher(
+                teacher_type=t_type,
+                num_classes=num_classes,
+                color_mode=color_mode,
+                x_train=x_train,
+                y_train=y_train,
+                x_val=x_val,
+                y_val=y_val,
+                epochs=args.teacher_epochs,
+                batch_size=args.batch,
+                learning_rate=args.teacher_lr,
+                checkpoint_dir=model_dir, # Save in model/ folder
+                pretrained=pretrained,
+                freeze_backbone=args.freeze_backbone,
+            )
+            logger.info(f"Teacher training session saved to: {output_dir}")
 
     elif args.phase == "student":
         # ── Distill student from existing teacher ─────────────────────────
         run_distillation_pipeline(
-            teacher_type=args.teacher,
-            teacher_checkpoint=args.load_teacher,
+            teacher_types=args.teachers,
+            teacher_checkpoints=args.load_teachers,
+            teacher_weights=args.teacher_weights,
             teacher_color=args.teacher_color if args.teacher_color else args.color,
             student_variant=args.student,
             num_classes=num_classes,
@@ -441,11 +456,12 @@ def main() -> None:
     else:  # "all"
         # ── Full pipeline ─────────────────────────────────────────────────
         results = run_distillation_pipeline(
-            teacher_type=args.teacher,
+            teacher_types=args.teachers,
             student_variant=args.student,
             num_classes=num_classes,
             color_mode=color_mode,
-            teacher_checkpoint=args.load_teacher,
+            teacher_checkpoints=args.load_teachers,
+            teacher_weights=args.teacher_weights,
             teacher_epochs=args.teacher_epochs,
             teacher_lr=args.teacher_lr,
             teacher_pretrained=pretrained,

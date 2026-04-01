@@ -23,7 +23,7 @@ import logging
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 
 # ── make sure the project root is on sys.path ──────────────────────────────
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -60,6 +60,12 @@ from models.digit_recognizer_v31_student import (
     create_v31_student_medium,
     create_v31_student_large,
 )
+from models.digit_recognizer_v32_teacher import (
+    create_v32_teacher_small,
+    create_v32_teacher_medium,
+    create_v32_teacher_large,
+    create_v32_teacher_xl,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -82,6 +88,10 @@ STUDENTS: Dict[str, Any] = {
     "v31_small":  create_v31_student_small,
     "v31_medium": create_v31_student_medium,
     "v31_large":  create_v31_student_large,
+    "v32_small":  create_v32_teacher_small,
+    "v32_medium": create_v32_teacher_medium,
+    "v32_large":  create_v32_teacher_large,
+    "v32_xl":     create_v32_teacher_xl,
 }
 
 
@@ -226,7 +236,7 @@ def train_teacher(
         epochs=epochs,
         batch_size=batch_size,
         callbacks=callbacks,
-        verbose=1,
+        verbose=2,
     )
 
     best_val_acc = max(history.history.get("val_accuracy", [0.0]))
@@ -376,6 +386,20 @@ def train_student_distillation(
         ),
     ]
 
+    # Add CSV text logger and Monitor for plots
+    log_csv_path = os.path.join(checkpoint_dir, "training_log.csv")
+    callbacks.append(tf.keras.callbacks.CSVLogger(log_csv_path))
+    
+    from utils.train_trainingmonitor import TrainingMonitor
+    monitor = TrainingMonitor(checkpoint_dir)
+    
+    class TrainingMonitorCallbackWrapper(tf.keras.callbacks.Callback):
+        def on_epoch_end(self, epoch, logs=None):
+            monitor.model = self.model
+            monitor.on_epoch_end(epoch, logs)
+            
+    callbacks.append(TrainingMonitorCallbackWrapper())
+
     # ── Train ──────────────────────────────────────────────────────────────
     history = distiller.fit(
         x_train, y_train,
@@ -383,8 +407,10 @@ def train_student_distillation(
         epochs=epochs,
         batch_size=batch_size,
         callbacks=callbacks,
-        verbose=1,
+        verbose=2,
     )
+
+    monitor.save_training_plots()
 
     best_val_acc = max(history.history.get("val_accuracy", [0.0]))
     logger.info(f"Student best val_accuracy: {best_val_acc:.4f}")
@@ -398,7 +424,7 @@ def train_student_distillation(
 # ---------------------------------------------------------------------------
 
 def run_distillation_pipeline(
-    teacher_type: str = "v30",
+    teacher_types: List[str] = ["v16"],
     student_variant: str = "v30_medium",
     num_classes: int = 10,
     color_mode: str = "gray",
@@ -408,7 +434,8 @@ def run_distillation_pipeline(
     teacher_lr: float = 1e-3,
     teacher_pretrained: bool = True,
     teacher_freeze_backbone: bool = False,
-    teacher_checkpoint: Optional[str] = None,
+    teacher_checkpoints: Optional[List[str]] = None,
+    teacher_weights: Optional[List[float]] = None,
     # Student distillation
     student_epochs: int = 50,
     student_lr: float = 1e-3,
@@ -437,12 +464,14 @@ def run_distillation_pipeline(
         results dict with teacher + student metrics and paths.
     """
     # ── Output directory ───────────────────────────────────────────────────
+    teacher_type_str = "+".join(teacher_types)
+
     if output_dir is None:
         color_label = color_mode.upper()
         timestamp   = datetime.now().strftime("%m%d_%H%M")
         
         # Match train.py naming convention: exported_models/10cls_RGB/distilled_v30_to_v4_10cls_RGB_0328_1910
-        run_folder = f"distilled_{teacher_type}_to_{student_variant}_{num_classes}cls_{color_label}_{timestamp}"
+        run_folder = f"distilled_{teacher_type_str}_to_{student_variant}_{num_classes}cls_{color_label}_{timestamp}"
         output_dir = os.path.join(params.OUTPUT_DIR, run_folder)
     
     os.makedirs(output_dir, exist_ok=True)
@@ -456,7 +485,7 @@ def run_distillation_pipeline(
 
     logger.info("=" * 60)
     logger.info("🚀 Starting Distillation Pipeline")
-    logger.info(f"   Teacher:  {teacher_type}  →  Student: {student_variant}")
+    logger.info(f"   Teachers: {teacher_type_str}  →  Student: {student_variant}")
     logger.info(f"   Classes:  {num_classes}   |  Color: {color_mode.upper()}")
     logger.info(f"   Mode:     {mode}          |  T={temperature}  α={alpha}")
     logger.info("=" * 60)
@@ -472,36 +501,106 @@ def run_distillation_pipeline(
     teacher_channels = 1 if teacher_color == "gray" else 3
     teacher_input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, teacher_channels)
 
-    auto_ckpt = os.path.join(
-        checkpoint_dir,
-        f"teacher_{teacher_type}_{num_classes}cls_{teacher_color}.keras"
-    )
-    if teacher_checkpoint and os.path.exists(teacher_checkpoint):
-        logger.info(f"Loading teacher from: {teacher_checkpoint}")
-        teacher = tf.keras.models.load_model(teacher_checkpoint)
-    elif os.path.exists(auto_ckpt):
-        logger.info(f"Found existing teacher checkpoint: {auto_ckpt}")
-        teacher = tf.keras.models.load_model(auto_ckpt)
-    else:
-        logger.info(f"Training teacher from scratch in {teacher_color} mode …")
-        teacher = train_teacher(
-            teacher_type=teacher_type,
-            num_classes=num_classes,
-            color_mode=teacher_color,
-            x_train=preprocess_for_training(get_data_splits()[0][0]) if teacher_color != color_mode else x_train, # Simplified for example
-            y_train=get_data_splits()[0][1],
-            x_val=preprocess_for_training(get_data_splits()[1][0]) if teacher_color != color_mode else x_val,
-            y_val=get_data_splits()[1][1],
-            epochs=teacher_epochs,
-            batch_size=batch_size,
-            learning_rate=teacher_lr,
-            checkpoint_dir=checkpoint_dir,
-            pretrained=teacher_pretrained,
-            freeze_backbone=teacher_freeze_backbone,
-        )
+    loaded_teachers = []
+    
+    for i, t_type in enumerate(teacher_types):
+        t_checkpoint = teacher_checkpoints[i] if teacher_checkpoints and i < len(teacher_checkpoints) else None
+        
+        # Auto-find checkpoint if not provided
+        if not t_checkpoint:
+            from utils.retrain_with_teacher import find_best_checkpoint
+            t_checkpoint = find_best_checkpoint(t_type, num_classes, teacher_color)
+        
+        if t_checkpoint and os.path.exists(t_checkpoint):
+            logger.info(f"Loading teacher {t_type} from: {t_checkpoint}")
+            from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss, sparse_focal_loss, focal_loss
+            custom_objects = {
+                "DynamicSparseFocalLoss": DynamicSparseFocalLoss,
+                "DynamicFocalLoss": DynamicFocalLoss,
+                "sparse_focal_loss": sparse_focal_loss,
+                "focal_loss": focal_loss
+            }
+            # Auto-inject any custom layers from the teacher's script
+            try:
+                import importlib, inspect
+                clean_name = t_type.replace('digit_recognizer_', '').replace('_teacher', '')
+                try:
+                    mod = importlib.import_module(f"models.{clean_name}")
+                except ModuleNotFoundError:
+                    mod = importlib.import_module(f"models.digit_recognizer_{clean_name}")
+                for name, obj in inspect.getmembers(mod, inspect.isclass):
+                    if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
+                        custom_objects[name] = obj
+            except Exception as e:
+                logger.warning(f"Could not auto-import custom layers from {t_type}: {e}")
 
-    # Freeze teacher for distillation
-    teacher = freeze_teacher_model(teacher)
+            t_model = tf.keras.models.load_model(t_checkpoint, custom_objects=custom_objects, safe_mode=False)
+        else:
+            # CRITICAL FIX: Load proper data for teacher training
+            logger.info(f"Training teacher {t_type} from scratch...")
+            
+            # Load data in teacher's color mode
+            x_train_teacher, y_train_teacher, x_val_teacher, y_val_teacher, _, _ = load_distillation_data(
+                num_classes=num_classes,
+                color_mode=teacher_color,  # Use teacher's color mode
+            )
+            
+            t_model = train_teacher(
+                teacher_type=t_type,
+                num_classes=num_classes,
+                color_mode=teacher_color,  # Use teacher's color mode
+                x_train=x_train_teacher,
+                y_train=y_train_teacher,
+                x_val=x_val_teacher,
+                y_val=y_val_teacher,
+                epochs=teacher_epochs,
+                batch_size=batch_size,
+                learning_rate=teacher_lr,
+                checkpoint_dir=checkpoint_dir,
+                pretrained=teacher_pretrained,
+                freeze_backbone=teacher_freeze_backbone,
+            )
+
+        # Freeze teacher for distillation
+        t_model = freeze_teacher_model(t_model)
+        loaded_teachers.append(t_model)
+
+    if len(loaded_teachers) > 1:
+        from utils.ensemble_teacher import EnsembleTeacher
+        teacher = EnsembleTeacher(loaded_teachers, teacher_weights=teacher_weights)
+        teacher_size = sum(get_model_size_kb(t) for t in loaded_teachers)
+    else:
+        teacher = loaded_teachers[0]
+        teacher_size = get_model_size_kb(teacher)
+
+    # CRITICAL: Verify teacher is working
+    logger.info("Verifying teacher ensemble...")
+    dummy_input = tf.zeros((1, params.INPUT_HEIGHT, params.INPUT_WIDTH, 1 if teacher_color == "gray" else 3))
+    dummy_output = teacher(dummy_input)
+    logger.info(f"Teacher output shape: {dummy_output.shape}")
+    
+    # Quick sanity check on a small batch
+    teacher_preds = teacher.predict(x_test[:32], verbose=0)
+    teacher_acc = np.mean(np.argmax(teacher_preds, axis=1) == y_test[:32])
+    logger.info(f"Teacher sanity check accuracy (32 samples): {teacher_acc:.4f}")
+    if teacher_acc < 0.5:
+        logger.error("=" * 60)
+        logger.error("❌ TEACHER ENSEMBLE IS NOT WORKING CORRECTLY!")
+        logger.error(f"Teacher accuracy: {teacher_acc:.4f} (random for {num_classes} classes is ~{1.0/num_classes:.1%})")
+        logger.error("=" * 60)
+        logger.error("Possible causes:")
+        logger.error("  1. Teacher checkpoints not found or wrong")
+        logger.error("  2. Teacher color mode mismatch")
+        logger.error("  3. EnsembleTeacher weights not properly loaded")
+        logger.error("=" * 60)
+        
+        # List all loaded teachers for debugging
+        for i, t in enumerate(loaded_teachers):
+            logger.info(f"Teacher {i}: {t.name}")
+            if hasattr(t, 'input_shape'):
+                logger.info(f"  Input shape: {t.input_shape}")
+        
+        logger.warning("Continuing with broken teacher - student will likely fail!")
 
     # Quick teacher evaluation
     teacher_metrics = evaluate_distilled_model(teacher, (x_test, y_test))
@@ -560,9 +659,9 @@ def run_distillation_pipeline(
     # ── 6. Save results ───────────────────────────────────────────────────
     results = {
         "teacher": {
-            "type":     teacher_type,
+            "type":     teacher_type_str,
             "accuracy": teacher_metrics["accuracy"],
-            "size_kb":  get_model_size_kb(teacher),
+            "size_kb":  teacher_size,
         },
         "student": {
             "type":        student_variant,
@@ -583,7 +682,7 @@ def run_distillation_pipeline(
             "batch_size":   batch_size,
             "teacher_lr":   teacher_lr,
             "student_lr":   student_lr,
-            "input_shape":  list(input_shape),
+            "input_shape":  list(params.INPUT_SHAPE),
         },
         "timestamp": datetime.now().isoformat(),
     }
@@ -591,10 +690,44 @@ def run_distillation_pipeline(
     # Save training report / summary into output_dir (like train.py)
     results_path = os.path.join(
         output_dir,
-        f"distillation_{teacher_type}_to_{student_variant}_{num_classes}cls.json"
+        f"distillation_{teacher_type_str}_to_{student_variant}_{num_classes}cls.json"
     )
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
-    logger.info(f"Results saved → {results_path}")
+    
+    # ── 7. Generate Training Resume (parity with train.py) ───────────────
+    try:
+        from utils.train_helpers import save_model_summary_to_file
+        from utils.train_analyse import analyze_confusion_matrix, analyze_training_history
+        import shutil
+        
+        # Save standard best_model.keras in the root
+        student.save(os.path.join(output_dir, "best_model.keras"))
+        
+        # Save model summary
+        save_model_summary_to_file(student, output_dir)
+        
+        # Copy logs/plots from checkpoint_dir
+        for file in ["training_history.png", "training_log.csv"]:
+            src = os.path.join(checkpoint_dir, file)
+            if os.path.exists(src):
+                shutil.copy(src, os.path.join(output_dir, file))
+                
+        # Generate Confusion Matrix
+        analysis_dir = os.path.join(output_dir, "analysis")
+        os.makedirs(analysis_dir, exist_ok=True)
+        analyze_confusion_matrix(student, x_test, y_test, save_path=analysis_dir)
 
+        # Generate Detailed Training plot from CSV if possible
+        csv_log = os.path.join(output_dir, "training_log.csv")
+        if os.path.exists(csv_log):
+            analyze_training_history(csv_log, save_path=analysis_dir)
+            
+    except Exception as e:
+        logger.warning(f"Could not generate full training resume: {e}")
+        import traceback
+        traceback.print_exc()
+        
+    logger.info(f"Results saved → {results_path}")
+    
     return results

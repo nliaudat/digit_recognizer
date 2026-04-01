@@ -56,9 +56,10 @@ AVAILABLE_MODELS = [
     # ── Distillation: Teacher models (PC-only, large backbone, not for ESP32) ──
     "digit_recognizer_v30_teacher", # EfficientNetB0 teacher (train first, then distill students)
     "digit_recognizer_v31_teacher", # ResNet50 teacher (alternative backbone for ensemble distillation)
+    "digit_recognizer_v32_teacher", # Super-Teacher: ensemble distillation from multiple teachers
 ]
 
-MODEL_ARCHITECTURE = "digit_recognizer_v29" # one of the models in AVAILABLE_MODELS
+MODEL_ARCHITECTURE = "digit_recognizer_v32_teacher" # one of the models in AVAILABLE_MODELS
 
 
 # ==============================================================================
