@@ -38,22 +38,36 @@ class EnsembleTeacher(tf.keras.Model):
             
         logger.info(f"EnsembleTeacher created with {self.num_teachers} teachers")
         logger.info(f"Weights: {self.teacher_weights}")
+        
+        # DEBUG: Print teacher info
+        for i, teacher in enumerate(self.teachers):
+            logger.info(f"  Teacher {i}: {teacher.name}")
+            if hasattr(teacher, 'input_shape'):
+                logger.info(f"    Input shape: {teacher.input_shape}")
+            if hasattr(teacher, 'output_shape'):
+                logger.info(f"    Output shape: {teacher.output_shape}")
 
     def call(self, inputs: tf.Tensor, training: bool = False) -> tf.Tensor:
+        logger.debug(f"EnsembleTeacher.call() - inputs shape: {inputs.shape}")
         all_outputs = []
-        for teacher in self.teachers:
-            all_outputs.append(teacher(inputs, training=training))
+        for i, teacher in enumerate(self.teachers):
+            output = teacher(inputs, training=training)
+            logger.debug(f"  Teacher {i} output shape: {output.shape}")
+            all_outputs.append(output)
             
         if self.use_logits:
             weighted_logits = tf.zeros_like(all_outputs[0])
             for output, weight in zip(all_outputs, self.teacher_weights):
                 weighted_logits += weight * output
-            return tf.nn.softmax(weighted_logits / self.temperature)
+            result = tf.nn.softmax(weighted_logits / self.temperature)
         else:
             weighted_probs = tf.zeros_like(all_outputs[0])
             for output, weight in zip(all_outputs, self.teacher_weights):
                 weighted_probs += weight * output
-            return weighted_probs
+            result = weighted_probs
+        
+        logger.debug(f"Ensemble output shape: {result.shape}")
+        return result
 
     @property
     def input_shape(self):
@@ -75,3 +89,11 @@ class EnsembleTeacher(tf.keras.Model):
             'use_logits': self.use_logits,
         })
         return config
+
+    def verify(self, test_data, num_samples=100):
+        """Verify teacher ensemble is working properly."""
+        x_test, y_test = test_data
+        predictions = self.predict(x_test[:num_samples])
+        acc = np.mean(np.argmax(predictions, axis=1) == y_test[:num_samples])
+        logger.info(f"Ensemble teacher verification accuracy: {acc:.4f}")
+        return acc

@@ -183,51 +183,57 @@ def find_best_checkpoint(
     color_mode: str
 ) -> Optional[str]:
     """
-    Search for the best existing checkpoint for a given model.
-    Checks exported_models/ and its subdirectories.
+    Find best checkpoint with improved matching.
     """
     color_suffix = color_mode.upper()
     
-    # Try project structure: exported_models/10cls_RGB/digit_recognizer_v16_10cls_RGB/best_model.keras
     search_dirs = [
         Path(f"exported_models/{num_classes}cls_{color_suffix}"),
         Path("checkpoints")
     ]
     
-    # Also search for short name folders
-    short_name = model_name.replace("digit_recognizer_", "").replace("_teacher", "")
+    # Normalize model name
+    short_name = model_name.replace("digit_recognizer_", "").replace("_teacher", "").replace("_student", "")
     
     for base_dir in search_dirs:
         if not base_dir.exists():
             continue
             
-        # 1. Search for subdirectories matching model name
+        # Search subdirectories
         for sub_dir in base_dir.iterdir():
             if not sub_dir.is_dir():
                 continue
             
-            # Use regex for strict matching: must be preceded/followed by underscores, 
-            # start/end of string, or other boundaries. This prevents "v3" matching "v30".
-            # We check both full name and the short "vX" variant.
-            patterns = [
-                rf"(^|_){re.escape(model_name)}(_|$)",
-                rf"(^|_){re.escape(short_name)}(_|$)"
-            ]
+            # Looser matching but safely exclude distillation artifacts
+            dir_name_lower = sub_dir.name.lower()
+            if dir_name_lower.startswith("distilled_"):
+                continue
+                
+            model_lower = model_name.lower()
+            short_lower = short_name.lower()
             
-            if any(re.search(p, sub_dir.name) for p in patterns):
+            # Require the directory explicitly start with the model name, or contain digit_recognizer_<model>
+            target_a = f"digit_recognizer_{short_lower}"
+            target_b = f"{short_lower}_"
+            
+            if target_a in dir_name_lower or target_b in dir_name_lower or model_lower == dir_name_lower:
                 best_model = sub_dir / "best_model.keras"
                 if best_model.exists():
+                    logger.info(f"Found checkpoint: {best_model}")
                     return str(best_model)
                 
-        # 2. Search for direct files
+                # Also check for model.keras
+                model_file = sub_dir / "model.keras"
+                if model_file.exists():
+                    logger.info(f"Found checkpoint: {model_file}")
+                    return str(model_file)
+        
+        # Search direct files
         for f in base_dir.glob("*.keras"):
-            patterns = [
-                rf"(^|_){re.escape(model_name)}(_|$)",
-                rf"(^|_){re.escape(short_name)}(_|$)"
-            ]
-            if any(re.search(p, f.name) for p in patterns):
+            fname_lower = f.name.lower()
+            if model_lower in fname_lower or short_lower in fname_lower:
                 return str(f)
-                
+    
     return None
 
 
@@ -455,11 +461,28 @@ def main():
     if actual_teacher_checkpoint and os.path.exists(actual_teacher_checkpoint):
         logger.info(f"Loading teacher from {actual_teacher_checkpoint}")
         # Pass custom objects for focal loss if needed
+        from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss, sparse_focal_loss, focal_loss
         custom_objects = {
             "DynamicSparseFocalLoss": DynamicSparseFocalLoss,
-            "DynamicFocalLoss": DynamicFocalLoss
+            "DynamicFocalLoss": DynamicFocalLoss,
+            "sparse_focal_loss": sparse_focal_loss,
+            "focal_loss": focal_loss
         }
-        teacher = tf.keras.models.load_model(actual_teacher_checkpoint, custom_objects=custom_objects)
+        # Auto-inject any custom layers from the teacher's script
+        try:
+            import importlib, inspect
+            clean_name = args.teacher.replace('digit_recognizer_', '').replace('_teacher', '')
+            try:
+                mod = importlib.import_module(f"models.{clean_name}")
+            except ModuleNotFoundError:
+                mod = importlib.import_module(f"models.digit_recognizer_{clean_name}")
+            for name, obj in inspect.getmembers(mod, inspect.isclass):
+                if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
+                    custom_objects[name] = obj
+        except Exception as e:
+            logger.warning(f"Could not auto-import custom layers from {args.teacher}: {e}")
+            
+        teacher = tf.keras.models.load_model(actual_teacher_checkpoint, custom_objects=custom_objects, safe_mode=False)
     else:
         logger.warning(f"No trained teacher found for {args.teacher}. Using random-weight teacher (not recommended!)")
         teacher = create_model_by_name(

@@ -386,6 +386,20 @@ def train_student_distillation(
         ),
     ]
 
+    # Add CSV text logger and Monitor for plots
+    log_csv_path = os.path.join(checkpoint_dir, "training_log.csv")
+    callbacks.append(tf.keras.callbacks.CSVLogger(log_csv_path))
+    
+    from utils.train_trainingmonitor import TrainingMonitor
+    monitor = TrainingMonitor(checkpoint_dir)
+    
+    class TrainingMonitorCallbackWrapper(tf.keras.callbacks.Callback):
+        def on_epoch_end(self, epoch, logs=None):
+            monitor.model = self.model
+            monitor.on_epoch_end(epoch, logs)
+            
+    callbacks.append(TrainingMonitorCallbackWrapper())
+
     # ── Train ──────────────────────────────────────────────────────────────
     history = distiller.fit(
         x_train, y_train,
@@ -395,6 +409,8 @@ def train_student_distillation(
         callbacks=callbacks,
         verbose=2,
     )
+
+    monitor.save_training_plots()
 
     best_val_acc = max(history.history.get("val_accuracy", [0.0]))
     logger.info(f"Student best val_accuracy: {best_val_acc:.4f}")
@@ -490,26 +506,53 @@ def run_distillation_pipeline(
     for i, t_type in enumerate(teacher_types):
         t_checkpoint = teacher_checkpoints[i] if teacher_checkpoints and i < len(teacher_checkpoints) else None
         
-        auto_ckpt = os.path.join(
-            checkpoint_dir,
-            f"teacher_{t_type}_{num_classes}cls_{teacher_color}.keras"
-        )
+        # Auto-find checkpoint if not provided
+        if not t_checkpoint:
+            from utils.retrain_with_teacher import find_best_checkpoint
+            t_checkpoint = find_best_checkpoint(t_type, num_classes, teacher_color)
+        
         if t_checkpoint and os.path.exists(t_checkpoint):
             logger.info(f"Loading teacher {t_type} from: {t_checkpoint}")
-            t_model = tf.keras.models.load_model(t_checkpoint)
-        elif os.path.exists(auto_ckpt):
-            logger.info(f"Found existing teacher checkpoint for {t_type}: {auto_ckpt}")
-            t_model = tf.keras.models.load_model(auto_ckpt)
+            from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss, sparse_focal_loss, focal_loss
+            custom_objects = {
+                "DynamicSparseFocalLoss": DynamicSparseFocalLoss,
+                "DynamicFocalLoss": DynamicFocalLoss,
+                "sparse_focal_loss": sparse_focal_loss,
+                "focal_loss": focal_loss
+            }
+            # Auto-inject any custom layers from the teacher's script
+            try:
+                import importlib, inspect
+                clean_name = t_type.replace('digit_recognizer_', '').replace('_teacher', '')
+                try:
+                    mod = importlib.import_module(f"models.{clean_name}")
+                except ModuleNotFoundError:
+                    mod = importlib.import_module(f"models.digit_recognizer_{clean_name}")
+                for name, obj in inspect.getmembers(mod, inspect.isclass):
+                    if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
+                        custom_objects[name] = obj
+            except Exception as e:
+                logger.warning(f"Could not auto-import custom layers from {t_type}: {e}")
+
+            t_model = tf.keras.models.load_model(t_checkpoint, custom_objects=custom_objects, safe_mode=False)
         else:
-            logger.info(f"Training teacher {t_type} from scratch in {teacher_color} mode …")
+            # CRITICAL FIX: Load proper data for teacher training
+            logger.info(f"Training teacher {t_type} from scratch...")
+            
+            # Load data in teacher's color mode
+            x_train_teacher, y_train_teacher, x_val_teacher, y_val_teacher, _, _ = load_distillation_data(
+                num_classes=num_classes,
+                color_mode=teacher_color,  # Use teacher's color mode
+            )
+            
             t_model = train_teacher(
                 teacher_type=t_type,
                 num_classes=num_classes,
-                color_mode=teacher_color,
-                x_train=preprocess_for_training(get_data_splits()[0][0]) if teacher_color != color_mode else x_train, # Simplified for example
-                y_train=get_data_splits()[0][1],
-                x_val=preprocess_for_training(get_data_splits()[1][0]) if teacher_color != color_mode else x_val,
-                y_val=get_data_splits()[1][1],
+                color_mode=teacher_color,  # Use teacher's color mode
+                x_train=x_train_teacher,
+                y_train=y_train_teacher,
+                x_val=x_val_teacher,
+                y_val=y_val_teacher,
                 epochs=teacher_epochs,
                 batch_size=batch_size,
                 learning_rate=teacher_lr,
@@ -529,6 +572,35 @@ def run_distillation_pipeline(
     else:
         teacher = loaded_teachers[0]
         teacher_size = get_model_size_kb(teacher)
+
+    # CRITICAL: Verify teacher is working
+    logger.info("Verifying teacher ensemble...")
+    dummy_input = tf.zeros((1, params.INPUT_HEIGHT, params.INPUT_WIDTH, 1 if teacher_color == "gray" else 3))
+    dummy_output = teacher(dummy_input)
+    logger.info(f"Teacher output shape: {dummy_output.shape}")
+    
+    # Quick sanity check on a small batch
+    teacher_preds = teacher.predict(x_test[:32], verbose=0)
+    teacher_acc = np.mean(np.argmax(teacher_preds, axis=1) == y_test[:32])
+    logger.info(f"Teacher sanity check accuracy (32 samples): {teacher_acc:.4f}")
+    if teacher_acc < 0.5:
+        logger.error("=" * 60)
+        logger.error("❌ TEACHER ENSEMBLE IS NOT WORKING CORRECTLY!")
+        logger.error(f"Teacher accuracy: {teacher_acc:.4f} (random for {num_classes} classes is ~{1.0/num_classes:.1%})")
+        logger.error("=" * 60)
+        logger.error("Possible causes:")
+        logger.error("  1. Teacher checkpoints not found or wrong")
+        logger.error("  2. Teacher color mode mismatch")
+        logger.error("  3. EnsembleTeacher weights not properly loaded")
+        logger.error("=" * 60)
+        
+        # List all loaded teachers for debugging
+        for i, t in enumerate(loaded_teachers):
+            logger.info(f"Teacher {i}: {t.name}")
+            if hasattr(t, 'input_shape'):
+                logger.info(f"  Input shape: {t.input_shape}")
+        
+        logger.warning("Continuing with broken teacher - student will likely fail!")
 
     # Quick teacher evaluation
     teacher_metrics = evaluate_distilled_model(teacher, (x_test, y_test))
@@ -622,6 +694,40 @@ def run_distillation_pipeline(
     )
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
-    logger.info(f"Results saved → {results_path}")
+    
+    # ── 7. Generate Training Resume (parity with train.py) ───────────────
+    try:
+        from utils.train_helpers import save_model_summary_to_file
+        from utils.train_analyse import analyze_confusion_matrix, analyze_training_history
+        import shutil
+        
+        # Save standard best_model.keras in the root
+        student.save(os.path.join(output_dir, "best_model.keras"))
+        
+        # Save model summary
+        save_model_summary_to_file(student, output_dir)
+        
+        # Copy logs/plots from checkpoint_dir
+        for file in ["training_history.png", "training_log.csv"]:
+            src = os.path.join(checkpoint_dir, file)
+            if os.path.exists(src):
+                shutil.copy(src, os.path.join(output_dir, file))
+                
+        # Generate Confusion Matrix
+        analysis_dir = os.path.join(output_dir, "analysis")
+        os.makedirs(analysis_dir, exist_ok=True)
+        analyze_confusion_matrix(student, x_test, y_test, save_path=analysis_dir)
 
+        # Generate Detailed Training plot from CSV if possible
+        csv_log = os.path.join(output_dir, "training_log.csv")
+        if os.path.exists(csv_log):
+            analyze_training_history(csv_log, save_path=analysis_dir)
+            
+    except Exception as e:
+        logger.warning(f"Could not generate full training resume: {e}")
+        import traceback
+        traceback.print_exc()
+        
+    logger.info(f"Results saved → {results_path}")
+    
     return results

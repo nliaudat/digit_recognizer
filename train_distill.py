@@ -66,6 +66,8 @@ v3, v4, v6, v7, v15, v16, v17, v18, v19
 """
 
 import os
+# Silence TensorFlow C++ and XLA PTX diagnostic warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 import sys
 import argparse
 import logging

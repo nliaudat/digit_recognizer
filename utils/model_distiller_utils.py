@@ -176,8 +176,22 @@ def evaluate_distilled_model(
     """
     x_test, y_test = test_data
     
-    # Get predictions
-    logits = model.predict(x_test, batch_size=batch_size, verbose=0)
+    # Check if model is an EnsembleTeacher wrapper
+    if hasattr(model, 'teachers'):  # EnsembleTeacher
+        logger.info("Evaluating ensemble teacher...")
+        try:
+            logits = model.predict(x_test, batch_size=batch_size, verbose=0)
+        except:
+            # Fallback: evaluate each teacher separately
+            all_preds = []
+            for teacher in model.teachers:
+                preds = teacher.predict(x_test, batch_size=batch_size, verbose=0)
+                all_preds.append(preds)
+            # Weighted average
+            logits = np.average(all_preds, weights=model.teacher_weights, axis=0)
+    else:
+        logits = model.predict(x_test, batch_size=batch_size, verbose=0)
+        
     predictions = np.argmax(logits, axis=1)
     
     # Calculate metrics
