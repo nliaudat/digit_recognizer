@@ -59,6 +59,8 @@ python train_distill.py --phase student \
 
 Ensemble distillation allows the student model to learn from the aggregated wisdom of multiple different teacher architectures. This prevents the student from memorizing the specific biases of a single teacher architecture and frequently improves final generalization.
 
+Our pipeline features an **`EnsembleTeacher`** that automatically freezes all contributing teachers and seamlessly combines their outputs. It supports computing weighted averages of either probabilities or logits to create a consolidated "soft target" for the student.
+
 To run ensemble distillation, specify multiple teacher types. Optionally, provide custom weights indicating their relative importance:
 
 ```bash
@@ -71,7 +73,30 @@ python train_distill.py --phase student \
     --alpha 0.6
 ```
 
-In the background, the pipeline wraps these models inside a frozen `EnsembleTeacher` class dynamically, ensuring smooth integration with standard loss routines.
+In the background, the pipeline wraps these models inside the `EnsembleTeacher` class dynamically, ensuring smooth integration with Keras loss routines.
+
+*Note: You can also utilize pre-built "super-teacher" models, such as the `v32` family (`v32_small`, `v32_medium`, `v32_large`, `v32_xl`), which themselves were trained via ensemble distillation.*
+
+### 4. Retraining Existing Models with a Teacher
+
+You can retroactively improve the accuracy of existing baseline edge models (e.g., `v4` or `v16`) by fine-tuning them under the supervision of a powerful teacher. This preserves the optimized edge architectures while mapping rich knowledge into them.
+
+```bash
+# Retrain v4 with a v30 teacher
+python train_distill.py --retrain-existing --existing-model v4 \
+    --teacher v30 --classes 10 --color gray --epochs 30
+
+# Retrain v16 from an existing checkpoint with progressive distillation
+python train_distill.py --retrain-existing --existing-model v16 \
+    --load-model-checkpoint checkpoints/v16_best.keras --teacher v30 --progressive
+```
+
+### 5. Advanced Distillation Strategies
+
+The pipeline automatically employs advanced distillation mechanisms when requested or needed:
+
+*   **Mixed Input Distillation:** Allows distilling knowledge from an RGB teacher (3 channels) into a lightweight Grayscale student (1 channel). The `MixedInputDistiller` automatically transforms inputs so both models receive appropriate channel structures transparently.
+*   **Progressive Distillation (`--progressive`):** Instead of fixed hyperparameters, progressively anneals the temperature (from 8.0 to 2.0) and transitions the `alpha` weighting from teacher-heavy (0.3) to more hard-labels (0.8) across the epochs.
 
 ## Global Parameters (`parameters.py`)
 
