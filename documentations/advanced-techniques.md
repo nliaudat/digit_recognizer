@@ -7,10 +7,11 @@ This document explains the advanced training techniques implemented in the digit
 1. [Intelligent Focal Loss](#1-intelligent-focal-loss)
 2. [Dynamic Per-Class Weighting](#2-dynamic-per-class-weighting)
 3. [Quantization-Aware Training (QAT)](#3-quantization-aware-training-qat)
-4. [Combined Strategy: Best Practices](#4-combined-strategy-best-practices)
-5. [Troubleshooting](#5-troubleshooting)
-6. [References](#6-references)
-7. [Appendix: Example Configurations](#appendix-example-configurations)
+4. [Knowledge Distillation](#4-knowledge-distillation)
+5. [Combined Strategy: Best Practices](#5-combined-strategy-best-practices)
+6. [Troubleshooting](#6-troubleshooting)
+7. [References](#7-references)
+8. [Appendix: Example Configurations](#8-appendix-example-configurations)
 
 ---
 
@@ -217,7 +218,16 @@ QAT_WARMUP_EPOCHS = 2            # Gradually introduce quantization
 
 ---
 
-## 4. Combined Strategy: Best Practices
+## 4. Knowledge Distillation
+
+For pushing accuracy boundaries on constrained edge devices, we employ Knowledge Distillation techniques (including Multi-Teacher Ensemble Distillation, Progressive Distillation, and Mixed-Input Distillation). This allows our tiniest models to inherit the rich representations of massive teacher architectures without increasing edge resource requirements.
+
+For full instructions, pipelines, and advanced configuration options regarding distillation, please refer to our dedicated documentation:
+👉 **[Knowledge Distillation Pipeline Documentation](distillation.md)**
+
+---
+
+## 5. Combined Strategy: Best Practices
 
 ### Scenario-Specific Configurations
 #### Scenario 1: 10-Class Digits (Simple)
@@ -283,7 +293,7 @@ Step 6: Validate on target hardware
 
 ---
 
-## 5. Troubleshooting
+## 6. Troubleshooting
 
 | Issue | Likely Cause | Solution |
 | :--- | :--- | :--- |
@@ -298,7 +308,7 @@ Step 6: Validate on target hardware
 
 ---
 
-## 6. References
+## 7. References
 1. **Focal Loss for Dense Object Detection**
    Lin, T. Y., Goyal, P., Girshick, R., He, K., & Dollár, P. (2017)
    Proceedings of the IEEE International Conference on Computer Vision (ICCV)
@@ -314,7 +324,7 @@ Step 6: Validate on target hardware
 
 ---
 
-## Appendix: Example Configurations
+## 8. Appendix: Example Configurations
 
 ### Production High-Accuracy (100 Classes)
 ```python

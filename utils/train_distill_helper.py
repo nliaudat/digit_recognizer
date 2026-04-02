@@ -503,17 +503,24 @@ def run_distillation_pipeline(
 
     loaded_teachers = []
     
+    # Pre-load required modules to avoid doing it in the loop
+    from utils.retrain_with_teacher import find_best_checkpoint
+    from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss, sparse_focal_loss, focal_loss
+    import importlib, inspect
+    
+    # Flags and caching for dataset loading
+    teacher_data_loaded = False
+    x_train_teacher, y_train_teacher, x_val_teacher, y_val_teacher = None, None, None, None
+    
     for i, t_type in enumerate(teacher_types):
         t_checkpoint = teacher_checkpoints[i] if teacher_checkpoints and i < len(teacher_checkpoints) else None
         
         # Auto-find checkpoint if not provided
         if not t_checkpoint:
-            from utils.retrain_with_teacher import find_best_checkpoint
             t_checkpoint = find_best_checkpoint(t_type, num_classes, teacher_color)
         
         if t_checkpoint and os.path.exists(t_checkpoint):
             logger.info(f"Loading teacher {t_type} from: {t_checkpoint}")
-            from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss, sparse_focal_loss, focal_loss
             custom_objects = {
                 "DynamicSparseFocalLoss": DynamicSparseFocalLoss,
                 "DynamicFocalLoss": DynamicFocalLoss,
@@ -522,7 +529,6 @@ def run_distillation_pipeline(
             }
             # Auto-inject any custom layers from the teacher's script
             try:
-                import importlib, inspect
                 clean_name = t_type.replace('digit_recognizer_', '').replace('_teacher', '')
                 try:
                     mod = importlib.import_module(f"models.{clean_name}")
@@ -539,11 +545,13 @@ def run_distillation_pipeline(
             # CRITICAL FIX: Load proper data for teacher training
             logger.info(f"Training teacher {t_type} from scratch...")
             
-            # Load data in teacher's color mode
-            x_train_teacher, y_train_teacher, x_val_teacher, y_val_teacher, _, _ = load_distillation_data(
-                num_classes=num_classes,
-                color_mode=teacher_color,  # Use teacher's color mode
-            )
+            # Load data in teacher's color mode only once if needed
+            if not teacher_data_loaded:
+                x_train_teacher, y_train_teacher, x_val_teacher, y_val_teacher, _, _ = load_distillation_data(
+                    num_classes=num_classes,
+                    color_mode=teacher_color,  # Use teacher's color mode
+                )
+                teacher_data_loaded = True
             
             t_model = train_teacher(
                 teacher_type=t_type,

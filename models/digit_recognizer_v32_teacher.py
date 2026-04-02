@@ -45,13 +45,19 @@ def squeeze_excite_block(
 ) -> tf.Tensor:
     """
     Squeeze-and-Excitation block for channel attention.
-    Helps model focus on important features.
+
+    Uses keepdims=True in GlobalAveragePooling2D to output shape
+    (batch, 1, 1, channels) directly — avoids the separate Reshape layer
+    that causes TFLite to emit SHAPE + STRIDED_SLICE + PACK dynamic-shape
+    ops, which break XNNPACK INT8 and add unnecessary overhead.
     """
-    channels = x.shape[-1]
-    se = tf.keras.layers.GlobalAveragePooling2D(name=f"{name_prefix}_gap")(x)
-    se = tf.keras.layers.Reshape((1, 1, channels), name=f"{name_prefix}_reshape")(se)
+    channels = int(x.shape[-1])
+    # keepdims=True → output is (batch, 1, 1, C), no Reshape needed
+    se = tf.keras.layers.GlobalAveragePooling2D(
+        keepdims=True, name=f"{name_prefix}_gap"
+    )(x)
     se = tf.keras.layers.Conv2D(
-        channels // reduction, 1, activation="relu",
+        max(1, channels // reduction), 1, activation="relu",
         kernel_initializer="he_normal", name=f"{name_prefix}_reduce"
     )(se)
     se = tf.keras.layers.Conv2D(
@@ -59,6 +65,7 @@ def squeeze_excite_block(
         kernel_initializer="he_normal", name=f"{name_prefix}_expand"
     )(se)
     return tf.keras.layers.Multiply(name=f"{name_prefix}_scale")([x, se])
+
 
 
 def inverted_residual_block(

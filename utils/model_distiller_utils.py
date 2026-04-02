@@ -78,83 +78,85 @@ def export_student_for_edge(
     os.makedirs(os.path.dirname(export_path), exist_ok=True)
     
     # Convert to TensorFlow Lite
-    
-    # CRITICAL: Re-build/clone student to ensure we capture actual session weights.
-    # Keras sub-models inside a wrapper can sometimes have stale or un-initialized 
-    # weight views when accessed via their own save/convert methods.
-    try:
-        from tensorflow.keras.models import clone_model
-        clean_student = clone_model(student)
-        clean_student.set_weights(student.get_weights())
-        student = clean_student
-        logger.info("  Synthesized clean student for export (weight-sync OK)")
-    except Exception as e:
-        logger.warning(f"  Student cloning failed ({e}), continuing with original object.")
+    # NOTE: Do NOT clone the model here. clone_model() can silently break the
+    # computation graph for complex architectures (EfficientNet backbones, custom
+    # layers), producing a TFLite model with garbage outputs despite the Keras
+    # model being perfectly accurate. The student passed in already has the correct
+    # best weights restored by EarlyStopping(restore_best_weights=True).
 
-    # 1. Create converter
-    converter = tf.lite.TFLiteConverter.from_keras_model(student)
-    
+    # 1. Build representative dataset generator (shared by both conversion attempts)
+    def _make_rep_gen(rep_data):
+        """Create a representative dataset generator from a numpy array."""
+        n = min(100, len(rep_data))
+        def _gen():
+            for i in range(n):
+                yield [rep_data[i:i+1].astype(np.float32)]
+        return _gen
+
+    def _make_dummy_gen(model):
+        """Create a dummy representative dataset generator from model input shape."""
+        shape = list(model.input_shape if not isinstance(model.input_shape, list)
+                     else model.input_shape[0])
+        shape[0] = 1
+        def _gen():
+            for _ in range(100):
+                yield [np.random.randn(*shape).astype(np.float32)]
+        return _gen
+
+    rep_gen = None
     if quantize:
-        logger.info(f"Applying quantization for {target_hardware}")
-        converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        
-        # Configure quantization based on target
-        if target_hardware == "esp32":
-            converter.target_spec.supported_ops = [
-                tf.lite.OpsSet.TFLITE_BUILTINS_INT8,
-                tf.lite.OpsSet.TFLITE_BUILTINS
-            ]
-            converter.inference_input_type = tf.int8
-            converter.inference_output_type = tf.int8
-        else:
-            converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-        
-        # Provide representative dataset if available
         if representative_dataset is not None:
             if isinstance(representative_dataset, np.ndarray):
-                def rep_data_gen():
-                    # Use a subset of provided data
-                    num_samples = min(100, len(representative_dataset))
-                    for i in range(num_samples):
-                        # Ensure batch dimension of 1
-                        sample = representative_dataset[i:i+1].astype(np.float32)
-                        yield [sample]
-                converter.representative_dataset = rep_data_gen
+                rep_gen = _make_rep_gen(representative_dataset)
             else:
-                converter.representative_dataset = lambda: representative_dataset
+                rep_gen = lambda: representative_dataset
         else:
-            # Create dummy representative dataset with correct shape
-            # Get input shape from model (excluding batch dim)
-            input_shape = student.input_shape
-            if isinstance(input_shape, list):
-                input_shape = input_shape[0]
-            
-            # Ensure shape is a tuple of (height, width, channels)
-            # student.input_shape can be (None, 32, 20, 3)
-            shape_with_batch = list(input_shape)
-            shape_with_batch[0] = 1 # Force batch size 1
-            
-            def dummy_dataset():
-                for _ in range(100):
-                    dummy_input = np.random.randn(*shape_with_batch).astype(np.float32)
-                    yield [dummy_input]
-            converter.representative_dataset = dummy_dataset
-    
-    # Convert
-    tflite_model = converter.convert()
-    
-    # Save
+            rep_gen = _make_dummy_gen(student)
+
+    def _build_converter(input_type=None, output_type=None, ops=None):
+        conv = tf.lite.TFLiteConverter.from_keras_model(student)
+        if quantize:
+            conv.optimizations = [tf.lite.Optimize.DEFAULT]
+            if ops:
+                conv.target_spec.supported_ops = ops
+            if input_type:
+                conv.inference_input_type = input_type
+            if output_type:
+                conv.inference_output_type = output_type
+            if rep_gen:
+                conv.representative_dataset = rep_gen
+        return conv
+
     tflite_path = f"{export_path}.tflite"
+
+    if quantize and target_hardware == "esp32":
+        # Full integer quantization (INT8 I/O) for ESP-DL / TFLite Micro.
+        # NOTE: We do NOT validate with XNNPACK here. XNNPACK is a PC-only delegate;
+        # the ESP32 uses ESP-DL or TFLite Micro which have their own kernels.
+        # A model that fails XNNPACK on the host may be perfectly valid on-device.
+        logger.info(f"Applying full INT8 quantization for {target_hardware}")
+        conv = _build_converter(
+            input_type=tf.int8, output_type=tf.int8,
+            ops=[tf.lite.OpsSet.TFLITE_BUILTINS_INT8, tf.lite.OpsSet.TFLITE_BUILTINS]
+        )
+        tflite_model = conv.convert()
+    elif quantize:
+        conv = _build_converter(ops=[tf.lite.OpsSet.TFLITE_BUILTINS_INT8])
+        tflite_model = conv.convert()
+    else:
+        tflite_model = _build_converter().convert()
+
+    # Save TFLite
     with open(tflite_path, 'wb') as f:
         f.write(tflite_model)
-    
-    # Also save as H5 for compatibility
+
+    # Also save keras for compatibility
     keras_path = os.path.join(os.path.dirname(export_path), "best_model.keras")
     student.save(keras_path)
-    
+
     size_kb = os.path.getsize(tflite_path) / 1024
     logger.info(f"Exported student to {tflite_path} ({size_kb:.1f} KB)")
-    
+
     return tflite_path
 
 
