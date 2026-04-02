@@ -217,16 +217,17 @@ def find_best_checkpoint(
             target_b = f"{short_lower}_"
             
             if target_a in dir_name_lower or target_b in dir_name_lower or model_lower == dir_name_lower:
-                best_model = sub_dir / "best_model.keras"
-                if best_model.exists():
-                    logger.info(f"Found checkpoint: {best_model}")
-                    return str(best_model)
-                
-                # Also check for model.keras
-                model_file = sub_dir / "model.keras"
-                if model_file.exists():
-                    logger.info(f"Found checkpoint: {model_file}")
-                    return str(model_file)
+                # Check root of the run folder and the 'model' subfolder 
+                candidate_paths = [
+                    sub_dir / "best_model.keras",
+                    sub_dir / "model" / "best_model.keras",
+                    sub_dir / "model.keras",
+                    sub_dir / "model" / "model.keras"
+                ]
+                for candidate in candidate_paths:
+                    if candidate.exists():
+                        logger.info(f"Found checkpoint: {candidate}")
+                        return str(candidate)
         
         # Search direct files
         for f in base_dir.glob("*.keras"):
