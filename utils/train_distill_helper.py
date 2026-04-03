@@ -35,6 +35,7 @@ import tensorflow as tf
 
 # ── project imports ────────────────────────────────────────────────────────
 import parameters as params
+from utils.keras_helper import keras
 from utils import get_data_splits, preprocess_for_training, preprocess_for_inference
 from utils.distiller import Distiller, ProgressiveDistiller, MixedInputDistiller, DistillationProgressCallback
 from utils.model_distiller_utils import (
@@ -46,26 +47,8 @@ from utils.model_distiller_utils import (
     freeze_teacher_model,
 )
 
-from models.digit_recognizer_v30_teacher import create_v30_teacher
-from models.digit_recognizer_v31_teacher import create_v31_teacher
-from models.digit_recognizer_v30_student import (
-    create_v30_student_micro,
-    create_v30_student_small,
-    create_v30_student_medium,
-    create_v30_student_large,
-)
-from models.digit_recognizer_v31_student import (
-    create_v31_student_micro,
-    create_v31_student_small,
-    create_v31_student_medium,
-    create_v31_student_large,
-)
-from models.digit_recognizer_v32_teacher import (
-    create_v32_teacher_small,
-    create_v32_teacher_medium,
-    create_v32_teacher_large,
-    create_v32_teacher_xl,
-)
+# Models are imported dynamically or registered through functions to avoid
+# crashing the whole script if one model has a dependency issue.
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -74,24 +57,26 @@ logger = logging.getLogger(__name__)
 # Registry maps
 # ---------------------------------------------------------------------------
 
+# Lazy registry for teachers and students
+# Use functions that import on-demand to stay robust against dependency issues
 TEACHERS: Dict[str, Any] = {
-    "v30": create_v30_teacher,   # EfficientNetB0
-    "v31": create_v31_teacher,   # ResNet50
+    "v30": lambda **kw: __import__("models.digit_recognizer_v30_teacher", fromlist=["create_v30_teacher"]).create_v30_teacher(**kw),
+    "v31": lambda **kw: __import__("models.digit_recognizer_v31_teacher", fromlist=["create_v31_teacher"]).create_v31_teacher(**kw),
 }
 
 STUDENTS: Dict[str, Any] = {
-    "v30_micro":  create_v30_student_micro,
-    "v30_small":  create_v30_student_small,
-    "v30_medium": create_v30_student_medium,
-    "v30_large":  create_v30_student_large,
-    "v31_micro":  create_v31_student_micro,
-    "v31_small":  create_v31_student_small,
-    "v31_medium": create_v31_student_medium,
-    "v31_large":  create_v31_student_large,
-    "v32_small":  create_v32_teacher_small,
-    "v32_medium": create_v32_teacher_medium,
-    "v32_large":  create_v32_teacher_large,
-    "v32_xl":     create_v32_teacher_xl,
+    "v30_micro":  lambda **kw: __import__("models.digit_recognizer_v30_student", fromlist=["create_v30_student_micro"]).create_v30_student_micro(**kw),
+    "v30_small":  lambda **kw: __import__("models.digit_recognizer_v30_student", fromlist=["create_v30_student_small"]).create_v30_student_small(**kw),
+    "v30_medium": lambda **kw: __import__("models.digit_recognizer_v30_student", fromlist=["create_v30_student_medium"]).create_v30_student_medium(**kw),
+    "v30_large":  lambda **kw: __import__("models.digit_recognizer_v30_student", fromlist=["create_v30_student_large"]).create_v30_student_large(**kw),
+    "v31_micro":  lambda **kw: __import__("models.digit_recognizer_v31_student", fromlist=["create_v31_student_micro"]).create_v31_student_micro(**kw),
+    "v31_small":  lambda **kw: __import__("models.digit_recognizer_v31_student", fromlist=["create_v31_student_small"]).create_v31_student_small(**kw),
+    "v31_medium": lambda **kw: __import__("models.digit_recognizer_v31_student", fromlist=["create_v31_student_medium"]).create_v31_student_medium(**kw),
+    "v31_large":  lambda **kw: __import__("models.digit_recognizer_v31_student", fromlist=["create_v31_student_large"]).create_v31_student_large(**kw),
+    "v32_small":  lambda **kw: __import__("models.digit_recognizer_v32_teacher", fromlist=["create_v32_teacher_small"]).create_v32_teacher_small(**kw),
+    "v32_medium": lambda **kw: __import__("models.digit_recognizer_v32_teacher", fromlist=["create_v32_teacher_medium"]).create_v32_teacher_medium(**kw),
+    "v32_large":  lambda **kw: __import__("models.digit_recognizer_v32_teacher", fromlist=["create_v32_teacher_large"]).create_v32_teacher_large(**kw),
+    "v32_xl":     lambda **kw: __import__("models.digit_recognizer_v32_teacher", fromlist=["create_v32_teacher_xl"]).create_v32_teacher_xl(**kw),
 }
 
 
@@ -165,7 +150,7 @@ def train_teacher(
     checkpoint_dir: str = "checkpoints",
     pretrained: bool = True,
     freeze_backbone: bool = False,
-) -> tf.keras.Model:
+) -> keras.Model:
     """
     Train a teacher model from scratch (or with pretrained ImageNet backbone).
 
@@ -175,7 +160,7 @@ def train_teacher(
     Returns:
         Trained teacher model.
     """
-    tf.keras.backend.clear_session()
+    keras.backend.clear_session()
     channels = 1 if color_mode == "gray" else 3
     input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, channels)
 
@@ -203,9 +188,9 @@ def train_teacher(
     teacher.summary(print_fn=logger.info)
 
     teacher.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+        optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
         # from_logits=False because teacher output is softmax (like v4/v16)
-        loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
+        loss=keras.losses.SparseCategoricalCrossentropy(from_logits=False),
         metrics=["accuracy"],
     )
 
@@ -219,13 +204,13 @@ def train_teacher(
         f"best_model.keras"
     )
     callbacks = [
-        tf.keras.callbacks.ReduceLROnPlateau(
+        keras.callbacks.ReduceLROnPlateau(
             monitor="val_accuracy", factor=0.5, patience=5, min_lr=1e-6, verbose=1
         ),
-        tf.keras.callbacks.EarlyStopping(
+        keras.callbacks.EarlyStopping(
             monitor="val_accuracy", patience=15, restore_best_weights=True, verbose=1
         ),
-        tf.keras.callbacks.ModelCheckpoint(
+        keras.callbacks.ModelCheckpoint(
             ckpt_path, monitor="val_accuracy", save_best_only=True, verbose=1
         ),
     ]
@@ -250,7 +235,7 @@ def train_teacher(
 # ---------------------------------------------------------------------------
 
 def train_student_distillation(
-    teacher: tf.keras.Model,
+    teacher: keras.Model,
     student_variant: str,
     num_classes: int,
     color_mode: str,
@@ -366,7 +351,7 @@ def train_student_distillation(
             )
 
     distiller.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+        optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
         metrics=["accuracy"],
     )
     
@@ -381,25 +366,25 @@ def train_student_distillation(
     )
     callbacks = [
         DistillationProgressCallback(),  # Sync current_epoch for schedules
-        tf.keras.callbacks.ReduceLROnPlateau(
+        keras.callbacks.ReduceLROnPlateau(
             monitor="val_accuracy", factor=0.5, patience=5, min_lr=1e-6, verbose=1
         ),
-        tf.keras.callbacks.EarlyStopping(
+        keras.callbacks.EarlyStopping(
             monitor="val_accuracy", patience=15, restore_best_weights=True, verbose=1
         ),
-        tf.keras.callbacks.ModelCheckpoint(
+        keras.callbacks.ModelCheckpoint(
             ckpt_path, monitor="val_accuracy", save_best_only=True, verbose=1
         ),
     ]
 
     # Add CSV text logger and Monitor for plots
     log_csv_path = os.path.join(checkpoint_dir, "training_log.csv")
-    callbacks.append(tf.keras.callbacks.CSVLogger(log_csv_path))
+    callbacks.append(keras.callbacks.CSVLogger(log_csv_path))
     
     from utils.train_trainingmonitor import TrainingMonitor
     monitor = TrainingMonitor(checkpoint_dir)
     
-    class TrainingMonitorCallbackWrapper(tf.keras.callbacks.Callback):
+    class TrainingMonitorCallbackWrapper(keras.callbacks.Callback):
         def on_epoch_end(self, epoch, logs=None):
             monitor.model = self.model
             monitor.on_epoch_end(epoch, logs)
@@ -539,13 +524,13 @@ def run_distillation_pipeline(
                 try:
                     mod = importlib.import_module(f"{prefix}{clean_name}")
                     for name, obj in inspect.getmembers(mod, inspect.isclass):
-                        if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
+                        if issubclass(obj, keras.layers.Layer) and obj is not keras.layers.Layer:
                             custom_objects[name] = obj
                     break # Success
                 except (ModuleNotFoundError, Exception):
                     continue
 
-            t_model = tf.keras.models.load_model(t_checkpoint, custom_objects=custom_objects, safe_mode=False)
+            t_model = keras.models.load_model(t_checkpoint, custom_objects=custom_objects, safe_mode=False)
         else:
             # CRITICAL FIX: Load proper data for teacher training
             logger.info(f"Training teacher {t_type} from scratch...")

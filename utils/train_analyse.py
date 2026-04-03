@@ -12,6 +12,7 @@ import tempfile
 import shutil
 
 import parameters as params
+from utils.keras_helper import keras
 from utils.train_helpers import create_tflite_interpreter
 
 
@@ -178,8 +179,7 @@ def measure_tflite_inference_time(tflite_path, x_test):
     x_test_analysis, _ = get_analysis_samples(x_test, np.zeros(len(x_test)))
     total_samples = len(x_test_analysis)
     
-    interpreter = tf.lite.Interpreter(model_path=tflite_path)
-    interpreter.allocate_tensors()
+    interpreter = create_tflite_interpreter(tflite_path)
     
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
@@ -418,7 +418,7 @@ def debug_model_architecture(model, sample_data=None):
     
     # Now the model should have defined inputs
     try:
-        activation_model = tf.keras.models.Model(
+        activation_model = keras.Model(
             inputs=model.input, 
             outputs=[layer.output for layer in model.layers]
         )

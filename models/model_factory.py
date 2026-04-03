@@ -222,7 +222,7 @@ def compile_model(model, loss_type='sparse'):
     optimizer = None
     
     if params.OPTIMIZER_TYPE == "rmsprop":
-        optimizer = tf.keras.optimizers.RMSprop(
+        optimizer = keras.optimizers.RMSprop(
             learning_rate=params.LEARNING_RATE,
             rho=params.RMSPROP_RHO,
             momentum=params.RMSPROP_MOMENTUM,
@@ -231,7 +231,7 @@ def compile_model(model, loss_type='sparse'):
         print(f"🔧 Using RMSprop optimizer (rho={params.RMSPROP_RHO}, momentum={params.RMSPROP_MOMENTUM})")
         
     elif params.OPTIMIZER_TYPE == "adam":
-        optimizer = tf.keras.optimizers.Adam(
+        optimizer = keras.optimizers.Adam(
             learning_rate=params.LEARNING_RATE,
             beta_1=params.ADAM_BETA_1,
             beta_2=params.ADAM_BETA_2,
@@ -241,7 +241,7 @@ def compile_model(model, loss_type='sparse'):
         print(f"🔧 Using Adam optimizer (beta1={params.ADAM_BETA_1}, beta2={params.ADAM_BETA_2})")
         
     elif params.OPTIMIZER_TYPE == "sgd":
-        optimizer = tf.keras.optimizers.SGD(
+        optimizer = keras.optimizers.SGD(
             learning_rate=params.LEARNING_RATE,
             momentum=params.SGD_MOMENTUM,
             nesterov=params.SGD_NESTEROV
@@ -249,7 +249,7 @@ def compile_model(model, loss_type='sparse'):
         print(f"🔧 Using SGD optimizer (momentum={params.SGD_MOMENTUM}, nesterov={params.SGD_NESTEROV})")
         
     elif params.OPTIMIZER_TYPE == "adagrad":
-        optimizer = tf.keras.optimizers.Adagrad(
+        optimizer = keras.optimizers.Adagrad(
             learning_rate=params.LEARNING_RATE,
             initial_accumulator_value=params.ADAGRAD_INITIAL_ACCUMULATOR,
             epsilon=params.ADAGRAD_EPSILON
@@ -257,7 +257,7 @@ def compile_model(model, loss_type='sparse'):
         print(f"🔧 Using AdaGrad optimizer")
         
     elif params.OPTIMIZER_TYPE == "nadam":
-        optimizer = tf.keras.optimizers.Nadam(
+        optimizer = keras.optimizers.Nadam(
             learning_rate=params.LEARNING_RATE,
             beta_1=params.ADAM_BETA_1,  # Use Adam parameters for consistency
             beta_2=params.ADAM_BETA_2,
@@ -279,7 +279,7 @@ def compile_model(model, loss_type='sparse'):
             print(f"🔧 Using AdamW optimizer (weight_decay={params.ADAMW_WEIGHT_DECAY})")
         except ImportError:
             print("⚠️  tensorflow-addons not available, falling back to Adam")
-            optimizer = tf.keras.optimizers.Adam(
+            optimizer = keras.optimizers.Adam(
                 learning_rate=params.LEARNING_RATE,
                 beta_1=params.ADAM_BETA_1,
                 beta_2=params.ADAM_BETA_2,
@@ -291,13 +291,13 @@ def compile_model(model, loss_type='sparse'):
     # Apply gradient clipping if enabled
     if params.USE_GRADIENT_CLIPPING:
         if params.GRADIENT_CLIP_VALUE is not None:
-            optimizer = tf.keras.optimizers.get({
+            optimizer = keras.optimizers.get({
                 'class_name': type(optimizer).__name__,
                 'config': {**optimizer.get_config(), 'clipvalue': params.GRADIENT_CLIP_VALUE}
             })
             print(f"🔧 Applied gradient clipping by value: {params.GRADIENT_CLIP_VALUE}")
         elif params.GRADIENT_CLIP_NORM is not None:
-            optimizer = tf.keras.optimizers.get({
+            optimizer = keras.optimizers.get({
                 'class_name': type(optimizer).__name__,
                 'config': {**optimizer.get_config(), 'clipnorm': params.GRADIENT_CLIP_NORM}
             })
@@ -343,19 +343,19 @@ def compile_model(model, loss_type='sparse'):
     # Handle standard crossentropy with label smoothing
     elif params.LABEL_SMOOTHING > 0:
         if loss == "categorical_crossentropy":
-            loss = tf.keras.losses.CategoricalCrossentropy(
+            loss = keras.losses.CategoricalCrossentropy(
                 label_smoothing=params.LABEL_SMOOTHING
             )
         elif loss == "sparse_categorical_crossentropy":
-            loss = tf.keras.losses.SparseCategoricalCrossentropy(
+            loss = keras.losses.SparseCategoricalCrossentropy(
                 label_smoothing=params.LABEL_SMOOTHING
             )
         print(f"🔧 Applied label smoothing: {params.LABEL_SMOOTHING}")
     else:
         if loss == "categorical_crossentropy":
-            loss = tf.keras.losses.CategoricalCrossentropy()
+            loss = keras.losses.CategoricalCrossentropy()
         elif loss == "sparse_categorical_crossentropy":
-            loss = tf.keras.losses.SparseCategoricalCrossentropy()
+            loss = keras.losses.SparseCategoricalCrossentropy()
     
     # ==========================================================================
     # METRICS CONFIGURATION
@@ -409,7 +409,7 @@ def create_learning_rate_scheduler():
         return None
     
     if params.LR_SCHEDULER_TYPE == "reduce_on_plateau":
-        from tensorflow.keras.callbacks import ReduceLROnPlateau
+        from keras.callbacks import ReduceLROnPlateau
         scheduler = ReduceLROnPlateau(
             monitor=params.LR_SCHEDULER_MONITOR,
             factor=params.LR_SCHEDULER_FACTOR,
@@ -420,7 +420,7 @@ def create_learning_rate_scheduler():
         print(f"🔧 Using ReduceLROnPlateau scheduler (patience={params.LR_SCHEDULER_PATIENCE})")
         
     elif params.LR_SCHEDULER_TYPE == "exponential":
-        from tensorflow.keras.optimizers.schedules import ExponentialDecay
+        from keras.optimizers.schedules import ExponentialDecay
         lr_schedule = ExponentialDecay(
             initial_learning_rate=params.LEARNING_RATE,
             decay_steps=params.EXPONENTIAL_DECAY_STEPS,
@@ -430,7 +430,7 @@ def create_learning_rate_scheduler():
         return lr_schedule
     
     elif params.LR_SCHEDULER_TYPE == "cosine":
-        from tensorflow.keras.optimizers.schedules import CosineDecayRestarts
+        from keras.optimizers.schedules import CosineDecayRestarts
         lr_schedule = CosineDecayRestarts(
             initial_learning_rate=params.LEARNING_RATE,
             first_decay_steps=1000,
@@ -451,7 +451,7 @@ def create_learning_rate_scheduler():
         peak_lr = params.LEARNING_RATE
 
         # Phase 1: linear warm-up
-        warmup_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
+        warmup_schedule = keras.optimizers.schedules.PolynomialDecay(
             initial_learning_rate=peak_lr * 0.1,
             decay_steps=warmup_steps,
             end_learning_rate=peak_lr,
@@ -470,7 +470,7 @@ def create_learning_rate_scheduler():
             else:
                 return float(cosine_schedule(epoch - warmup_steps))
 
-        from tensorflow.keras.callbacks import LearningRateScheduler
+        from keras.callbacks import LearningRateScheduler
         scheduler = LearningRateScheduler(_onecycle_lr, verbose=1)
         print(f"🔧 Using OneCycleLR scheduler (warmup={warmup_steps} epochs)")
 
@@ -483,7 +483,7 @@ def create_learning_rate_scheduler():
             lr = initial_lr * (drop ** (epoch // epochs_drop))
             return lr
         
-        from tensorflow.keras.callbacks import LearningRateScheduler
+        from keras.callbacks import LearningRateScheduler
         scheduler = LearningRateScheduler(step_decay, verbose=1)
         print(f"🔧 Using Step Decay scheduler (step_size={params.STEP_DECAY_STEP_SIZE})")
     
@@ -496,28 +496,28 @@ def create_learning_rate_scheduler():
 def get_initializer():
     """Get weight initializer based on configuration"""
     if params.WEIGHT_INITIALIZER == "glorot_uniform":
-        return tf.keras.initializers.GlorotUniform()
+        return keras.initializers.GlorotUniform()
     elif params.WEIGHT_INITIALIZER == "he_normal":
-        return tf.keras.initializers.HeNormal()
+        return keras.initializers.HeNormal()
     elif params.WEIGHT_INITIALIZER == "he_uniform":
-        return tf.keras.initializers.HeUniform()
+        return keras.initializers.HeUniform()
     elif params.WEIGHT_INITIALIZER == "lecun_normal":
-        return tf.keras.initializers.LecunNormal()
+        return keras.initializers.LecunNormal()
     else:
         print(f"⚠️  Unknown initializer: {params.WEIGHT_INITIALIZER}, using he_normal")
-        return tf.keras.initializers.HeNormal()
+        return keras.initializers.HeNormal()
 
 def get_regularizer():
     """Get regularizer based on configuration"""
     if params.L1_REGULARIZATION > 0 and params.L2_REGULARIZATION > 0:
-        return tf.keras.regularizers.l1_l2(
+        return keras.regularizers.l1_l2(
             l1=params.L1_REGULARIZATION, 
             l2=params.L2_REGULARIZATION
         )
     elif params.L1_REGULARIZATION > 0:
-        return tf.keras.regularizers.l1(params.L1_REGULARIZATION)
+        return keras.regularizers.l1(params.L1_REGULARIZATION)
     elif params.L2_REGULARIZATION > 0:
-        return tf.keras.regularizers.l2(params.L2_REGULARIZATION)
+        return keras.regularizers.l2(params.L2_REGULARIZATION)
     else:
         return None
 
@@ -527,7 +527,7 @@ def get_training_callbacks():
     
     # Early Stopping
     if params.USE_EARLY_STOPPING:
-        from tensorflow.keras.callbacks import EarlyStopping
+        from keras.callbacks import EarlyStopping
         early_stopping = EarlyStopping(
             monitor=params.EARLY_STOPPING_MONITOR,
             patience=params.EARLY_STOPPING_PATIENCE,
@@ -540,7 +540,7 @@ def get_training_callbacks():
     
     # Model Checkpoint
     if params.SAVE_CHECKPOINTS:
-        from tensorflow.keras.callbacks import ModelCheckpoint
+        from keras.callbacks import ModelCheckpoint
         checkpoint = ModelCheckpoint(
             filepath=f"checkpoints/{params.MODEL_ARCHITECTURE}_epoch_{{epoch:02d}}.h5",
             monitor=params.CHECKPOINT_MONITOR,
@@ -559,7 +559,7 @@ def get_training_callbacks():
     
     # TensorBoard
     if params.USE_TENSORBOARD:
-        from tensorflow.keras.callbacks import TensorBoard
+        from keras.callbacks import TensorBoard
         tensorboard = TensorBoard(
             log_dir=f"logs/{params.MODEL_ARCHITECTURE}",
             update_freq=params.TENSORBOARD_UPDATE_FREQ,

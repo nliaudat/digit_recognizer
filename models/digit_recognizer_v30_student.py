@@ -22,6 +22,7 @@ Size variants (estimated INT8 size after quantization):
 """
 
 import tensorflow as tf
+from utils.keras_helper import keras
 from typing import Tuple, Dict, Optional
 import sys
 from pathlib import Path
@@ -99,7 +100,7 @@ def _build_v30_student(
     input_shape: Tuple[int, int, int],
     variant: str,
     name: str,
-) -> tf.keras.Model:
+) -> keras.Model:
     """
     Build V30 student as a Keras functional model.
 
@@ -112,51 +113,51 @@ def _build_v30_student(
     """
     config = _VARIANT_CONFIGS.get(variant, _VARIANT_CONFIGS["medium"])
 
-    inputs = tf.keras.Input(shape=input_shape, name="input")
+    inputs = keras.Input(shape=input_shape, name="input")
 
     # ── Initial conv ──────────────────────────────────────────────────────────
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         config["initial_filters"], 3, padding="same",
         kernel_initializer="he_normal", use_bias=False, name="init_conv"
     )(inputs)
-    x = tf.keras.layers.BatchNormalization(name="init_bn")(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name="init_relu6")(x)
+    x = keras.layers.BatchNormalization(name="init_bn")(x)
+    x = keras.layers.ReLU(max_value=6.0, name="init_relu6")(x)
 
     # ── Depthwise-separable blocks ────────────────────────────────────────────
     for i, block_cfg in enumerate(config["blocks"]):
         prefix = f"block{i + 1}"
         # Depthwise
-        x = tf.keras.layers.DepthwiseConv2D(
+        x = keras.layers.DepthwiseConv2D(
             3, strides=block_cfg["stride"], padding="same",
             depthwise_initializer="he_normal", use_bias=False,
             name=f"{prefix}_dwconv"
         )(x)
-        x = tf.keras.layers.BatchNormalization(name=f"{prefix}_dw_bn")(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name=f"{prefix}_dw_relu6")(x)
+        x = keras.layers.BatchNormalization(name=f"{prefix}_dw_bn")(x)
+        x = keras.layers.ReLU(max_value=6.0, name=f"{prefix}_dw_relu6")(x)
         # Pointwise
-        x = tf.keras.layers.Conv2D(
+        x = keras.layers.Conv2D(
             block_cfg["filters"], 1, padding="same",
             kernel_initializer="he_normal", use_bias=False,
             name=f"{prefix}_pwconv"
         )(x)
-        x = tf.keras.layers.BatchNormalization(name=f"{prefix}_pw_bn")(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name=f"{prefix}_pw_relu6")(x)
+        x = keras.layers.BatchNormalization(name=f"{prefix}_pw_bn")(x)
+        x = keras.layers.ReLU(max_value=6.0, name=f"{prefix}_pw_relu6")(x)
 
     # ── Head ─────────────────────────────────────────────────────────────────
-    x = tf.keras.layers.GlobalAveragePooling2D(name="gap")(x)
-    x = tf.keras.layers.Dense(
+    x = keras.layers.GlobalAveragePooling2D(name="gap")(x)
+    x = keras.layers.Dense(
         config["dense_units"], kernel_initializer="he_normal", name="dense"
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name="dense_relu6")(x)
+    x = keras.layers.ReLU(max_value=6.0, name="dense_relu6")(x)
     if config["dropout"] > 0:
-        x = tf.keras.layers.Dropout(config["dropout"], name="dropout")(x)
+        x = keras.layers.Dropout(config["dropout"], name="dropout")(x)
 
     # Softmax output — same convention as v4 / v16
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         num_classes, activation="softmax", name="output"
     )(x)
 
-    model = tf.keras.Model(inputs=inputs, outputs=outputs, name=name)
+    model = keras.Model(inputs=inputs, outputs=outputs, name=name)
     return model
 
 
@@ -164,7 +165,7 @@ def _build_v30_student(
 # QAT wrapper  (same pattern as v16)
 # ---------------------------------------------------------------------------
 
-def create_qat_model(base_model: Optional[tf.keras.Model] = None) -> tf.keras.Model:
+def create_qat_model(base_model: Optional[keras.Model] = None) -> keras.Model:
     """
     Wrap a V30 student for Quantization-Aware Training.
 
@@ -199,7 +200,7 @@ def create_v30_student(
     num_classes: int = 10,
     input_shape: Tuple[int, int, int] = (32, 20, 1),
     variant: str = "medium",
-) -> tf.keras.Model:
+) -> keras.Model:
     """
     Create a V30 student model.
 
@@ -236,7 +237,7 @@ def create_v30_student(
 def create_v30_student_micro(
     num_classes: int = 10,
     input_shape: Tuple[int, int, int] = (32, 20, 1),
-) -> tf.keras.Model:
+) -> keras.Model:
     """Ultra-light student for ESP32-C3 (< 30 KB)."""
     return create_v30_student(num_classes, input_shape=input_shape, variant="micro")
 
@@ -244,7 +245,7 @@ def create_v30_student_micro(
 def create_v30_student_small(
     num_classes: int = 10,
     input_shape: Tuple[int, int, int] = (32, 20, 1),
-) -> tf.keras.Model:
+) -> keras.Model:
     """Small student for ESP32 (< 50 KB)."""
     return create_v30_student(num_classes, input_shape=input_shape, variant="small")
 
@@ -252,7 +253,7 @@ def create_v30_student_small(
 def create_v30_student_medium(
     num_classes: int = 10,
     input_shape: Tuple[int, int, int] = (32, 20, 1),
-) -> tf.keras.Model:
+) -> keras.Model:
     """Medium student for balanced accuracy/size (< 100 KB)."""
     return create_v30_student(num_classes, input_shape=input_shape, variant="medium")
 
@@ -260,7 +261,7 @@ def create_v30_student_medium(
 def create_v30_student_large(
     num_classes: int = 10,
     input_shape: Tuple[int, int, int] = (32, 20, 1),
-) -> tf.keras.Model:
+) -> keras.Model:
     """Large student for Raspberry Pi (< 200 KB)."""
     return create_v30_student(num_classes, input_shape=input_shape, variant="large")
 

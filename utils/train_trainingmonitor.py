@@ -3,6 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf 
+from utils.keras_helper import keras
 
 import parameters as params
 
@@ -48,7 +49,7 @@ class TrainingMonitor:
                         lr = float(lr_value)
                 else:
                     # Fallback: try to get from Keras backend
-                    lr = float(tf.keras.backend.get_value(self.model.optimizer.learning_rate))
+                    lr = float(keras.backend.get_value(self.model.optimizer.learning_rate))
         except (AttributeError, TypeError, ValueError) as e:
             if self.debug:
                 print(f"⚠️  Could not get learning rate: {e}")

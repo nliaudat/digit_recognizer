@@ -1,4 +1,4 @@
-﻿# models/digit_recognizer_v20.py
+# models/digit_recognizer_v20.py
 """
 digit_recognizer_v20 – Spatial-Aware SE-GhostNet with Positional Encoding
 ===========================================================================
@@ -22,9 +22,8 @@ import sys
 # Support running directly
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import tensorflow as tf
-import numpy as np
 import parameters as params
+from utils.keras_helper import keras
 
 try:
     import tensorflow_model_optimization as tfmot
@@ -37,7 +36,7 @@ except ImportError:
 # Positional Encoding Layer (TFLite Compatible)
 # ---------------------------------------------------------------------------
 
-class PositionalEncoding2D(tf.keras.layers.Layer):
+class PositionalEncoding2D(keras.layers.Layer):
     """
     Add explicit positional information to feature maps.
     This helps the network understand "where" in the image features are located.
@@ -50,19 +49,19 @@ class PositionalEncoding2D(tf.keras.layers.Layer):
         h, w, c = input_shape[1], input_shape[2], input_shape[3]
         
         # Create coordinate grids
-        y_grid, x_grid = tf.meshgrid(
-            tf.linspace(-1.0, 1.0, h),
-            tf.linspace(-1.0, 1.0, w),
+        y_grid, x_grid = keras.ops.meshgrid(
+            keras.ops.linspace(-1.0, 1.0, h),
+            keras.ops.linspace(-1.0, 1.0, w),
             indexing='ij'
         )
         
         # Expand dimensions for broadcasting: 1, h, w, 1
-        y_grid = tf.expand_dims(tf.expand_dims(y_grid, 0), -1)  
-        x_grid = tf.expand_dims(tf.expand_dims(x_grid, 0), -1)  
+        y_grid = keras.ops.expand_dims(keras.ops.expand_dims(y_grid, 0), -1)  
+        x_grid = keras.ops.expand_dims(keras.ops.expand_dims(x_grid, 0), -1)  
         
         # Register as non-trainable buffers
-        self.y_coord = tf.cast(y_grid, tf.float32)
-        self.x_coord = tf.cast(x_grid, tf.float32)
+        self.y_coord = keras.ops.cast(y_grid, 'float32')
+        self.x_coord = keras.ops.cast(x_grid, 'float32')
         
         # Learnable scaling factors for coordinates
         self.y_scale = self.add_weight(
@@ -86,12 +85,12 @@ class PositionalEncoding2D(tf.keras.layers.Layer):
         x_coord = self.x_coord * self.x_scale
         
         # Tile coordinates to match batch size
-        batch_size = tf.shape(inputs)[0]
-        y_coord = tf.tile(y_coord, [batch_size, 1, 1, 1])
-        x_coord = tf.tile(x_coord, [batch_size, 1, 1, 1])
+        batch_size = keras.ops.shape(inputs)[0]
+        y_coord = keras.ops.tile(y_coord, [batch_size, 1, 1, 1])
+        x_coord = keras.ops.tile(x_coord, [batch_size, 1, 1, 1])
         
         # Concatenate coordinates with input features
-        return tf.concat([inputs, y_coord, x_coord], axis=-1)
+        return keras.ops.concatenate([inputs, y_coord, x_coord], axis=-1)
     
     def get_config(self):
         config = super().get_config()
@@ -107,32 +106,32 @@ def _se_block_spatial(x, reduction=8, name_prefix='se'):
     channels = x.shape[-1]
     
     # — Channel Attention (Squeeze and Excitation) —
-    channel_se = tf.keras.layers.GlobalAveragePooling2D(name=f'{name_prefix}_gap')(x)
-    channel_se = tf.keras.layers.Dense(
+    channel_se = keras.layers.GlobalAveragePooling2D(name=f'{name_prefix}_gap')(x)
+    channel_se = keras.layers.Dense(
         max(4, channels // reduction),
         activation='relu',
         name=f'{name_prefix}_fc1'
     )(channel_se)
-    channel_se = tf.keras.layers.Dense(
+    channel_se = keras.layers.Dense(
         channels,
         activation='sigmoid',
         name=f'{name_prefix}_fc2'
     )(channel_se)
-    channel_se = tf.keras.layers.Reshape((1, 1, channels), name=f'{name_prefix}_reshape')(channel_se)
+    channel_se = keras.layers.Reshape((1, 1, channels), name=f'{name_prefix}_reshape')(channel_se)
     
     # Apply channel attention
-    x = tf.keras.layers.Multiply(name=f'{name_prefix}_channel_scale')([x, channel_se])
+    x = keras.layers.Multiply(name=f'{name_prefix}_channel_scale')([x, channel_se])
     
     # — Spatial Attention —
     # Focuses on WHERE the important features are in the receptive field
-    spatial = tf.keras.layers.Conv2D(
+    spatial = keras.layers.Conv2D(
         1, (1, 1), padding='same',
         activation='sigmoid',
         name=f'{name_prefix}_spatial_conv'
     )(x)
     
     # Apply spatial attention
-    x = tf.keras.layers.Multiply(name=f'{name_prefix}_spatial_scale')([x, spatial])
+    x = keras.layers.Multiply(name=f'{name_prefix}_spatial_scale')([x, spatial])
     
     return x
 
@@ -152,39 +151,39 @@ def _ghost_module_spatial(x, out_channels, ratio=2, dw_kernel=3, use_se=True,
         x = PositionalEncoding2D(name=f'{name_prefix}_pos')(x)
         # Adapt channels back down immediately to save parameters
         current_channels = x.shape[-1]
-        x = tf.keras.layers.Conv2D(
+        x = keras.layers.Conv2D(
             current_channels - 2, (1, 1), padding='same',
             kernel_initializer='he_normal', use_bias=False,
             name=f'{name_prefix}_pos_adapt'
         )(x)
-        x = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_pos_bn')(x)
+        x = keras.layers.BatchNormalization(name=f'{name_prefix}_pos_bn')(x)
     
     # Primary convolution
-    primary = tf.keras.layers.Conv2D(
+    primary = keras.layers.Conv2D(
         intrinsic_ch, (1, 1), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name=f'{name_prefix}_primary_conv'
     )(x)
-    primary = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_primary_bn')(primary)
-    primary = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_primary_relu')(primary)
+    primary = keras.layers.BatchNormalization(name=f'{name_prefix}_primary_bn')(primary)
+    primary = keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_primary_relu')(primary)
     
     # Ghost features
-    ghost = tf.keras.layers.DepthwiseConv2D(
+    ghost = keras.layers.DepthwiseConv2D(
         (dw_kernel, dw_kernel), padding='same',
         depthwise_initializer='he_normal', use_bias=False,
         name=f'{name_prefix}_ghost_dw'
     )(primary)
-    ghost = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_ghost_bn')(ghost)
-    ghost = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_ghost_relu')(ghost)
+    ghost = keras.layers.BatchNormalization(name=f'{name_prefix}_ghost_bn')(ghost)
+    ghost = keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_ghost_relu')(ghost)
     
     if ghost_ch != intrinsic_ch:
-        ghost = tf.keras.layers.Conv2D(
+        ghost = keras.layers.Conv2D(
             ghost_ch, (1, 1), padding='same',
             kernel_initializer='he_normal', use_bias=False,
             name=f'{name_prefix}_ghost_adjust'
         )(ghost)
     
-    concat = tf.keras.layers.Concatenate(name=f'{name_prefix}_concat')([primary, ghost])
+    concat = keras.layers.Concatenate(name=f'{name_prefix}_concat')([primary, ghost])
     
     if use_se:
         concat = _se_block_spatial(concat, reduction=8, name_prefix=f'{name_prefix}_se')
@@ -208,13 +207,13 @@ def _ghost_block_spatial(x, out_channels, stride=1, expansion=2, use_se=True,
     )
     
     if stride > 1:
-        y = tf.keras.layers.DepthwiseConv2D(
+        y = keras.layers.DepthwiseConv2D(
             (3, 3), strides=stride, padding='same',
             depthwise_initializer='he_normal', use_bias=False,
             name=f'{name_prefix}_stride_dw'
         )(y)
-        y = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_stride_bn')(y)
-        y = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_stride_relu')(y)
+        y = keras.layers.BatchNormalization(name=f'{name_prefix}_stride_bn')(y)
+        y = keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_stride_relu')(y)
     
     y = _ghost_module_spatial(
         y, out_channels, use_se=use_se,
@@ -225,22 +224,22 @@ def _ghost_block_spatial(x, out_channels, stride=1, expansion=2, use_se=True,
     if stride == 1 and ch_in == out_channels:
         shortcut = x
     else:
-        shortcut = tf.keras.layers.DepthwiseConv2D(
+        shortcut = keras.layers.DepthwiseConv2D(
             (3, 3), strides=stride, padding='same',
             depthwise_initializer='he_normal', use_bias=False,
             name=f'{name_prefix}_sc_dw'
         )(x)
-        shortcut = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_sc_bn')(shortcut)
-        shortcut = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_sc_relu')(shortcut)
-        shortcut = tf.keras.layers.Conv2D(
+        shortcut = keras.layers.BatchNormalization(name=f'{name_prefix}_sc_bn')(shortcut)
+        shortcut = keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_sc_relu')(shortcut)
+        shortcut = keras.layers.Conv2D(
             out_channels, (1, 1), padding='same',
             kernel_initializer='he_normal', use_bias=False,
             name=f'{name_prefix}_sc_conv'
         )(shortcut)
-        shortcut = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_sc_conv_bn')(shortcut)
+        shortcut = keras.layers.BatchNormalization(name=f'{name_prefix}_sc_conv_bn')(shortcut)
     
-    y = tf.keras.layers.Add(name=f'{name_prefix}_add')([shortcut, y])
-    y = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_relu')(y)
+    y = keras.layers.Add(name=f'{name_prefix}_add')([shortcut, y])
+    y = keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_relu')(y)
     return y
 
 
@@ -250,38 +249,38 @@ def _ghost_block_spatial(x, out_channels, stride=1, expansion=2, use_se=True,
 
 def _spatial_pyramid(x, name_prefix='pyramid'):
     # Branch 1: Original scale
-    b1 = tf.keras.layers.Conv2D(
+    b1 = keras.layers.Conv2D(
         64, (1, 1), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name=f'{name_prefix}_b1_conv'
     )(x)
-    b1 = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_b1_bn')(b1)
+    b1 = keras.layers.BatchNormalization(name=f'{name_prefix}_b1_bn')(b1)
     
     # Branch 2: 3x3 context
-    b2 = tf.keras.layers.Conv2D(
+    b2 = keras.layers.Conv2D(
         64, (3, 3), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name=f'{name_prefix}_b2_conv'
     )(x)
-    b2 = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_b2_bn')(b2)
+    b2 = keras.layers.BatchNormalization(name=f'{name_prefix}_b2_bn')(b2)
     
     # Branch 3: Broad context (Fixed: standard 5x5 instead of dilated 3x3 for ESP-NN capability)
-    b3 = tf.keras.layers.DepthwiseConv2D(
+    b3 = keras.layers.DepthwiseConv2D(
         (5, 5), padding='same',
         depthwise_initializer='he_normal', use_bias=False,
         name=f'{name_prefix}_b3_dw'
     )(x)
-    b3 = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_b3_bn')(b3)
-    b3 = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_b3_relu')(b3)
-    b3 = tf.keras.layers.Conv2D(
+    b3 = keras.layers.BatchNormalization(name=f'{name_prefix}_b3_bn')(b3)
+    b3 = keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_b3_relu')(b3)
+    b3 = keras.layers.Conv2D(
         64, (1, 1), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name=f'{name_prefix}_b3_conv'
     )(b3)
-    b3 = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_b3_conv_bn')(b3)
+    b3 = keras.layers.BatchNormalization(name=f'{name_prefix}_b3_conv_bn')(b3)
     
-    concat = tf.keras.layers.Concatenate(name=f'{name_prefix}_concat')([b1, b2, b3])
-    concat = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_output_relu')(concat)
+    concat = keras.layers.Concatenate(name=f'{name_prefix}_concat')([b1, b2, b3])
+    concat = keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_output_relu')(concat)
     
     return concat
 
@@ -291,18 +290,18 @@ def _spatial_pyramid(x, name_prefix='pyramid'):
 # ---------------------------------------------------------------------------
 
 def create_digit_recognizer_v20():
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Inject coordinate maps explicitly into the image!
     x = PositionalEncoding2D(name='input_pos')(inputs)
     
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         32, (3, 3), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name='stem_conv'
     )(x)
-    x = tf.keras.layers.BatchNormalization(name='stem_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='stem_relu')(x)
+    x = keras.layers.BatchNormalization(name='stem_bn')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='stem_relu')(x)
     
     # (out_channels, stride, expansion, use_se, use_position)
     blocks = [
@@ -331,30 +330,30 @@ def create_digit_recognizer_v20():
     x = _spatial_pyramid(x, name_prefix='pyramid')
     
     # Final 1x1 convolution
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         128, (1, 1), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name='spatial_fusion'
     )(x)
-    x = tf.keras.layers.BatchNormalization(name='spatial_fusion_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='spatial_fusion_relu')(x)
+    x = keras.layers.BatchNormalization(name='spatial_fusion_bn')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='spatial_fusion_relu')(x)
     
     # — CRITICAL: FLATTEN TO PRESERVE SPATIAL COORDINATES —
-    x = tf.keras.layers.Flatten(name='spatial_flatten')(x)
+    x = keras.layers.Flatten(name='spatial_flatten')(x)
     
     # — CLASSIFIER —
     # Single resilient bottleneck sized for the 1.5MB headroom
-    x = tf.keras.layers.Dropout(0.4, name='dropout_pre')(x)
-    x = tf.keras.layers.Dense(256, use_bias=False, kernel_initializer='he_normal', name='fc1')(x)
-    x = tf.keras.layers.BatchNormalization(name='fc1_bn')(x)
-    x = tf.keras.layers.ReLU(name='fc1_relu')(x)
-    x = tf.keras.layers.Dropout(0.3, name='dropout_post')(x)
+    x = keras.layers.Dropout(0.4, name='dropout_pre')(x)
+    x = keras.layers.Dense(256, use_bias=False, kernel_initializer='he_normal', name='fc1')(x)
+    x = keras.layers.BatchNormalization(name='fc1_bn')(x)
+    x = keras.layers.ReLU(name='fc1_relu')(x)
+    x = keras.layers.Dropout(0.3, name='dropout_post')(x)
     
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, activation='softmax', name='output'
     )(x)
     
-    model = tf.keras.Model(inputs, outputs, name='digit_recognizer_v20')
+    model = keras.Model(inputs, outputs, name='digit_recognizer_v20')
     return model
 
 

@@ -22,8 +22,8 @@ Notes:
 Estimated: ~800K+ parameters → not intended for ESP32 RAM constraints.
 """
 
-import tensorflow as tf
 import parameters as params
+from utils.keras_helper import keras
 
 def create_esp_quantization_ready_v2_aggressive():
     """
@@ -32,69 +32,69 @@ def create_esp_quantization_ready_v2_aggressive():
     
     Target: >97% accuracy with <80KB quantized size
     """
-    model = tf.keras.Sequential([
-        tf.keras.layers.Input(shape=params.INPUT_SHAPE),
+    model = keras.Sequential([
+        keras.layers.Input(shape=params.INPUT_SHAPE),
         
         # Block 1 - High capacity
-        tf.keras.layers.Conv2D(
+        keras.layers.Conv2D(
             64, (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
             name='conv1'
         ),
-        tf.keras.layers.ReLU(name='relu1'),
-        tf.keras.layers.Conv2D(
+        keras.layers.ReLU(name='relu1'),
+        keras.layers.Conv2D(
             64, (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
             name='conv2'
         ),
-        tf.keras.layers.ReLU(name='relu2'),
-        tf.keras.layers.MaxPooling2D((2, 2), name='pool1'),
+        keras.layers.ReLU(name='relu2'),
+        keras.layers.MaxPooling2D((2, 2), name='pool1'),
         
         # Block 2 - High capacity  
-        tf.keras.layers.Conv2D(
+        keras.layers.Conv2D(
             128, (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
             name='conv3'
         ),
-        tf.keras.layers.ReLU(name='relu3'),
-        tf.keras.layers.Conv2D(
+        keras.layers.ReLU(name='relu3'),
+        keras.layers.Conv2D(
             128, (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
             name='conv4'
         ),
-        tf.keras.layers.ReLU(name='relu4'),
-        tf.keras.layers.MaxPooling2D((2, 2), name='pool2'),
+        keras.layers.ReLU(name='relu4'),
+        keras.layers.MaxPooling2D((2, 2), name='pool2'),
         
         # Block 3 - Depthwise for efficiency
-        tf.keras.layers.DepthwiseConv2D(
+        keras.layers.DepthwiseConv2D(
             (3, 3), padding='same',
             depthwise_initializer='he_normal',
             use_bias=True,
             name='depthwise1'
         ),
-        tf.keras.layers.ReLU(name='depthwise_relu1'),
-        tf.keras.layers.Conv2D(
+        keras.layers.ReLU(name='depthwise_relu1'),
+        keras.layers.Conv2D(
             256, (1, 1),
             kernel_initializer='he_normal',
             use_bias=True,
             name='pointwise1'
         ),
-        tf.keras.layers.ReLU(name='relu5'),
+        keras.layers.ReLU(name='relu5'),
         
         # Classification head
-        tf.keras.layers.GlobalAveragePooling2D(name='gap'),
-        tf.keras.layers.Dense(
+        keras.layers.GlobalAveragePooling2D(name='gap'),
+        keras.layers.Dense(
             256, activation='relu',
             kernel_initializer='he_normal',
             use_bias=True,
             name='dense1'
         ),
-        tf.keras.layers.Dropout(0.3, name='dropout1'),
-        tf.keras.layers.Dense(params.NB_CLASSES, activation='softmax', name='output')
+        keras.layers.Dropout(0.3, name='dropout1'),
+        keras.layers.Dense(params.NB_CLASSES, activation='softmax', name='output')
     ])
     
     return model

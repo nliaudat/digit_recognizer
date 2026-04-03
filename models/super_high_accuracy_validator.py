@@ -43,6 +43,7 @@ Hard classes addressed (from benchmark data):
 import os
 import tensorflow as tf
 import numpy as np
+from utils.keras_helper import keras
 
 # ---------------------------------------------------------------------------
 # Parameter Fetching (Lazy)
@@ -63,8 +64,8 @@ def _get_default_params():
 
 def enable_mixed_precision():
     """Enable float16 mixed precision for ~2× GPU throughput on Ampere+ GPUs."""
-    policy = tf.keras.mixed_precision.Policy('mixed_float16')
-    tf.keras.mixed_precision.set_global_policy(policy)
+    policy = keras.mixed_precision.Policy('mixed_float16')
+    keras.mixed_precision.set_global_policy(policy)
     print("✅ Mixed precision enabled: float16 compute / float32 weights")
 
 
@@ -75,40 +76,40 @@ def enable_mixed_precision():
 def _channel_se(x, ratio=16, name="cse"):
     """Channel Squeeze-and-Excitation (cSE) block."""
     filters = x.shape[-1]
-    squeezed = tf.keras.layers.GlobalAveragePooling2D(
+    squeezed = keras.layers.GlobalAveragePooling2D(
         name=f"{name}_gap", keepdims=True)(x)
-    squeezed = tf.keras.layers.Conv2D(
+    squeezed = keras.layers.Conv2D(
         max(1, filters // ratio), 1, padding='same', use_bias=True,
         activation='relu', kernel_initializer='he_normal',
         name=f"{name}_fc1")(squeezed)
-    squeezed = tf.keras.layers.Conv2D(
+    squeezed = keras.layers.Conv2D(
         filters, 1, padding='same', use_bias=True,
         activation='sigmoid', kernel_initializer='glorot_uniform',
         name=f"{name}_fc2")(squeezed)
-    return tf.keras.layers.Multiply(name=f"{name}_scale")([x, squeezed])
+    return keras.layers.Multiply(name=f"{name}_scale")([x, squeezed])
 
 
 def _spatial_se(x, name="sse"):
     """Spatial Squeeze-and-Excitation (sSE) block."""
-    squeezed = tf.keras.layers.Conv2D(
+    squeezed = keras.layers.Conv2D(
         1, 1, padding='same', use_bias=True,
         activation='sigmoid', kernel_initializer='glorot_uniform',
         name=f"{name}_conv")(x)
-    return tf.keras.layers.Multiply(name=f"{name}_scale")([x, squeezed])
+    return keras.layers.Multiply(name=f"{name}_scale")([x, squeezed])
 
 
 def _dual_se(x, ratio=16, name="dse"):
     """Concurrent Spatial-and-Channel SE (scSE) block — best of both worlds."""
     cse_out = _channel_se(x, ratio=ratio, name=f"{name}_c")
     sse_out = _spatial_se(x, name=f"{name}_s")
-    return tf.keras.layers.Add(name=f"{name}_add")([cse_out, sse_out])
+    return keras.layers.Add(name=f"{name}_add")([cse_out, sse_out])
 
 
 def _bn_relu(x, name=None):
     """Fused BN + ReLU shorthand."""
-    x = tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=1e-3,
+    x = keras.layers.BatchNormalization(momentum=0.99, epsilon=1e-3,
                                            name=f"{name}_bn" if name else None)(x)
-    x = tf.keras.layers.ReLU(name=f"{name}_relu" if name else None)(x)
+    x = keras.layers.ReLU(name=f"{name}_relu" if name else None)(x)
     return x
 
 
@@ -121,12 +122,12 @@ def _se_res_block(x, filters, strides=1, se_ratio=16, name="srb"):
 
     # Pre-activation path
     y = _bn_relu(x, name=f"{name}_pre")
-    y = tf.keras.layers.Conv2D(
+    y = keras.layers.Conv2D(
         filters, 3, strides=strides, padding='same', use_bias=False,
         kernel_initializer='he_normal', name=f"{name}_conv1")(y)
 
     y = _bn_relu(y, name=f"{name}_mid")
-    y = tf.keras.layers.Conv2D(
+    y = keras.layers.Conv2D(
         filters, 3, strides=1, padding='same', use_bias=False,
         kernel_initializer='he_normal', name=f"{name}_conv2")(y)
 
@@ -135,13 +136,13 @@ def _se_res_block(x, filters, strides=1, se_ratio=16, name="srb"):
 
     # Adjust shortcut if dimensions change
     if strides != 1 or shortcut.shape[-1] != filters:
-        shortcut = tf.keras.layers.Conv2D(
+        shortcut = keras.layers.Conv2D(
             filters, 1, strides=strides, padding='same', use_bias=False,
             kernel_initializer='he_normal', name=f"{name}_skip")(shortcut)
-        shortcut = tf.keras.layers.BatchNormalization(
+        shortcut = keras.layers.BatchNormalization(
             momentum=0.99, epsilon=1e-3, name=f"{name}_skip_bn")(shortcut)
 
-    return tf.keras.layers.Add(name=f"{name}_add")([shortcut, y])
+    return keras.layers.Add(name=f"{name}_add")([shortcut, y])
 
 
 def _multi_scale_stem(inputs, stem_base=32, out_ch=64, name="stem"):
@@ -150,24 +151,24 @@ def _multi_scale_stem(inputs, stem_base=32, out_ch=64, name="stem"):
     Concatenated and projected with 1×1 conv.
     Captures both fine texture (3×3) and broad structure (7×7) simultaneously.
     """
-    b3 = tf.keras.layers.Conv2D(
+    b3 = keras.layers.Conv2D(
         stem_base, 3, padding='same', use_bias=False,
         kernel_initializer='he_normal', name=f"{name}_3x3")(inputs)
 
-    b5 = tf.keras.layers.Conv2D(
+    b5 = keras.layers.Conv2D(
         stem_base, 5, padding='same', use_bias=False,
         kernel_initializer='he_normal', name=f"{name}_5x5")(inputs)
 
-    b7 = tf.keras.layers.Conv2D(
+    b7 = keras.layers.Conv2D(
         stem_base, 7, padding='same', use_bias=False,
         kernel_initializer='he_normal', name=f"{name}_7x7")(inputs)
 
-    x = tf.keras.layers.Concatenate(name=f"{name}_concat")([b3, b5, b7])
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Concatenate(name=f"{name}_concat")([b3, b5, b7])
+    x = keras.layers.Conv2D(
         out_ch, 1, padding='same', use_bias=False,
         kernel_initializer='he_normal', name=f"{name}_proj")(x)
     x = _bn_relu(x, name=f"{name}_proj")
-    x = tf.keras.layers.MaxPooling2D(2, strides=2, name=f"{name}_pool")(x)
+    x = keras.layers.MaxPooling2D(2, strides=2, name=f"{name}_pool")(x)
     return x
 
 
@@ -200,7 +201,7 @@ def create_super_high_accuracy_validator(
         dropout_rates:   Dropout rates in classifier head
         label_smoothing: Label smoothing for compile() CategoricalCE
     Returns:
-        tf.keras.Model
+        keras.Model
     """
     # Lazy-fetch defaults if not provided explicitly
     if nb_classes is None or input_shape is None:
@@ -208,7 +209,7 @@ def create_super_high_accuracy_validator(
         nb_classes = nb_classes if nb_classes is not None else def_nb
         input_shape = input_shape if input_shape is not None else def_shape
 
-    inputs = tf.keras.Input(shape=input_shape, name='input')
+    inputs = keras.Input(shape=input_shape, name='input')
 
     # ── Multi-Scale Stem ────────────────────────────────────────────────────
     x = _multi_scale_stem(inputs, stem_base=stem_base, out_ch=filters[0], name="stem")
@@ -229,24 +230,24 @@ def create_super_high_accuracy_validator(
     x = _dual_se(x, ratio=se_ratios[-1], name="final_dse")
 
     # ── Classifier Head ─────────────────────────────────────────────────────
-    x = tf.keras.layers.GlobalAveragePooling2D(name='gap')(x)
+    x = keras.layers.GlobalAveragePooling2D(name='gap')(x)
 
     for i, (units, drop) in enumerate(zip(dense_units, dropout_rates)):
-        x = tf.keras.layers.Dense(
+        x = keras.layers.Dense(
             units, use_bias=False, kernel_initializer='he_normal',
             name=f'fc{i+1}')(x)
-        x = tf.keras.layers.BatchNormalization(
+        x = keras.layers.BatchNormalization(
             momentum=0.99, epsilon=1e-3, name=f'fc{i+1}_bn')(x)
-        x = tf.keras.layers.ReLU(name=f'fc{i+1}_relu')(x)
-        x = tf.keras.layers.Dropout(drop, name=f'fc{i+1}_drop')(x)
+        x = keras.layers.ReLU(name=f'fc{i+1}_relu')(x)
+        x = keras.layers.Dropout(drop, name=f'fc{i+1}_drop')(x)
 
     # Output — cast to float32 so mixed-precision loss is stable
-    logits = tf.keras.layers.Dense(
+    logits = keras.layers.Dense(
         nb_classes, kernel_initializer='glorot_uniform', name='logits')(x)
-    outputs = tf.keras.layers.Activation(
+    outputs = keras.layers.Activation(
         'softmax', dtype='float32', name='output')(logits)
 
-    model = tf.keras.Model(inputs, outputs, name='super_high_accuracy_validator')
+    model = keras.Model(inputs, outputs, name='super_high_accuracy_validator')
     return model
 
 
@@ -276,7 +277,7 @@ def tta_predict(model, images, angles_deg=(-10, -5, 0, 5, 10), verbose=False):
             aug_imgs = images
         else:
             rad = angle * math.pi / 180.0
-            aug_imgs = tf.keras.ops.image.affine_transform(
+            aug_imgs = keras.ops.image.affine_transform(
                 images,
                 transform=_rotation_matrix(rad, images.shape[1], images.shape[2]),
                 interpolation='bilinear',
@@ -298,7 +299,7 @@ def _rotation_matrix(angle_rad, height, width):
     """Returns a batch affine transform matrix for image rotation around center."""
     cx, cy = width / 2.0, height / 2.0
     cos_a, sin_a = float(np.cos(angle_rad)), float(np.sin(angle_rad))
-    # Affine transform: [a0,a1,a2,b0,b1,b2,c0,c1] for tf.keras.ops.image.affine_transform
+    # Affine transform: [a0,a1,a2,b0,b1,b2,c0,c1] for keras.ops.image.affine_transform
     a0, a1 = cos_a, -sin_a
     a2 = cx - cx * cos_a + cy * sin_a
     b0, b1 = sin_a, cos_a
@@ -309,8 +310,8 @@ def _rotation_matrix(angle_rad, height, width):
 # Simpler TTA using tf.raw_ops not available on all backends; fallback version:
 def tta_predict_tfa(model, images, angles_deg=(-10, -5, 0, 5, 10)):
     """
-    Fallback TTA using tf.keras.preprocessing for environments without
-    tf.keras.ops.image.affine_transform.
+    Fallback TTA using keras.preprocessing for environments without
+    keras.ops.image.affine_transform.
     """
     all_probs = []
     for angle in angles_deg:

@@ -39,6 +39,7 @@ Pipeline:
 
 
 import tensorflow as tf
+from utils.keras_helper import keras
 import numpy as np
 import sys
 import os
@@ -61,7 +62,7 @@ except ImportError:
 # HYBRID BINARIZATION PIPELINE
 # ============================================================================
 
-class AdaptiveHybridBinarization(tf.keras.layers.Layer):
+class AdaptiveHybridBinarization(keras.layers.Layer):
     """
     Hybrid approach:
     1. Compute per-digit adaptive threshold
@@ -111,7 +112,7 @@ class AdaptiveHybridBinarization(tf.keras.layers.Layer):
         return config
 
 
-class PolarityNormalization2Channel(tf.keras.layers.Layer):
+class PolarityNormalization2Channel(keras.layers.Layer):
     """
     Normalize polarity for both channels simultaneously.
     If the image is inverted (light background), flips both the binary 
@@ -149,40 +150,40 @@ def _build_v29_backbone(x, filters, dense_units, use_batch_norm=False):
     2 channels at conv1 instead of 1. Keras handles the input_channels automatically.
     """
     with tf.name_scope('backbone'):
-        x = tf.keras.layers.Conv2D(
+        x = keras.layers.Conv2D(
             filters[0], (3, 3), padding='same',
             kernel_initializer='he_normal', use_bias=True, name=f'conv1_{filters[0]}f'
         )(x)
-        if use_batch_norm: x = tf.keras.layers.BatchNormalization(name='bn1')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
-        x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+        if use_batch_norm: x = keras.layers.BatchNormalization(name='bn1')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
+        x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
 
-        x = tf.keras.layers.Conv2D(
+        x = keras.layers.Conv2D(
             filters[1], (3, 3), padding='same',
             kernel_initializer='he_normal', use_bias=True, name=f'conv2_{filters[1]}f'
         )(x)
-        if use_batch_norm: x = tf.keras.layers.BatchNormalization(name='bn2')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
-        x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
+        if use_batch_norm: x = keras.layers.BatchNormalization(name='bn2')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
+        x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
 
-        x = tf.keras.layers.Conv2D(
+        x = keras.layers.Conv2D(
             filters[2], (3, 3), padding='same',
             kernel_initializer='he_normal', use_bias=True, name=f'conv3_{filters[2]}f'
         )(x)
-        if use_batch_norm: x = tf.keras.layers.BatchNormalization(name='bn3')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
+        if use_batch_norm: x = keras.layers.BatchNormalization(name='bn3')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
 
-        x = tf.keras.layers.Conv2D(
+        x = keras.layers.Conv2D(
             filters[3], (3, 3), padding='same',
             kernel_initializer='he_normal', use_bias=True, name=f'conv4_{filters[3]}f'
         )(x)
-        if use_batch_norm: x = tf.keras.layers.BatchNormalization(name='bn4')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
+        if use_batch_norm: x = keras.layers.BatchNormalization(name='bn4')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
 
-        x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
-        x = tf.keras.layers.Dense(dense_units, activation=None, name='feature_dense')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
-        x = tf.keras.layers.Dropout(0.25, name='dropout')(x)
+        x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+        x = keras.layers.Dense(dense_units, activation=None, name='feature_dense')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
+        x = keras.layers.Dropout(0.25, name='dropout')(x)
     return x
 
 
@@ -202,12 +203,12 @@ def create_digit_recognizer_v29(use_batch_norm=False):
     filters, dense_units, _ = _get_adaptive_config()
     print(f"v29 config: classes={params.NB_CLASSES}  filters={filters}  dense={dense_units}")
 
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
 
     # 1. Luminance
     input_channels = params.INPUT_SHAPE[-1]
     if input_channels is not None and input_channels == 3:
-        x = tf.keras.layers.Lambda(
+        x = keras.layers.Lambda(
             lambda t: 0.299 * t[..., 0:1] + 0.587 * t[..., 1:2] + 0.114 * t[..., 2:3],
             name='luminance_grayscale'
         )(inputs)
@@ -223,11 +224,11 @@ def create_digit_recognizer_v29(use_batch_norm=False):
     # 4. Backbone expects 2 channels now
     x = _build_v29_backbone(x, filters, dense_units, use_batch_norm)
 
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, activation='softmax', name='output'
     )(x)
 
-    model = tf.keras.Model(inputs, outputs, name='digit_recognizer_v29')
+    model = keras.Model(inputs, outputs, name='digit_recognizer_v29')
 
     # Freeze preprocessing
     frozen = 0
@@ -270,7 +271,7 @@ if __name__ == "__main__":
     pred = model.predict(x, verbose=0)
     
     # Check intermediate
-    preproc = tf.keras.Model(model.input, model.get_layer('polarity_norm').output)
+    preproc = keras.Model(model.input, model.get_layer('polarity_norm').output)
     out_2ch = preproc.predict(x, verbose=0)
     
     print("\n✓ 2-Channel Preprocessing Output:")

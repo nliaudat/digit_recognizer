@@ -52,9 +52,8 @@ ESP32 C++ transition rule:
         digit = (digit + 1) % 10;
 """
 
-import tensorflow as tf
-import numpy as np
 import parameters as params
+from utils.keras_helper import keras
 
 try:
     import tensorflow_model_optimization as tfmot
@@ -78,7 +77,7 @@ def _luminance_layer(inputs):
     """RGB → grayscale using BT.601 luminance weights."""
     channels = inputs.shape[-1]
     if channels is not None and channels == 3:
-        return tf.keras.layers.Lambda(
+        return keras.layers.Lambda(
             lambda t: 0.299 * t[..., 0:1] + 0.587 * t[..., 1:2] + 0.114 * t[..., 2:3],
             name='luminance_grayscale'
         )(inputs)
@@ -96,36 +95,36 @@ def _build_v25_backbone(x, use_batch_norm=False):
     All ops are standard TFLite Micro ops.
     """
     with tf.name_scope('backbone'):
-        x = tf.keras.layers.Conv2D(24, (3, 3), padding='same',
+        x = keras.layers.Conv2D(24, (3, 3), padding='same',
                                    kernel_initializer='he_normal', name='conv1_24f')(x)
         if use_batch_norm:
-            x = tf.keras.layers.BatchNormalization(name='bn1')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
-        x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+            x = keras.layers.BatchNormalization(name='bn1')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
+        x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
 
-        x = tf.keras.layers.Conv2D(36, (3, 3), padding='same',
+        x = keras.layers.Conv2D(36, (3, 3), padding='same',
                                    kernel_initializer='he_normal', name='conv2_36f')(x)
         if use_batch_norm:
-            x = tf.keras.layers.BatchNormalization(name='bn2')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
-        x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
+            x = keras.layers.BatchNormalization(name='bn2')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
+        x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
 
-        x = tf.keras.layers.Conv2D(48, (3, 3), padding='same',
+        x = keras.layers.Conv2D(48, (3, 3), padding='same',
                                    kernel_initializer='he_normal', name='conv3_48f')(x)
         if use_batch_norm:
-            x = tf.keras.layers.BatchNormalization(name='bn3')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
+            x = keras.layers.BatchNormalization(name='bn3')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
 
-        x = tf.keras.layers.Conv2D(64, (3, 3), padding='same',
+        x = keras.layers.Conv2D(64, (3, 3), padding='same',
                                    kernel_initializer='he_normal', name='conv4_64f')(x)
         if use_batch_norm:
-            x = tf.keras.layers.BatchNormalization(name='bn4')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
+            x = keras.layers.BatchNormalization(name='bn4')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
 
-        x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
-        x = tf.keras.layers.Dense(96, activation=None, name='shared_dense')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_shared')(x)
-        x = tf.keras.layers.Dropout(0.25, name='shared_dropout')(x)
+        x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+        x = keras.layers.Dense(96, activation=None, name='shared_dense')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_shared')(x)
+        x = keras.layers.Dropout(0.25, name='shared_dropout')(x)
     return x
 
 
@@ -151,7 +150,7 @@ def create_digit_recognizer_v25(use_batch_norm=False):
                           'transition_dir': 0.5, 'digit_confidence': 0.1},
         )
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
 
     # Luminance conversion (no-op for grayscale input)
     x = _luminance_layer(inputs)
@@ -165,26 +164,26 @@ def create_digit_recognizer_v25(use_batch_norm=False):
     features = _build_v25_backbone(x, use_batch_norm=use_batch_norm)
 
     # ── Digit classification head ──────────────────────────────────────────
-    d = tf.keras.layers.Dense(64, activation=None, name='digit_dense')(features)
-    d = tf.keras.layers.ReLU(max_value=6.0, name='relu6_digit')(d)
-    digit_probs = tf.keras.layers.Dense(
+    d = keras.layers.Dense(64, activation=None, name='digit_dense')(features)
+    d = keras.layers.ReLU(max_value=6.0, name='relu6_digit')(d)
+    digit_probs = keras.layers.Dense(
         params.NB_CLASSES, activation='softmax', name='digit_probs'
     )(d)
-    digit_confidence = tf.keras.layers.Dense(
+    digit_confidence = keras.layers.Dense(
         1, activation='sigmoid', name='digit_confidence'
     )(d)
 
     # ── Transition detection head ──────────────────────────────────────────
-    t = tf.keras.layers.Dense(32, activation=None, name='trans_dense')(features)
-    t = tf.keras.layers.ReLU(max_value=6.0, name='relu6_trans')(t)
-    transition_prob = tf.keras.layers.Dense(
+    t = keras.layers.Dense(32, activation=None, name='trans_dense')(features)
+    t = keras.layers.ReLU(max_value=6.0, name='relu6_trans')(t)
+    transition_prob = keras.layers.Dense(
         1, activation='sigmoid', name='transition_prob'
     )(t)
-    transition_dir = tf.keras.layers.Dense(
+    transition_dir = keras.layers.Dense(
         1, activation='sigmoid', name='transition_dir'
     )(t)
 
-    model = tf.keras.Model(
+    model = keras.Model(
         inputs=inputs,
         outputs=[digit_probs, digit_confidence, transition_prob, transition_dir],
         name='digit_recognizer_v25'
@@ -229,7 +228,7 @@ def create_qat_model_v25(model=None):
 # CUSTOM MULTI-TASK LOSS
 # ============================================================================
 
-class TransitionAwareLoss(tf.keras.losses.Loss):
+class TransitionAwareLoss(keras.losses.Loss):
     """
     Multi-task loss for v25.
 
@@ -253,26 +252,26 @@ class TransitionAwareLoss(tf.keras.losses.Loss):
     def call(self, y_true, y_pred):
         digit_probs, digit_confidence, transition_prob, transition_dir = y_pred
 
-        digit_target = tf.cast(y_true[..., 0], tf.int32)
+        digit_target = keras.ops.cast(y_true[..., 0], 'int32')
         trans_target = y_true[..., 1]
         dir_target   = y_true[..., 2]
 
-        digit_loss = tf.keras.losses.sparse_categorical_crossentropy(
+        digit_loss = keras.losses.sparse_categorical_crossentropy(
             digit_target, digit_probs
         )
-        trans_loss = tf.keras.losses.binary_crossentropy(
-            tf.expand_dims(trans_target, -1), transition_prob
+        trans_loss = keras.losses.binary_crossentropy(
+            keras.ops.expand_dims(trans_target, -1), transition_prob
         )
         # Direction loss only counts when sample is actually in transition
-        dir_loss = tf.keras.losses.binary_crossentropy(
-            tf.expand_dims(dir_target, -1), transition_dir
+        dir_loss = keras.losses.binary_crossentropy(
+            keras.ops.expand_dims(dir_target, -1), transition_dir
         )
         dir_loss = dir_loss * trans_target  # Mask non-transitional samples
         
         # Confidence target: 1.0 if not in transition, 0.0 if in transition
         conf_target = 1.0 - trans_target
-        conf_loss = tf.keras.losses.binary_crossentropy(
-            tf.expand_dims(conf_target, -1), digit_confidence
+        conf_loss = keras.losses.binary_crossentropy(
+            keras.ops.expand_dims(conf_target, -1), digit_confidence
         )
 
         return (self.digit_weight      * digit_loss +

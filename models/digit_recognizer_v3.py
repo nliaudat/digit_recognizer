@@ -21,7 +21,7 @@ Architecture (RGB variant):
   - Dense(48) classification head
 
 Notes:
-  - ReLU6 via tf.keras.layers.Activation(tf.nn.relu6) — may cause
+  - ReLU6 via keras.layers.Activation(tf.nn.relu6) — may cause
     issues with some quantization converters; prefer v4+ for QAT
   - Dropout rates scaled from 0.1 to 0.4 for regularization
 
@@ -29,6 +29,7 @@ Estimated: ~80–120K parameters depending on variant.
 """
 
 import tensorflow as tf
+from utils.keras_helper import keras
 import parameters as params
 
 def create_digit_recognizer_v3():
@@ -55,132 +56,132 @@ def create_digit_recognizer_v3_grayscale():
     - Minimal filters for simple digit features
     - Compact architecture for embedded deployment
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Layer 1: Minimal filters for grayscale
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         8, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         activation='relu',
         name='conv1_8f'
     )(inputs)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_1')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     
     # Layer 2: Moderate increase
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         16, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         activation='relu',
         name='conv2_16f'
     )(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_2')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
     
     # Layer 3: Feature abstraction
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         24, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         activation='relu',
         name='conv3_24f'
     )(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_3')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
     
     # Global pooling for robust feature reduction
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Small dense layer for better separation
-    x = tf.keras.layers.Dense(32, activation='relu', name='feature_dense')(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense')(x)
+    x = keras.layers.Dense(32, activation='relu', name='feature_dense')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v3_grayscale")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v3_grayscale")
     
     
 def create_digit_recognizer_v3_grayscale_improved():
     """
     Improved version for grayscale images with better accuracy
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Layer 1: Increased filters for better feature detection
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         16, (3, 3), padding='same',  # Increased from 8 to 16
         kernel_initializer='he_normal',
         use_bias=True,
         activation='relu',
         name='conv1_16f'
     )(inputs)
-    x = tf.keras.layers.BatchNormalization(name='bn1')(x)  # Added BN
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_1')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
-    x = tf.keras.layers.Dropout(0.1, name='drop1')(x)  # Light dropout
+    x = keras.layers.BatchNormalization(name='bn1')(x)  # Added BN
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+    x = keras.layers.Dropout(0.1, name='drop1')(x)  # Light dropout
     
     # Layer 2: Increased capacity
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         32, (3, 3), padding='same',  # Increased from 16 to 32
         kernel_initializer='he_normal',
         use_bias=True,
         activation='relu',
         name='conv2_32f'
     )(x)
-    x = tf.keras.layers.BatchNormalization(name='bn2')(x)  # Added BN
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_2')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
-    x = tf.keras.layers.Dropout(0.2, name='drop2')(x)
+    x = keras.layers.BatchNormalization(name='bn2')(x)  # Added BN
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
+    x = keras.layers.Dropout(0.2, name='drop2')(x)
     
     # Layer 3: Additional convolutional layer for better features
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         48, (3, 3), padding='same',  # Increased from 24 to 48
         kernel_initializer='he_normal',
         use_bias=True,
         activation='relu',
         name='conv3_48f'
     )(x)
-    x = tf.keras.layers.BatchNormalization(name='bn3')(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_3')(x)
+    x = keras.layers.BatchNormalization(name='bn3')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
     
     # Layer 4: Additional layer for complex feature learning
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         64, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         activation='relu',
         name='conv4_64f'
     )(x)
-    x = tf.keras.layers.BatchNormalization(name='bn4')(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_4')(x)
-    x = tf.keras.layers.Dropout(0.3, name='drop3')(x)
+    x = keras.layers.BatchNormalization(name='bn4')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
+    x = keras.layers.Dropout(0.3, name='drop3')(x)
     
     # Alternative to GlobalAveragePooling - try Flatten or keep spatial info
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Increased dense layer capacity
-    x = tf.keras.layers.Dense(64, activation='relu', name='feature_dense1')(x)  # Increased from 32 to 64
-    x = tf.keras.layers.BatchNormalization(name='bn_dense')(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense')(x)
-    x = tf.keras.layers.Dropout(0.4, name='drop_dense')(x)
+    x = keras.layers.Dense(64, activation='relu', name='feature_dense1')(x)  # Increased from 32 to 64
+    x = keras.layers.BatchNormalization(name='bn_dense')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
+    x = keras.layers.Dropout(0.4, name='drop_dense')(x)
     
     # Optional: Additional small dense layer
-    x = tf.keras.layers.Dense(32, activation='relu', name='feature_dense2')(x)
+    x = keras.layers.Dense(32, activation='relu', name='feature_dense2')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v3_grayscale_improved")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v3_grayscale_improved")
 
 def create_digit_recognizer_v3_rgb():
     """
@@ -188,10 +189,10 @@ def create_digit_recognizer_v3_rgb():
     - Depthwise separable convolutions for efficiency
     - Slightly more capacity for color information
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Layer 1: Depthwise separable for RGB efficiency
-    x = tf.keras.layers.SeparableConv2D(
+    x = keras.layers.SeparableConv2D(
         16, (3, 3), padding='same',
         depthwise_initializer='he_normal',
         pointwise_initializer='he_normal',
@@ -199,55 +200,55 @@ def create_digit_recognizer_v3_rgb():
         activation='relu',
         name='sep_conv1_16f'
     )(inputs)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_1')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     
     # Layer 2: Regular convolution
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         24, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         activation='relu',
         name='conv2_24f'
     )(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_2')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
     
     # Layer 3: Feature abstraction
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         32, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         activation='relu',
         name='conv3_32f'
     )(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_3')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
     
     # Optional bottleneck layer for richer color features
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         48, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         activation='relu',
         name='conv4_bottleneck'
     )(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_4')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
     
     # Global pooling
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Dense layer
-    x = tf.keras.layers.Dense(48, activation='relu', name='feature_dense')(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense')(x)
+    x = keras.layers.Dense(48, activation='relu', name='feature_dense')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v3_rgb")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v3_rgb")
 
 def create_digit_recognizer_v3_adaptive():
     """
@@ -255,12 +256,12 @@ def create_digit_recognizer_v3_adaptive():
     - Uses depthwise separable for multi-channel, regular conv for single channel
     - Good for flexibility but less optimized than specialized versions
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     input_channels = params.INPUT_SHAPE[-1]
     
     # Layer 1: Adaptive based on channel count
     if input_channels == 1:
-        x = tf.keras.layers.Conv2D(
+        x = keras.layers.Conv2D(
             12, (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
@@ -268,7 +269,7 @@ def create_digit_recognizer_v3_adaptive():
             name='conv1_adaptive'
         )(inputs)
     else:
-        x = tf.keras.layers.SeparableConv2D(
+        x = keras.layers.SeparableConv2D(
             16, (3, 3), padding='same',
             depthwise_initializer='he_normal',
             pointwise_initializer='he_normal',
@@ -277,45 +278,45 @@ def create_digit_recognizer_v3_adaptive():
             name='sep_conv1_adaptive'
         )(inputs)
     
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_1')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     
     # Layer 2
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         24, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         activation='relu',
         name='conv2_24f'
     )(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_2')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
     
     # Layer 3
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         32, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         activation='relu',
         name='conv3_32f'
     )(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_3')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
     
     # Global pooling
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Dense layer
-    x = tf.keras.layers.Dense(40, activation='relu', name='feature_dense')(x)
-    x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense')(x)
+    x = keras.layers.Dense(40, activation='relu', name='feature_dense')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v3_adaptive")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v3_adaptive")
 
 def compare_models():
     """Compare all three model variants"""

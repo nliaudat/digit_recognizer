@@ -6,6 +6,7 @@ import tensorflow as tf
 import numpy as np
 
 from utils.train_qat_helper import _is_qat_model
+from utils.keras_helper import keras
 
 # --------------------------------------------------------------------------- #
 #  Absolute imports (no leading dots) – these work when train.py is run directly
@@ -40,7 +41,7 @@ class TFLiteModelManager:
     # -----------------------------------------------------------------
     #  Sanity check before conversion
     # -----------------------------------------------------------------
-    def verify_model_for_conversion(self, model: tf.keras.Model) -> bool:
+    def verify_model_for_conversion(self, model: keras.Model) -> bool:
         """Run a quick forwardpass sanity check."""
         try:
             test_input = tf.random.normal([1] + list(params.INPUT_SHAPE))
@@ -57,7 +58,7 @@ class TFLiteModelManager:
             return False
 
 
-    # def _is_qat_model(self, model: tf.keras.Model) -> bool:
+    # def _is_qat_model(self, model: keras.Model) -> bool:
         # """More reliable QAT model detection"""
         # # This local method SHADOWS the imported one!
     
@@ -65,7 +66,7 @@ class TFLiteModelManager:
     # -----------------------------------------------------------------
     #  Save a trainable checkpoint (Keras 3 .keras format)
     # -----------------------------------------------------------------
-    def save_trainable_checkpoint(self, model: tf.keras.Model, accuracy: float, epoch: int):
+    def save_trainable_checkpoint(self, model: keras.Model, accuracy: float, epoch: int):
         ts = datetime.now().strftime("%H%M%S")
         ckpt_path = os.path.join(
             self.output_dir,
@@ -425,7 +426,7 @@ class TFLiteModelManager:
         
         # Convert labels if needed
         if params.MODEL_ARCHITECTURE == "original_haverland":
-            y_test = tf.keras.utils.to_categorical(y_test, params.NB_CLASSES)
+            y_test = keras.utils.to_categorical(y_test, params.NB_CLASSES)
         
         return x_test, y_test, x_train_raw
 
@@ -637,7 +638,7 @@ class TFLiteModelManager:
     # -----------------------------------------------------------------
     #  Build a TFLiteConverter with the correct options
     # -----------------------------------------------------------------
-    def _make_converter(self, model: tf.keras.Model,
+    def _make_converter(self, model: keras.Model,
                         quantize: bool,
                         representative_data=None) -> tf.lite.TFLiteConverter:
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
@@ -818,7 +819,7 @@ class TFLiteModelManager:
     # -----------------------------------------------------------------
     def save_best_model(
         self,
-        model: tf.keras.Model,
+        model: keras.Model,
         accuracy: float,
         representative_data=None,
     ):

@@ -31,25 +31,26 @@ Notes:
 Estimated: ~1M+ parameters → not intended for ESP32 deployment.
 """
 
-import tensorflow as tf
 import parameters as params
-from tensorflow.keras import layers, Model
-import tensorflow.keras.backend as K
+from utils.keras_helper import keras
+layers = keras.layers
+Model = keras.Model
+K = keras.backend
 
 class QATFriendlyGELU(layers.Layer):
     """GELU activation that's quantization-friendly using approximation"""
     def call(self, inputs):
         # GELU approximation that works well with quantization
-        return 0.5 * inputs * (1.0 + tf.math.tanh(
-            tf.math.sqrt(2.0 / tf.constant(3.141592653589793)) * 
-            (inputs + 0.044715 * tf.math.pow(inputs, 3))
+        return 0.5 * inputs * (1.0 + keras.ops.tanh(
+            keras.ops.sqrt(2.0 / 3.141592653589793) * 
+            (inputs + 0.044715 * keras.ops.power(inputs, 3))
         ))
 
 class QATFriendlySwish(layers.Layer):
     """Swish activation that's quantization-friendly"""
     def call(self, inputs):
         # Swish: x * sigmoid(x)
-        return inputs * tf.math.sigmoid(inputs)
+        return inputs * keras.activations.sigmoid(inputs)
 
 class QATSEBlock(layers.Layer):
     """Squeeze-and-Excitation block optimized for QAT"""
@@ -167,10 +168,10 @@ class StochasticDepth(layers.Layer):
             return inputs
             
         keep_prob = 1.0 - self.drop_rate
-        batch_size = tf.shape(inputs)[0]
+        batch_size = keras.ops.shape(inputs)[0]
         random_tensor = keep_prob
-        random_tensor += tf.random.uniform([batch_size, 1, 1, 1], dtype=inputs.dtype)
-        binary_tensor = tf.floor(random_tensor)
+        random_tensor += keras.random.uniform([batch_size, 1, 1, 1], dtype=inputs.dtype)
+        binary_tensor = keras.ops.floor(random_tensor)
         return inputs * binary_tensor / keep_prob
 
 def create_digit_recognizer_v11():
@@ -178,7 +179,7 @@ def create_digit_recognizer_v11():
     Modern SOTA architecture with GELU, Swish, SE blocks, and MBConv
     Optimized for both accuracy and QAT compatibility
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Stem with modern activations
     x = layers.Conv2D(32, 3, strides=1, padding='same', use_bias=False, 
@@ -242,14 +243,14 @@ def create_digit_recognizer_v11():
     
     outputs = layers.Dense(params.NB_CLASSES, activation='softmax', name='output')(x)
     
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v11")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v11")
 
 def create_digit_recognizer_v11_light():
     """
     Lightweight version with selective modern components
     Better QAT compatibility while keeping modern improvements
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Stem with Swish
     x = layers.Conv2D(32, 3, padding='same', use_bias=False, name='stem_conv')(inputs)
@@ -283,7 +284,7 @@ def create_digit_recognizer_v11_light():
     
     outputs = layers.Dense(params.NB_CLASSES, activation='softmax', name='output')(x)
     
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v11_light")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v11_light")
 
 # Test modern components
 def test_modern_components():
@@ -291,7 +292,7 @@ def test_modern_components():
     print("🧪 Testing Modern Components...")
     
     # Test activations
-    test_input = tf.constant([-2.0, -1.0, 0.0, 1.0, 2.0])
+    test_input = keras.ops.convert_to_tensor([-2.0, -1.0, 0.0, 1.0, 2.0])
     
     gelu_layer = QATFriendlyGELU()
     swish_layer = QATFriendlySwish()
@@ -299,12 +300,12 @@ def test_modern_components():
     gelu_output = gelu_layer(test_input)
     swish_output = swish_layer(test_input)
     
-    print(f"✓ GELU works: {gelu_output.numpy()}")
-    print(f"✓ Swish works: {swish_output.numpy()}")
+    print(f"✓ GELU works: {gelu_output.numpy() if hasattr(gelu_output, 'numpy') else gelu_output}")
+    print(f"✓ Swish works: {swish_output.numpy() if hasattr(swish_output, 'numpy') else swish_output}")
     
     # Test SE Block
     se_block = QATSEBlock(se_ratio=16)
-    test_feature = tf.ones((1, 8, 5, 64))  # Simulate feature map
+    test_feature = keras.ops.ones((1, 8, 5, 64))  # Simulate feature map
     se_output = se_block(test_feature)
     print(f"✓ SE Block works: input {test_feature.shape} -> output {se_output.shape}")
     

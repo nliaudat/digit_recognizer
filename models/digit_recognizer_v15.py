@@ -19,6 +19,7 @@ Fully QAT-compatible.
 """
 
 import tensorflow as tf
+from utils.keras_helper import keras
 import parameters as params
 
 try:
@@ -40,34 +41,34 @@ def _res_block_relu6(x, filters, name_prefix):
     """
     shortcut = x
 
-    y = tf.keras.layers.Conv2D(
+    y = keras.layers.Conv2D(
         filters, (3, 3), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name=f'{name_prefix}_conv_a'
     )(x)
-    y = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_bn_a')(y)
-    y = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_relu6_a')(y)
+    y = keras.layers.BatchNormalization(name=f'{name_prefix}_bn_a')(y)
+    y = keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_relu6_a')(y)
 
-    y = tf.keras.layers.Conv2D(
+    y = keras.layers.Conv2D(
         filters, (3, 3), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name=f'{name_prefix}_conv_b'
     )(y)
-    y = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_bn_b')(y)
+    y = keras.layers.BatchNormalization(name=f'{name_prefix}_bn_b')(y)
 
     # Adjust shortcut channel count if needed
     if shortcut.shape[-1] != filters:
-        shortcut = tf.keras.layers.Conv2D(
+        shortcut = keras.layers.Conv2D(
             filters, (1, 1), padding='same',
             kernel_initializer='he_normal', use_bias=False,
             name=f'{name_prefix}_shortcut_conv'
         )(shortcut)
-        shortcut = tf.keras.layers.BatchNormalization(
+        shortcut = keras.layers.BatchNormalization(
             name=f'{name_prefix}_shortcut_bn'
         )(shortcut)
 
-    y = tf.keras.layers.Add(name=f'{name_prefix}_add')([shortcut, y])
-    y = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_relu6_out')(y)
+    y = keras.layers.Add(name=f'{name_prefix}_add')([shortcut, y])
+    y = keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_relu6_out')(y)
     return y
 
 
@@ -93,66 +94,66 @@ def create_digit_recognizer_v15():
 
 def _build_v15(entry_filters, res1_filters, res2_filters, dense_units, model_name):
     """Grayscale variant – uses plain Conv2D entry (1-channel is cheap enough)."""
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
 
     # Entry block
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         entry_filters, (3, 3), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name='entry_conv'
     )(inputs)
-    x = tf.keras.layers.BatchNormalization(name='entry_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='entry_relu6')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='entry_pool')(x)
+    x = keras.layers.BatchNormalization(name='entry_bn')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='entry_relu6')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='entry_pool')(x)
 
     # Residual stage 1
     x = _res_block_relu6(x, res1_filters, name_prefix='res1')
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='res1_pool')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='res1_pool')(x)
 
     # Residual stage 2
     x = _res_block_relu6(x, res2_filters, name_prefix='res2')
 
     # Classifier
-    x = tf.keras.layers.GlobalAveragePooling2D(name='gap')(x)
-    x = tf.keras.layers.Dense(dense_units, use_bias=True, name='fc')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='fc_relu6')(x)
-    outputs = tf.keras.layers.Dense(
+    x = keras.layers.GlobalAveragePooling2D(name='gap')(x)
+    x = keras.layers.Dense(dense_units, use_bias=True, name='fc')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='fc_relu6')(x)
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, activation='softmax', name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name=model_name)
+    return keras.Model(inputs, outputs, name=model_name)
 
 
 def _build_v15_rgb(entry_filters, res1_filters, res2_filters, dense_units, model_name):
     """RGB variant – uses SeparableConv2D in the entry to keep params low."""
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
 
     # Entry: separable conv is ~3× cheaper for RGB input
-    x = tf.keras.layers.SeparableConv2D(
+    x = keras.layers.SeparableConv2D(
         entry_filters, (3, 3), padding='same',
         depthwise_initializer='he_normal', pointwise_initializer='he_normal',
         use_bias=False, name='entry_sep_conv'
     )(inputs)
-    x = tf.keras.layers.BatchNormalization(name='entry_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='entry_relu6')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='entry_pool')(x)
+    x = keras.layers.BatchNormalization(name='entry_bn')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='entry_relu6')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='entry_pool')(x)
 
     # Residual stage 1
     x = _res_block_relu6(x, res1_filters, name_prefix='res1')
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='res1_pool')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='res1_pool')(x)
 
     # Residual stage 2
     x = _res_block_relu6(x, res2_filters, name_prefix='res2')
 
     # Classifier
-    x = tf.keras.layers.GlobalAveragePooling2D(name='gap')(x)
-    x = tf.keras.layers.Dense(dense_units, use_bias=True, name='fc')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='fc_relu6')(x)
-    outputs = tf.keras.layers.Dense(
+    x = keras.layers.GlobalAveragePooling2D(name='gap')(x)
+    x = keras.layers.Dense(dense_units, use_bias=True, name='fc')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='fc_relu6')(x)
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, activation='softmax', name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name=model_name)
+    return keras.Model(inputs, outputs, name=model_name)
 
 
 # ---------------------------------------------------------------------------

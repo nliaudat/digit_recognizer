@@ -9,10 +9,11 @@ Keras callback that handles:
 
 import os
 import tensorflow as tf
+from utils.keras_helper import keras
 from utils.train_qat_helper import create_qat_representative_dataset
 
 
-class TFLiteCheckpoint(tf.keras.callbacks.Callback):
+class TFLiteCheckpoint(keras.callbacks.Callback):
     """
     Parameters
     ----------

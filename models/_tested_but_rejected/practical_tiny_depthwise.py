@@ -21,52 +21,51 @@ Notes:
 Estimated: ~200–350K parameters → suitable for benchmarking, not strict IoT.
 """
 
-import tensorflow as tf
 import parameters as params
-
+from utils.keras_helper import keras
 
 def create_practical_tiny_depthwise():
     """
     FIXED VERSION - Proper architecture that can actually learn
     """
-    model = tf.keras.Sequential([
-        tf.keras.layers.Input(shape=params.INPUT_SHAPE),
+    model = keras.Sequential([
+        keras.layers.Input(shape=params.INPUT_SHAPE),
         
         # First conv with sufficient capacity
-        tf.keras.layers.Conv2D(
+        keras.layers.Conv2D(
             32, (3, 3), padding='same', activation='relu',
             kernel_initializer='he_normal',
         ),
-        tf.keras.layers.MaxPooling2D((2, 2)),
+        keras.layers.MaxPooling2D((2, 2)),
         
         # Depthwise separable block 1 - increased capacity
-        tf.keras.layers.DepthwiseConv2D(
+        keras.layers.DepthwiseConv2D(
             (3, 3), padding='same', activation='relu',
             depthwise_initializer='he_normal',
         ),
-        tf.keras.layers.Conv2D(
+        keras.layers.Conv2D(
             64, (1, 1), activation='relu',
             kernel_initializer='he_normal',
         ),
-        tf.keras.layers.MaxPooling2D((2, 2)),
+        keras.layers.MaxPooling2D((2, 2)),
         
         # Depthwise separable block 2 - increased capacity  
-        tf.keras.layers.DepthwiseConv2D(
+        keras.layers.DepthwiseConv2D(
             (3, 3), padding='same', activation='relu',
             depthwise_initializer='he_normal',
         ),
-        tf.keras.layers.Conv2D(
+        keras.layers.Conv2D(
             128, (1, 1), activation='relu',
             kernel_initializer='he_normal',
         ),
-        tf.keras.layers.MaxPooling2D((2, 2)),
+        keras.layers.MaxPooling2D((2, 2)),
         
         # Adequate classification head
-        tf.keras.layers.Flatten(),
-        tf.keras.layers.Dense(256, activation='relu', 
+        keras.layers.Flatten(),
+        keras.layers.Dense(256, activation='relu', 
                              kernel_initializer='he_normal'),
-        tf.keras.layers.Dropout(0.3),
-        tf.keras.layers.Dense(params.NB_CLASSES, activation='softmax')
+        keras.layers.Dropout(0.3),
+        keras.layers.Dense(params.NB_CLASSES, activation='softmax')
     ])
     
     return model

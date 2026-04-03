@@ -1,11 +1,12 @@
 import tensorflow as tf
+from utils.keras_helper import keras
 import numpy as np
 import logging
 from typing import List, Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-class EnsembleTeacher(tf.keras.Model):
+class EnsembleTeacher(keras.Model):
     """
     Combine multiple teachers into a single ensemble for distillation.
     
@@ -16,7 +17,7 @@ class EnsembleTeacher(tf.keras.Model):
     
     def __init__(
         self,
-        teachers: List[tf.keras.Model],
+        teachers: List[keras.Model],
         teacher_weights: Optional[List[float]] = None,
         temperature: float = 1.0,
         use_logits: bool = False,

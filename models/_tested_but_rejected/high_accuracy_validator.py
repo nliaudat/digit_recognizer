@@ -28,39 +28,39 @@ Notes:
 Estimated: ~3–5M parameters → PC/server validation only.
 """
 
-import tensorflow as tf
 import parameters as params
+from utils.keras_helper import keras
 
 def se_block(input_tensor, ratio=16):
     """Squeeze-and-Excitation block."""
     filters = input_tensor.shape[-1]
-    se = tf.keras.layers.GlobalAveragePooling2D()(input_tensor)
-    se = tf.keras.layers.Dense(filters // ratio, activation='relu', kernel_initializer='he_normal')(se)
-    se = tf.keras.layers.Dense(filters, activation='sigmoid', kernel_initializer='he_normal')(se)
-    se = tf.keras.layers.Reshape((1, 1, filters))(se)
-    return tf.keras.layers.Multiply()([input_tensor, se])
+    se = keras.layers.GlobalAveragePooling2D()(input_tensor)
+    se = keras.layers.Dense(filters // ratio, activation='relu', kernel_initializer='he_normal')(se)
+    se = keras.layers.Dense(filters, activation='sigmoid', kernel_initializer='he_normal')(se)
+    se = keras.layers.Reshape((1, 1, filters))(se)
+    return keras.layers.Multiply()([input_tensor, se])
 
 def res_se_block(x, filters, strides=1):
     """Residual block with Squeeze-and-Excitation."""
     shortcut = x
     
-    y = tf.keras.layers.Conv2D(filters, (3, 3), strides=strides, padding='same', kernel_initializer='he_normal')(x)
-    y = tf.keras.layers.BatchNormalization()(y)
-    y = tf.keras.layers.ReLU()(y)
+    y = keras.layers.Conv2D(filters, (3, 3), strides=strides, padding='same', kernel_initializer='he_normal')(x)
+    y = keras.layers.BatchNormalization()(y)
+    y = keras.layers.ReLU()(y)
     
-    y = tf.keras.layers.Conv2D(filters, (3, 3), strides=1, padding='same', kernel_initializer='he_normal')(y)
-    y = tf.keras.layers.BatchNormalization()(y)
+    y = keras.layers.Conv2D(filters, (3, 3), strides=1, padding='same', kernel_initializer='he_normal')(y)
+    y = keras.layers.BatchNormalization()(y)
     
     # Squeeze-and-Excitation
     y = se_block(y)
     
     # Adjust shortcut if needed
     if strides != 1 or shortcut.shape[-1] != filters:
-        shortcut = tf.keras.layers.Conv2D(filters, (1, 1), strides=strides, padding='same', kernel_initializer='he_normal')(shortcut)
-        shortcut = tf.keras.layers.BatchNormalization()(shortcut)
+        shortcut = keras.layers.Conv2D(filters, (1, 1), strides=strides, padding='same', kernel_initializer='he_normal')(shortcut)
+        shortcut = keras.layers.BatchNormalization()(shortcut)
         
-    y = tf.keras.layers.add([shortcut, y])
-    y = tf.keras.layers.ReLU()(y)
+    y = keras.layers.add([shortcut, y])
+    y = keras.layers.ReLU()(y)
     return y
 
 def create_high_accuracy_validator():
@@ -69,13 +69,13 @@ def create_high_accuracy_validator():
     designed strictly for PC/Server validation.
     Ignores IoT constraints to maximize accuracy.
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Initial Conv layer
-    x = tf.keras.layers.Conv2D(64, (3, 3), padding='same', kernel_initializer='he_normal', use_bias=False)(inputs)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.ReLU()(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2)(x)
+    x = keras.layers.Conv2D(64, (3, 3), padding='same', kernel_initializer='he_normal', use_bias=False)(inputs)
+    x = keras.layers.BatchNormalization()(x)
+    x = keras.layers.ReLU()(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2)(x)
     
     # Stage 1
     x = res_se_block(x, filters=64, strides=1)
@@ -90,25 +90,25 @@ def create_high_accuracy_validator():
     x = res_se_block(x, filters=256, strides=1)
     
     # Global pooling
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Classifier stage with Dropout
-    x = tf.keras.layers.Dense(512, activation='relu', name='fc1')(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Dropout(0.5)(x)
+    x = keras.layers.Dense(512, activation='relu', name='fc1')(x)
+    x = keras.layers.BatchNormalization()(x)
+    x = keras.layers.Dropout(0.5)(x)
     
-    x = tf.keras.layers.Dense(256, activation='relu', name='fc2')(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Dropout(0.3)(x)
+    x = keras.layers.Dense(256, activation='relu', name='fc2')(x)
+    x = keras.layers.BatchNormalization()(x)
+    x = keras.layers.Dropout(0.3)(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name="high_accuracy_validator")
+    return keras.Model(inputs, outputs, name="high_accuracy_validator")
 
 def create_qat_model(base_model=None):
     """

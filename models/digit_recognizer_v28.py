@@ -29,6 +29,7 @@ Edge Detection:
 """
 
 import tensorflow as tf
+from utils.keras_helper import keras
 import numpy as np
 import sys
 import os
@@ -51,7 +52,7 @@ except ImportError:
 # DIRECT BINARIZATION PIPELINE
 # ============================================================================
 
-class AdaptiveMeanBinarization(tf.keras.layers.Layer):
+class AdaptiveMeanBinarization(keras.layers.Layer):
     """
     Thresholds each image at its own mean pixel value using STE.
     Forward:  binary = float(x > mean(x))
@@ -72,7 +73,7 @@ class AdaptiveMeanBinarization(tf.keras.layers.Layer):
         return super().get_config()
 
 
-class PolarityNormalization(tf.keras.layers.Layer):
+class PolarityNormalization(keras.layers.Layer):
     """
     Ensures digits are white (1.0) and background is black (0.0).
     Water meter digits take up <50% of the image area. 
@@ -105,7 +106,7 @@ def _make_gaussian_kernel(size, sigma):
     return (g2d / g2d.sum()).astype(np.float32)
 
 
-class DoGEdgeDetection(tf.keras.layers.Layer):
+class DoGEdgeDetection(keras.layers.Layer):
     """
     Difference of Gaussians (DoG) edge detector.
     DoG ≈ Laplacian of Gaussian — highlights digit stroke outlines.
@@ -135,7 +136,7 @@ class DoGEdgeDetection(tf.keras.layers.Layer):
         k1 = np.tile(g1[:, :, np.newaxis, np.newaxis], [1, 1, in_ch, 1])  # (3,3,in_ch,1)
         self.kernel1 = self.add_weight(
             name='dog_kernel1', shape=k1.shape,
-            initializer=tf.keras.initializers.Constant(k1),
+            initializer=keras.initializers.Constant(k1),
             trainable=False,
         )
 
@@ -144,7 +145,7 @@ class DoGEdgeDetection(tf.keras.layers.Layer):
         k2 = np.tile(g2[:, :, np.newaxis, np.newaxis], [1, 1, in_ch, 1])  # (5,5,in_ch,1)
         self.kernel2 = self.add_weight(
             name='dog_kernel2', shape=k2.shape,
-            initializer=tf.keras.initializers.Constant(k2),
+            initializer=keras.initializers.Constant(k2),
             trainable=False,
         )
         super().build(input_shape)
@@ -192,12 +193,12 @@ def create_digit_recognizer_v28(use_batch_norm=False, use_edge_fusion=False):
     print(f"v28 config: classes={params.NB_CLASSES}  filters={filters}  "
           f"dense={dense_units}  edge_fusion={use_edge_fusion}")
 
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
 
     # 1. Luminance (frozen)
     input_channels = params.INPUT_SHAPE[-1]
     if input_channels is not None and input_channels == 3:
-        x = tf.keras.layers.Lambda(
+        x = keras.layers.Lambda(
             lambda t: 0.299 * t[..., 0:1] + 0.587 * t[..., 1:2] + 0.114 * t[..., 2:3],
             name='luminance_grayscale'
         )(inputs)
@@ -213,7 +214,7 @@ def create_digit_recognizer_v28(use_batch_norm=False, use_edge_fusion=False):
     # 4. Optional: fuse binary with DoG edge map
     if use_edge_fusion:
         edges = DoGEdgeDetection(sigma1=0.8, sigma2=1.6, name='dog_edges')(binary)
-        x = tf.keras.layers.Concatenate(name='binary_edge_fusion')([binary, edges])
+        x = keras.layers.Concatenate(name='binary_edge_fusion')([binary, edges])
     else:
         x = binary
 
@@ -221,11 +222,11 @@ def create_digit_recognizer_v28(use_batch_norm=False, use_edge_fusion=False):
     x = _build_v27_backbone(x, filters, dense_units, use_batch_norm=use_batch_norm)
 
     # 6. Output
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, activation='softmax', name='output'
     )(x)
 
-    model = tf.keras.Model(inputs, outputs, name='digit_recognizer_v28')
+    model = keras.Model(inputs, outputs, name='digit_recognizer_v28')
 
     # Freeze fixed preprocessing layers
     frozen = 0
@@ -300,7 +301,7 @@ if __name__ == "__main__":
         print(f"  Prediction: class={cls} ({cls//10}.{cls%10}) → digit={digit}")
 
         # To check binarization we can just run the pre-processing part of the model
-        binary_model = tf.keras.Model(model.input, model.get_layer('polarity_norm').output)
+        binary_model = keras.Model(model.input, model.get_layer('polarity_norm').output)
         out_bin = binary_model.predict(x, verbose=0)
         mean_val = float(np.mean(out_bin[0]))
         print(f"  Binarized mean: {mean_val:.3f} (expect < 0.5 since background is black)")

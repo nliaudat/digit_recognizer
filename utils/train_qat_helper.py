@@ -36,7 +36,7 @@ from utils.keras_helper import keras
 # --------------------------------------------------------------------------- #
 #  QAT model creation
 # --------------------------------------------------------------------------- #
-def apply_qat_to_model(model) -> tf.keras.Model:
+def apply_qat_to_model(model) -> keras.Model:
     """
     Apply QAT wrappers using modern clustering presets.
     
@@ -61,12 +61,12 @@ def apply_qat_to_model(model) -> tf.keras.Model:
         # Final fallback - try simple quantize_model if annotate/apply fails
         try:
              print("🔄 Retrying with simple quantize_model...")
-             import tensorflow_model_optimization as tfmot
+             from utils.keras_helper import tfmot
              return tfmot.quantization.keras.quantize_model(model)
         except:
              return model
 
-def create_qat_model(model: tf.keras.Model = None) -> tf.keras.Model:
+def create_qat_model(model: keras.Model = None) -> keras.Model:
     """
     Create a new model or wrap an existing one for QAT using the unified factory.
     """
@@ -93,7 +93,7 @@ def _rebuild_functional_model(original_model, annotated_layers):
     if len(original_model.layers) == len(annotated_layers):
         try:
             # Try to build as sequential
-            return tf.keras.Sequential(annotated_layers)
+            return keras.Sequential(annotated_layers)
         except:
             pass
     
@@ -328,7 +328,7 @@ def validate_quantization_combination():
 #  QAT dataflow validation (optional sanity check)
 # --------------------------------------------------------------------------- #
 def validate_qat_data_flow(
-    model: tf.keras.Model,
+    model: keras.Model,
     x_train_sample: np.ndarray,
     debug: bool = False,
 ) -> Tuple[bool, str]:
@@ -338,7 +338,7 @@ def validate_qat_data_flow(
 
     Parameters
     ----------
-    model : tf.keras.Model
+    model : keras.Model
         The model to test (should be QAT enabled).
     x_train_sample : np.ndarray
         A small slice of the training data (raw, before preprocessing).
@@ -389,7 +389,7 @@ def validate_qat_data_flow(
 # --------------------------------------------------------------------------- #
 #  QAT model detection
 # --------------------------------------------------------------------------- #
-def _is_qat_model(model: tf.keras.Model) -> bool:
+def _is_qat_model(model: keras.Model) -> bool:
     """Check if model is a QAT model with better detection"""
     # Check for quantization layers
     for layer in model.layers:
@@ -414,7 +414,7 @@ def _is_qat_model(model: tf.keras.Model) -> bool:
         
     return False
     
-# def _is_qat_model(model: tf.keras.Model) -> bool:
+# def _is_qat_model(model: keras.Model) -> bool:
     # """Enhanced QAT model detection"""
     # # Method 1: Check if model was created with QAT
     # if hasattr(model, '_quantize_scope'):
@@ -449,7 +449,7 @@ def _is_qat_model(model: tf.keras.Model) -> bool:
     
     # return False
 
-def verify_qat_model(model: tf.keras.Model, debug: bool = False) -> bool:
+def verify_qat_model(model: keras.Model, debug: bool = False) -> bool:
     """
     Verify that the QAT model was properly created and has quantization layers.
     """
@@ -528,7 +528,7 @@ def validate_qat_data_consistency():
         print("⚠️  UNEXPECTED: QAT data types don't match expected pattern")
         return False, "Unexpected QAT data types"
 
-def validate_complete_qat_setup(model: tf.keras.Model = None, debug: bool = False):
+def validate_complete_qat_setup(model: keras.Model = None, debug: bool = False):
     """
     Comprehensive QAT validation with corrected logic for QAT data flow.
     """
@@ -640,7 +640,7 @@ def check_qat_gradient_flow(model, x_sample, y_sample):
                 y_labels = tf.one_hot(y_sample[:2], params.NB_CLASSES)
             else:
                 y_labels = y_sample[:2]
-            loss = tf.keras.losses.categorical_crossentropy(y_labels, predictions)
+            loss = keras.losses.categorical_crossentropy(y_labels, predictions)
         else:
             # Other models use sparse_categorical_crossentropy with integer labels
             if len(y_sample.shape) > 1 and y_sample.shape[1] > 1:
@@ -648,7 +648,7 @@ def check_qat_gradient_flow(model, x_sample, y_sample):
                 y_labels = tf.argmax(y_sample[:2], axis=1)
             else:
                 y_labels = y_sample[:2]
-            loss = tf.keras.losses.SparseCategoricalCrossentropy()(y_labels, predictions)
+            loss = keras.losses.SparseCategoricalCrossentropy()(y_labels, predictions)
         
         loss = tf.reduce_mean(loss)
     
@@ -705,14 +705,14 @@ def diagnose_qat_output_behavior(model, x_train, y_train):
                 y_labels = tf.one_hot(sample_labels, params.NB_CLASSES)
             else:
                 y_labels = sample_labels
-            loss = tf.keras.losses.categorical_crossentropy(y_labels, predictions)
+            loss = keras.losses.categorical_crossentropy(y_labels, predictions)
         else:
             # Other models use sparse_categorical_crossentropy with integer labels
             if len(sample_labels.shape) > 1 and sample_labels.shape[1] > 1:
                 y_labels = tf.argmax(sample_labels, axis=1)
             else:
                 y_labels = sample_labels
-            loss = tf.keras.losses.SparseCategoricalCrossentropy()(y_labels, predictions)
+            loss = keras.losses.SparseCategoricalCrossentropy()(y_labels, predictions)
             
         loss_value = tf.reduce_mean(loss)
     
@@ -767,7 +767,7 @@ def two_phase_qat_training(x_train, y_train, x_val, y_val):
         validation_data=(x_val, y_val),
         verbose=1,
         callbacks=[
-            tf.keras.callbacks.EarlyStopping(
+            keras.callbacks.EarlyStopping(
                 patience=10, 
                 restore_best_weights=True,
                 monitor='val_accuracy'
@@ -787,9 +787,8 @@ def two_phase_qat_training(x_train, y_train, x_val, y_val):
     params.USE_QAT = True
     
     try:
-        import tensorflow_model_optimization as tfmot
-        
         # Create QAT model
+        from utils.keras_helper import tfmot
         with tfmot.quantization.keras.quantize_scope():
             qat_model = create_model()
         
@@ -811,8 +810,8 @@ def two_phase_qat_training(x_train, y_train, x_val, y_val):
         print(f"✅ Transferred weights for {weights_transferred} layers")
         
         # Compile with slightly higher learning rate for fine-tuning
-        qat_optimizer = tf.keras.optimizers.Adam(learning_rate=params.LEARNING_RATE * 2.0)
-        loss = tf.keras.losses.SparseCategoricalCrossentropy() if params.MODEL_ARCHITECTURE != "original_haverland" else tf.keras.losses.CategoricalCrossentropy()
+        qat_optimizer = keras.optimizers.Adam(learning_rate=params.LEARNING_RATE * 2.0)
+        loss = keras.losses.SparseCategoricalCrossentropy() if params.MODEL_ARCHITECTURE != "original_haverland" else keras.losses.CategoricalCrossentropy()
         qat_model.compile(optimizer=qat_optimizer, loss=loss, metrics=['accuracy'])
         
         # Fine-tune for a few epochs

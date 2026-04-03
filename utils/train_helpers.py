@@ -3,7 +3,8 @@ import os
 import tensorflow as tf
 import numpy as np
 from datetime import datetime
-from tensorflow.keras import backend as K
+from utils.keras_helper import keras
+K = keras.backend
 import parameters as params
 import warnings
 
@@ -360,7 +361,7 @@ def create_tflite_interpreter(model_path):
 # LR Warm-up Callback
 # ──────────────────────────────────────────────────────────────────────────────
 
-class LRWarmupCallback(tf.keras.callbacks.Callback):
+class LRWarmupCallback(keras.callbacks.Callback):
     """
     Linearly ramps the learning rate from `initial_lr * initial_scale` up to
     `initial_lr` over `warmup_epochs` epochs, then deactivates itself.
@@ -415,7 +416,7 @@ class LRWarmupCallback(tf.keras.callbacks.Callback):
 # Adaptive Loss Controllers
 # ──────────────────────────────────────────────────────────────────────────────
 
-class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
+class AdaptiveFocalLossController(keras.callbacks.Callback):
     """
     Dynamically adjust Focal Loss based on validation accuracy thresholds.
     """
@@ -773,7 +774,7 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
 # Per-Class Accuracy Callback
 # ──────────────────────────────────────────────────────────────────────────────
 
-class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
+class PerClassAccuracyCallback(keras.callbacks.Callback):
     """Prints per-class accuracy on validation set and updates dynamic loss weights."""
 
     def __init__(self, val_ds, every_n_epochs=5, debug=False):
@@ -872,7 +873,7 @@ class DynamicLRProxy:
         self.epoch_offset = current_epoch
 
 
-class DynamicSchedulerController(tf.keras.callbacks.Callback):
+class DynamicSchedulerController(keras.callbacks.Callback):
     """
     Switches the LR scheduler (and optionally the optimizer) at val_accuracy
     thresholds, mirroring how IntelligentFocalLossController switches γ.
@@ -971,7 +972,7 @@ class DynamicSchedulerController(tf.keras.callbacks.Callback):
         elif sched_type == 'cosine':
             remaining = max(1, params.EPOCHS - start_epoch)
             first_decay = max(1, getattr(params, 'LR_WARMUP_EPOCHS', 15))
-            schedule = tf.keras.optimizers.schedules.CosineDecayRestarts(
+            schedule = keras.optimizers.schedules.CosineDecayRestarts(
                 initial_learning_rate=base_lr,
                 first_decay_steps=first_decay,
                 t_mul=2.0,
@@ -981,7 +982,7 @@ class DynamicSchedulerController(tf.keras.callbacks.Callback):
             return lambda epoch, lr: float(schedule(epoch))
 
         elif sched_type == 'exponential':
-            schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+            schedule = keras.optimizers.schedules.ExponentialDecay(
                 initial_learning_rate=base_lr,
                 decay_steps=getattr(params, 'EXPONENTIAL_DECAY_STEPS', 1000),
                 decay_rate=getattr(params, 'EXPONENTIAL_DECAY_RATE', 0.96),
@@ -993,11 +994,11 @@ class DynamicSchedulerController(tf.keras.callbacks.Callback):
             warmup = max(1, int(total * 0.3))
             decay = max(1, total - warmup)
             min_lr = getattr(params, 'COSINE_DECAY_ALPHA', 1e-6)
-            warmup_sched = tf.keras.optimizers.schedules.PolynomialDecay(
+            warmup_sched = keras.optimizers.schedules.PolynomialDecay(
                 initial_learning_rate=base_lr * 0.1,
                 decay_steps=warmup, end_learning_rate=base_lr, power=1.0,
             )
-            cosine_sched = tf.keras.optimizers.schedules.CosineDecay(
+            cosine_sched = keras.optimizers.schedules.CosineDecay(
                 initial_learning_rate=base_lr,
                 decay_steps=decay,
                 alpha=min_lr / base_lr,

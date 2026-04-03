@@ -2,7 +2,8 @@ import tensorflow as tf
 import numpy as np
 import os
 import cv2
-from tensorflow.keras.datasets import mnist
+from utils.keras_helper import keras
+mnist = keras.datasets.mnist
 import json
 from pathlib import Path
 import argparse

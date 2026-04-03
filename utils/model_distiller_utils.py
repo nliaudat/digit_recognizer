@@ -9,6 +9,7 @@ import os
 import json
 import logging
 import parameters as params
+from utils.keras_helper import keras
 from typing import Optional, Tuple, Dict, Any, Union, List, Callable
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from utils.train_helpers import create_tflite_interpreter
 
 
 
-def freeze_teacher_model(teacher: tf.keras.Model) -> tf.keras.Model:
+def freeze_teacher_model(teacher: keras.Model) -> keras.Model:
     """
     Freeze teacher model for distillation.
     
@@ -38,7 +39,7 @@ def freeze_teacher_model(teacher: tf.keras.Model) -> tf.keras.Model:
     return teacher
 
 
-def get_model_size_kb(model: tf.keras.Model) -> float:
+def get_model_size_kb(model: keras.Model) -> float:
     """
     Get model size in KB after potential quantization.
     
@@ -61,7 +62,7 @@ def get_model_size_kb(model: tf.keras.Model) -> float:
 
 
 def export_student_for_edge(
-    student: tf.keras.Model,
+    student: keras.Model,
     export_path: str,
     quantize: bool = True,
     representative_dataset: Optional[tf.data.Dataset] = None,
@@ -171,7 +172,7 @@ def export_student_for_edge(
 
 
 def evaluate_distilled_model(
-    model: tf.keras.Model,
+    model: keras.Model,
     test_data: Tuple[np.ndarray, np.ndarray],
     batch_size: int = 64
 ) -> Dict[str, float]:
@@ -224,8 +225,8 @@ def evaluate_distilled_model(
 
 
 def compare_teacher_student(
-    teacher: tf.keras.Model,
-    student: tf.keras.Model,
+    teacher: keras.Model,
+    student: keras.Model,
     test_data: Tuple[np.ndarray, np.ndarray],
     batch_size: int = 64
 ) -> Dict[str, Any]:
@@ -306,7 +307,7 @@ def save_distillation_results(
 def load_distilled_model(
     model_path: str,
     is_tflite: bool = False
-) -> Union[tf.keras.Model, tf.lite.Interpreter]:
+) -> Union[keras.Model, tf.lite.Interpreter]:
     """
     Load distilled model for inference.
     
@@ -320,7 +321,7 @@ def load_distilled_model(
     if is_tflite:
         return create_tflite_interpreter(model_path)
     else:
-        return tf.keras.models.load_model(model_path)
+        return keras.models.load_model(model_path)
 
 
 def create_temperature_schedule(

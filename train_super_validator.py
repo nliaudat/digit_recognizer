@@ -24,8 +24,7 @@ import sys
 import math
 import argparse
 import numpy as np
-import tensorflow as tf
-from pathlib import Path
+from utils.keras_helper import keras, tfmot
 import parameters as params
 from utils.losses import focal_loss
 from utils.train_helpers import IntelligentFocalLossController, PerClassAccuracyCallback
@@ -357,7 +356,7 @@ def mixup(images, labels_one_hot, alpha=0.2):
 # Cosine LR Schedule with warm-up
 # ──────────────────────────────────────────────────────────────────────────────
 
-class WarmupCosineDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
+class WarmupCosineDecay(keras.optimizers.schedules.LearningRateSchedule):
     def __init__(self, initial_lr, warmup_steps, total_steps, min_lr=1e-6):
         super().__init__()
         self.initial_lr   = initial_lr
@@ -417,8 +416,11 @@ def main():
 
     # Mixed precision
     if has_gpu and not args.no_mixed_precision:
-        tf.keras.mixed_precision.set_global_policy('mixed_float16')
-        print("✅ Mixed precision: float16")
+        try:
+            keras.mixed_precision.set_global_policy('mixed_float16')
+            print("✅ Mixed precision: float16")
+        except Exception as e:
+            print(f"⚠️ Could not set mixed precision: {e}")
 
     # Output dir
     out_dir = Path(args.output_dir)
@@ -452,7 +454,7 @@ def main():
     # ──── Training pipeline ───────────────────────────────────────────────────
     train_paths  = all_paths[train_idx]
     train_labels = all_labels[train_idx]
-    train_labels_oh = tf.keras.utils.to_categorical(train_labels, NB_CLASSES)
+    train_labels_oh = keras.utils.to_categorical(train_labels, NB_CLASSES)
 
     train_ds = tf.data.Dataset.from_tensor_slices((train_paths, train_labels))
     train_ds = train_ds.shuffle(len(train_paths), seed=42, reshuffle_each_iteration=True)
@@ -511,7 +513,7 @@ def main():
         min_lr=1e-7,
     )
 
-    optimizer = tf.keras.optimizers.AdamW(
+    optimizer = keras.optimizers.AdamW(
         learning_rate=lr_schedule,
         weight_decay=args.weight_decay,
     )
@@ -527,29 +529,29 @@ def main():
         optimizer=optimizer,
         loss=loss_fn,
         metrics=[
-            tf.keras.metrics.CategoricalAccuracy(name='accuracy'),
-            tf.keras.metrics.TopKCategoricalAccuracy(k=3, name='top3_acc'),
+            keras.metrics.CategoricalAccuracy(name='accuracy'),
+            keras.metrics.TopKCategoricalAccuracy(k=3, name='top3_acc'),
         ],
     )
 
     # ──── Callbacks ───────────────────────────────────────────────────────
     model_path = str(out_dir / "super_high_accuracy_validator.keras")
     callbacks = [
-        tf.keras.callbacks.ModelCheckpoint(
+        keras.callbacks.ModelCheckpoint(
             filepath=model_path,
             monitor='val_accuracy',
             save_best_only=True,
             verbose=1,
         ),
-        tf.keras.callbacks.EarlyStopping(
+        keras.callbacks.EarlyStopping(
             monitor='val_accuracy',
             patience=40,
             min_delta=0.0001,
             restore_best_weights=True,
             verbose=1,
         ),
-        tf.keras.callbacks.TerminateOnNaN(),
-        tf.keras.callbacks.CSVLogger(str(out_dir / "training_log.csv")),
+        keras.callbacks.TerminateOnNaN(),
+        keras.callbacks.CSVLogger(str(out_dir / "training_log.csv")),
         PerClassAccuracyCallback(val_ds, every_n_epochs=5),
     ]
 

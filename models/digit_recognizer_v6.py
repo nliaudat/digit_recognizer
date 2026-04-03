@@ -29,6 +29,7 @@ Estimated: ~50–140K parameters depending on class count and variant.
 """
 
 import tensorflow as tf
+from utils.keras_helper import keras
 import parameters as params
 
 def create_digit_recognizer_v6():
@@ -58,271 +59,271 @@ def create_digit_recognizer_v6_grayscale():
     """
     Grayscale-optimized version with ESP-DL compatibility
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # ===== ESP-DL COMPATIBLE CONVOLUTIONAL BACKBONE =====
     # Layer 1: Standard Conv + ReLU (TFLite Micro compatible)
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(24, 32),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv1'
     )(inputs)
-    x = tf.keras.layers.ReLU(name='relu1')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+    x = keras.layers.ReLU(name='relu1')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     # After pool: 10x16xfilters
     
     # Layer 2
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(36, 48),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv2'
     )(x)
-    x = tf.keras.layers.ReLU(name='relu2')(x)
+    x = keras.layers.ReLU(name='relu2')(x)
     
     # Layer 3
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(48, 64),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv3'
     )(x)
-    x = tf.keras.layers.ReLU(name='relu3')(x)
+    x = keras.layers.ReLU(name='relu3')(x)
     
     # Layer 4: Additional capacity for 100-class discrimination
     if params.NB_CLASSES >= 50:
-        x = tf.keras.layers.Conv2D(
+        x = keras.layers.Conv2D(
             get_filters_v6(56, 72),
             (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
             name='conv4'
         )(x)
-        x = tf.keras.layers.ReLU(name='relu4')(x)
+        x = keras.layers.ReLU(name='relu4')(x)
     
     # ===== QUANTIZATION-FRIENDLY FEATURE REDUCTION =====
     # GlobalAveragePooling (quantization friendly, ESP-DL compatible)
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Dense layer with scaled units based on class complexity
     dense_units = get_dense_units_v6(64, 128)
-    x = tf.keras.layers.Dense(dense_units, activation='relu', name='dense1')(x)
+    x = keras.layers.Dense(dense_units, activation='relu', name='dense1')(x)
     
     # Optional: Additional dense layer for complex classification
     if params.NB_CLASSES >= 50:
         dense_units_2 = get_dense_units_v6(48, 96)
-        x = tf.keras.layers.Dense(dense_units_2, activation='relu', name='dense2')(x)
+        x = keras.layers.Dense(dense_units_2, activation='relu', name='dense2')(x)
     
     # Dropout for regularization (higher for more classes)
     dropout_rate = 0.1 if params.NB_CLASSES <= 10 else 0.2
-    x = tf.keras.layers.Dropout(dropout_rate, name='dropout')(x)
+    x = keras.layers.Dropout(dropout_rate, name='dropout')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name=f"digit_recognizer_v6_grayscale_{params.NB_CLASSES}classes")
+    return keras.Model(inputs, outputs, name=f"digit_recognizer_v6_grayscale_{params.NB_CLASSES}classes")
 
 def create_digit_recognizer_v6_rgb():
     """
     RGB-optimized version with ESP-DL compatibility
     Uses standard Conv2D instead of SeparableConv for better ESP-DL support
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Layer 1: Standard Conv2D (better ESP-DL support than SeparableConv)
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(28, 36),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv1'
     )(inputs)
-    x = tf.keras.layers.ReLU(name='relu1')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+    x = keras.layers.ReLU(name='relu1')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     
     # Layer 2
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(42, 56),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv2'
     )(x)
-    x = tf.keras.layers.ReLU(name='relu2')(x)
+    x = keras.layers.ReLU(name='relu2')(x)
     
     # Layer 3
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(56, 72),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv3'
     )(x)
-    x = tf.keras.layers.ReLU(name='relu3')(x)
+    x = keras.layers.ReLU(name='relu3')(x)
     
     # Layer 4: For 100-class discrimination
     if params.NB_CLASSES >= 50:
-        x = tf.keras.layers.Conv2D(
+        x = keras.layers.Conv2D(
             get_filters_v6(64, 80),
             (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
             name='conv4'
         )(x)
-        x = tf.keras.layers.ReLU(name='relu4')(x)
+        x = keras.layers.ReLU(name='relu4')(x)
     
     # Global pooling
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Dense layers
     dense_units = get_dense_units_v6(72, 144)
-    x = tf.keras.layers.Dense(dense_units, activation='relu', name='dense1')(x)
+    x = keras.layers.Dense(dense_units, activation='relu', name='dense1')(x)
     
     if params.NB_CLASSES >= 50:
-        x = tf.keras.layers.Dense(get_dense_units_v6(64, 96), activation='relu', name='dense2')(x)
+        x = keras.layers.Dense(get_dense_units_v6(64, 96), activation='relu', name='dense2')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name=f"digit_recognizer_v6_rgb_{params.NB_CLASSES}classes")
+    return keras.Model(inputs, outputs, name=f"digit_recognizer_v6_rgb_{params.NB_CLASSES}classes")
 
 def create_digit_recognizer_v6_compact():
     """
     Ultra-compact version optimized for microcontrollers
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Minimal convolutional backbone
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(16, 20),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv1'
     )(inputs)
-    x = tf.keras.layers.ReLU(name='relu1')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+    x = keras.layers.ReLU(name='relu1')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     
     # Layer 2
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(24, 32),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv2'
     )(x)
-    x = tf.keras.layers.ReLU(name='relu2')(x)
+    x = keras.layers.ReLU(name='relu2')(x)
     
     # Layer 3
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(32, 40),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv3'
     )(x)
-    x = tf.keras.layers.ReLU(name='relu3')(x)
+    x = keras.layers.ReLU(name='relu3')(x)
     
     # Optional layer for 100 classes
     if params.NB_CLASSES >= 50:
-        x = tf.keras.layers.Conv2D(
+        x = keras.layers.Conv2D(
             get_filters_v6(40, 48),
             (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
             name='conv4'
         )(x)
-        x = tf.keras.layers.ReLU(name='relu4')(x)
+        x = keras.layers.ReLU(name='relu4')(x)
     
     # Global pooling
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Compact dense layer
     dense_units = get_dense_units_v6(48, 64)
-    x = tf.keras.layers.Dense(dense_units, activation='relu', name='dense1')(x)
+    x = keras.layers.Dense(dense_units, activation='relu', name='dense1')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name=f"digit_recognizer_v6_compact_{params.NB_CLASSES}classes")
+    return keras.Model(inputs, outputs, name=f"digit_recognizer_v6_compact_{params.NB_CLASSES}classes")
 
 def create_digit_recognizer_v6_high_accuracy():
     """
     High-accuracy version for complex classification (100 classes)
     Maintains ESP-DL compatibility
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # High-capacity backbone for 100-class discrimination
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(32, 48),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv1'
     )(inputs)
-    x = tf.keras.layers.ReLU(name='relu1')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+    x = keras.layers.ReLU(name='relu1')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     
     # Multiple conv layers for complex features
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(48, 64),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv2'
     )(x)
-    x = tf.keras.layers.ReLU(name='relu2')(x)
+    x = keras.layers.ReLU(name='relu2')(x)
     
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(64, 80),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv3'
     )(x)
-    x = tf.keras.layers.ReLU(name='relu3')(x)
+    x = keras.layers.ReLU(name='relu3')(x)
     
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         get_filters_v6(72, 96),
         (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv4'
     )(x)
-    x = tf.keras.layers.ReLU(name='relu4')(x)
+    x = keras.layers.ReLU(name='relu4')(x)
     
     # Global pooling
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
     
     # Larger dense layers for 100-class separation
-    x = tf.keras.layers.Dense(get_dense_units_v6(96, 160), activation='relu', name='dense1')(x)
-    x = tf.keras.layers.Dense(get_dense_units_v6(64, 112), activation='relu', name='dense2')(x)
+    x = keras.layers.Dense(get_dense_units_v6(96, 160), activation='relu', name='dense1')(x)
+    x = keras.layers.Dense(get_dense_units_v6(64, 112), activation='relu', name='dense2')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name=f"digit_recognizer_v6_high_acc_{params.NB_CLASSES}classes")
+    return keras.Model(inputs, outputs, name=f"digit_recognizer_v6_high_acc_{params.NB_CLASSES}classes")
 
 def create_digit_recognizer_v6_adaptive():
     """

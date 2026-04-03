@@ -23,6 +23,7 @@ from train import (
 )
 from utils import get_data_splits, preprocess_images
 import parameters as params
+from utils.keras_helper import keras
 
 class FineTuneManager:
     """Manager for fine-tuning pre-trained models"""
@@ -49,7 +50,7 @@ class FineTuneManager:
                 # Load the .keras file instead
                 keras_path = os.path.join(directory, keras_files[0])
                 print(f"🔍 Found .keras file: {keras_files[0]}, loading that instead")
-                return tf.keras.models.load_model(keras_path)
+                return keras.models.load_model(keras_path)
             
             # Method 2: Create a new model with same architecture and load weights
             print("🔧 Reconstructing model architecture and loading weights...")
@@ -152,11 +153,11 @@ class FineTuneManager:
             # ✅ UPDATED: Keras 3 compatible model loading
             if model_path.endswith('.keras'):
                 # Load .keras format (recommended for Keras 3)
-                model = tf.keras.models.load_model(model_path)
+                model = keras.models.load_model(model_path)
                 print("✅ Loaded .keras model")
             elif model_path.endswith('.h5'):
                 # Load H5 format (legacy support)
-                model = tf.keras.models.load_model(model_path)
+                model = keras.models.load_model(model_path)
                 print("✅ Loaded H5 model")
             elif os.path.isdir(model_path):
                 # ✅ UPDATED: For SavedModel directories, use TFSMLayer for inference or load weights
@@ -358,7 +359,7 @@ class FineTuneManager:
             # Use lower learning rate for fine-tuning
             fine_tune_lr = params.LEARNING_RATE * learning_rate_multiplier
             base_model.compile(
-                optimizer=tf.keras.optimizers.Adam(learning_rate=fine_tune_lr),
+                optimizer=keras.optimizers.Adam(learning_rate=fine_tune_lr),
                 loss=loss_fn,
                 metrics=['accuracy']
             )
@@ -372,7 +373,7 @@ class FineTuneManager:
             
             fine_tune_lr = params.LEARNING_RATE * learning_rate_multiplier
             base_model.compile(
-                optimizer=tf.keras.optimizers.Adam(learning_rate=fine_tune_lr),
+                optimizer=keras.optimizers.Adam(learning_rate=fine_tune_lr),
                 loss=loss_fn,
                 metrics=['accuracy']
             )
@@ -385,13 +386,13 @@ class FineTuneManager:
             
             # Remove the last layer and add new classifier
             base_output = base_model.layers[-2].output
-            x = tf.keras.layers.Dense(128, activation='relu')(base_output)
-            x = tf.keras.layers.Dropout(0.3)(x)
-            outputs = tf.keras.layers.Dense(params.NB_CLASSES, activation='softmax')(x)
+            x = keras.layers.Dense(128, activation='relu')(base_output)
+            x = keras.layers.Dropout(0.3)(x)
+            outputs = keras.layers.Dense(params.NB_CLASSES, activation='softmax')(x)
             
-            model = tf.keras.Model(inputs=base_model.input, outputs=outputs)
+            model = keras.Model(inputs=base_model.input, outputs=outputs)
             model.compile(
-                optimizer=tf.keras.optimizers.Adam(learning_rate=params.LEARNING_RATE),
+                optimizer=keras.optimizers.Adam(learning_rate=params.LEARNING_RATE),
                 loss=loss_fn,
                 metrics=['accuracy']
             )

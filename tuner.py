@@ -1,12 +1,4 @@
 # tuner.py
-import tensorflow as tf
-try:
-    import keras_tuner as kt
-except ImportError:
-    kt = None  # keras_tuner is optional — not used by SimpleGuaranteedTuner / FineTuneTuner
-import parameters as params
-from models import create_model, compile_model
-from utils.losses import focal_loss, sparse_focal_loss
 import os
 from datetime import datetime
 import random
@@ -14,6 +6,17 @@ import numpy as np
 from itertools import product
 import json
 import pandas as pd
+import tensorflow as tf
+import parameters as params
+from utils.keras_helper import keras
+from models import create_model, compile_model
+from utils.losses import focal_loss, sparse_focal_loss
+
+try:
+    import keras_tuner as kt
+except ImportError:
+    kt = None
+
 
 class SimpleGuaranteedTuner:
     """Simple tuner that guarantees unique hyperparameter combinations"""
@@ -116,7 +119,7 @@ class SimpleGuaranteedTuner:
                 self.trials.append(trial_result)
             
             # Clean up
-            tf.keras.backend.clear_session()
+            keras.backend.clear_session()
     
     def _build_model_with_config(self, optimizer, learning_rate, batch_size, gamma=0.0, alpha=0.45):
         """Build model with specific configuration including Focal Loss support"""
@@ -127,20 +130,20 @@ class SimpleGuaranteedTuner:
         
         # Select optimizer
         if optimizer == 'adamw':
-            opt = tf.keras.optimizers.AdamW(
+            opt = keras.optimizers.AdamW(
                 learning_rate=learning_rate,
                 weight_decay=getattr(params, 'ADAMW_WEIGHT_DECAY', 0.01),
             )
         elif optimizer == 'adam':
-            opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            opt = keras.optimizers.Adam(learning_rate=learning_rate)
         elif optimizer == 'rmsprop':
-            opt = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
+            opt = keras.optimizers.RMSprop(learning_rate=learning_rate)
         elif optimizer == 'sgd':
-            opt = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9)
+            opt = keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9)
         elif optimizer == 'nadam':
-            opt = tf.keras.optimizers.Nadam(learning_rate=learning_rate)
+            opt = keras.optimizers.Nadam(learning_rate=learning_rate)
         else:
-            opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            opt = keras.optimizers.Adam(learning_rate=learning_rate)
         
         # Determine Loss Function
         is_haverland = (params.MODEL_ARCHITECTURE == "original_haverland")
@@ -397,7 +400,7 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
         print(f"   Testing {num_trials} guaranteed unique combinations")
         
         # Early stopping for tuning
-        early_stopping = tf.keras.callbacks.EarlyStopping(
+        early_stopping = keras.callbacks.EarlyStopping(
             monitor='val_accuracy',
             patience=getattr(params, 'TUNER_EARLY_STOPPING_PATIENCE', 3),
             min_delta=0.0005,
@@ -513,7 +516,7 @@ class FineTuneTuner(SimpleGuaranteedTuner):
               f"BS={batch_size}, LR-factor={lr_factor:.2f}")
 
         # Load pre-trained model (weights + architecture)
-        model = tf.keras.models.load_model(
+        model = keras.models.load_model(
             self.model_path,
             compile=False,  # We'll recompile with the trial optimizer
         )
@@ -530,21 +533,21 @@ class FineTuneTuner(SimpleGuaranteedTuner):
 
         # Build optimizer
         if optimizer == 'adamw':
-            opt = tf.keras.optimizers.AdamW(
+            opt = keras.optimizers.AdamW(
                 learning_rate=learning_rate,
                 weight_decay=getattr(params, 'ADAMW_WEIGHT_DECAY', 0.01),
             )
         elif optimizer == 'adam':
-            opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            opt = keras.optimizers.Adam(learning_rate=learning_rate)
         elif optimizer == 'rmsprop':
-            opt = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
+            opt = keras.optimizers.RMSprop(learning_rate=learning_rate)
         elif optimizer == 'sgd':
-            opt = tf.keras.optimizers.SGD(learning_rate=learning_rate,
+            opt = keras.optimizers.SGD(learning_rate=learning_rate,
                                           momentum=0.9, nesterov=True)
         elif optimizer == 'nadam':
-            opt = tf.keras.optimizers.Nadam(learning_rate=learning_rate)
+            opt = keras.optimizers.Nadam(learning_rate=learning_rate)
         else:
-            opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            opt = keras.optimizers.Adam(learning_rate=learning_rate)
 
         # Recompile with the existing loss type
         is_haverland = (params.MODEL_ARCHITECTURE == "original_haverland")
@@ -573,14 +576,14 @@ class FineTuneTuner(SimpleGuaranteedTuner):
 
                 # Per-trial ReduceLROnPlateau with the swept factor
                 trial_callbacks = [
-                    tf.keras.callbacks.ReduceLROnPlateau(
+                    keras.callbacks.ReduceLROnPlateau(
                         monitor='val_loss',
                         factor=lr_factor,
                         patience=params.LR_SCHEDULER_PATIENCE,
                         min_lr=params.LR_SCHEDULER_MIN_LR,
                         verbose=0,
                     ),
-                    tf.keras.callbacks.EarlyStopping(
+                    keras.callbacks.EarlyStopping(
                         monitor='val_accuracy',
                         patience=getattr(params, 'TUNER_EARLY_STOPPING_PATIENCE', 5),
                         min_delta=0.0002,
@@ -629,7 +632,7 @@ class FineTuneTuner(SimpleGuaranteedTuner):
                     'val_accuracy': 0.0, 'status': 'FAILED', 'score': 0.0,
                 })
 
-            tf.keras.backend.clear_session()
+            keras.backend.clear_session()
 
 
 def _discover_best_model(nb_classes=None, input_channels=None):
@@ -791,9 +794,8 @@ if __name__ == '__main__':
         x_val   = preprocess_for_training(x_val_raw)
         # For haverland (one-hot labels); all other architectures use sparse integer labels
         if params.MODEL_ARCHITECTURE == "original_haverland":
-            import tensorflow as _tf
-            y_train = _tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
-            y_val   = _tf.keras.utils.to_categorical(y_val_raw,   params.NB_CLASSES)
+            y_train = keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
+            y_val   = keras.utils.to_categorical(y_val_raw,   params.NB_CLASSES)
         else:
             y_train = y_train_raw.copy()
             y_val   = y_val_raw.copy()
@@ -857,16 +859,21 @@ def manual_hyperparameter_search(x_train, y_train, x_val, y_val, num_trials=10, 
             model = create_model()
             
             # Select optimizer
-            if optimizer == 'adam':
-                opt = tf.keras.optimizers.Adam(learning_rate=lr)
+            if optimizer == 'adamW':
+                opt = keras.optimizers.AdamW(
+                    learning_rate=lr,
+                    weight_decay=getattr(params, 'ADAMW_WEIGHT_DECAY', 0.01),
+                )
+            elif optimizer == 'adam':
+                opt = keras.optimizers.Adam(learning_rate=lr)
             elif optimizer == 'rmsprop':
-                opt = tf.keras.optimizers.RMSprop(learning_rate=lr)
+                opt = keras.optimizers.RMSprop(learning_rate=lr)
             elif optimizer == 'sgd':
-                opt = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9)
+                opt = keras.optimizers.SGD(learning_rate=lr, momentum=0.9)
             elif optimizer == 'nadam':
-                opt = tf.keras.optimizers.Nadam(learning_rate=lr)
+                opt = keras.optimizers.Nadam(learning_rate=lr)
             else:
-                opt = tf.keras.optimizers.Adam(learning_rate=lr)
+                opt = keras.optimizers.Adam(learning_rate=lr)
             
             # Determine Loss Function
             is_haverland = (params.MODEL_ARCHITECTURE == "original_haverland")
@@ -919,7 +926,7 @@ def manual_hyperparameter_search(x_train, y_train, x_val, y_val, num_trials=10, 
             })
         
         # Clean up
-        tf.keras.backend.clear_session()
+        keras.backend.clear_session()
     
     # Find best result
     best_result = max(results, key=lambda x: x['val_accuracy'])

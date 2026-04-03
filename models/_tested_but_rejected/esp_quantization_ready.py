@@ -21,8 +21,8 @@ Notes:
 Estimated: ~70K parameters → ~70 KB after INT8 quantization.
 """
 
-import tensorflow as tf
 import parameters as params
+from utils.keras_helper import keras
 
 def create_esp_quantization_ready():
     """
@@ -31,48 +31,48 @@ def create_esp_quantization_ready():
     - All activations compatible with quantization
     - Symmetric weight distributions
     """
-    model = tf.keras.Sequential([
-        tf.keras.layers.Input(shape=params.INPUT_SHAPE),
+    model = keras.Sequential([
+        keras.layers.Input(shape=params.INPUT_SHAPE),
         
         # First conv with explicit activation
-        tf.keras.layers.Conv2D(
+        keras.layers.Conv2D(
             32, (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,  # Important for quantization
             name='conv1'
         ),
-        tf.keras.layers.ReLU(name='relu1'),
-        tf.keras.layers.MaxPooling2D((2, 2), name='pool1'),
+        keras.layers.ReLU(name='relu1'),
+        keras.layers.MaxPooling2D((2, 2), name='pool1'),
         
         # Second conv
-        tf.keras.layers.Conv2D(
+        keras.layers.Conv2D(
             64, (3, 3), padding='same',
             kernel_initializer='he_normal',
             use_bias=True,
             name='conv2'
         ),
-        tf.keras.layers.ReLU(name='relu2'),
-        tf.keras.layers.MaxPooling2D((2, 2), name='pool2'),
+        keras.layers.ReLU(name='relu2'),
+        keras.layers.MaxPooling2D((2, 2), name='pool2'),
         
         # Third conv - depthwise for efficiency
-        tf.keras.layers.DepthwiseConv2D(
+        keras.layers.DepthwiseConv2D(
             (3, 3), padding='same',
             depthwise_initializer='he_normal',
             use_bias=True,
             name='depthwise1'
         ),
-        tf.keras.layers.ReLU(name='depthwise_relu1'),
-        tf.keras.layers.Conv2D(
+        keras.layers.ReLU(name='depthwise_relu1'),
+        keras.layers.Conv2D(
             64, (1, 1),
             kernel_initializer='he_normal',
             use_bias=True,
             name='pointwise1'
         ),
-        tf.keras.layers.ReLU(name='relu3'),
+        keras.layers.ReLU(name='relu3'),
         
         # Global average pooling - quantization friendly
-        tf.keras.layers.GlobalAveragePooling2D(name='gap'),
-        tf.keras.layers.Dense(params.NB_CLASSES, activation='softmax', name='output')
+        keras.layers.GlobalAveragePooling2D(name='gap'),
+        keras.layers.Dense(params.NB_CLASSES, activation='softmax', name='output')
     ])
     
     return model

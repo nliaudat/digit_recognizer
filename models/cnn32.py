@@ -27,6 +27,7 @@ Estimated: ~200–300K parameters → reference only, not intended for ESP32.
 
 import tensorflow as tf
 import parameters as params
+from utils.keras_helper import keras
 
 def CNN_s2(input_shape=None, nb_classes=params.NB_CLASSES, activation_top='softmax'):
     """
@@ -37,42 +38,42 @@ def CNN_s2(input_shape=None, nb_classes=params.NB_CLASSES, activation_top='softm
         input_shape = params.INPUT_SHAPE
     
     # Input layer
-    inputs = tf.keras.layers.Input(shape=input_shape)
+    inputs = keras.layers.Input(shape=input_shape)
     
     # First conv block
-    x = tf.keras.layers.BatchNormalization()(inputs)
-    x = tf.keras.layers.Conv2D(32, (3, 3), padding='same')(x) # Processes all channels together, similar to convert to grayscale
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Activation('relu')(x)
-    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)
-    x = tf.keras.layers.Dropout(0.2)(x)
+    x = keras.layers.BatchNormalization()(inputs)
+    x = keras.layers.Conv2D(32, (3, 3), padding='same')(x) # Processes all channels together, similar to convert to grayscale
+    x = keras.layers.BatchNormalization()(x)
+    x = keras.layers.Activation('relu')(x)
+    x = keras.layers.MaxPooling2D(pool_size=(2, 2))(x)
+    x = keras.layers.Dropout(0.2)(x)
     
     # Second conv block  
-    x = tf.keras.layers.Conv2D(64, (3, 3), padding='same')(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Activation('relu')(x)
-    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)
-    x = tf.keras.layers.Dropout(0.2)(x)
+    x = keras.layers.Conv2D(64, (3, 3), padding='same')(x)
+    x = keras.layers.BatchNormalization()(x)
+    x = keras.layers.Activation('relu')(x)
+    x = keras.layers.MaxPooling2D(pool_size=(2, 2))(x)
+    x = keras.layers.Dropout(0.2)(x)
     
     # Third conv block
-    x = tf.keras.layers.Conv2D(64, (3, 3), padding='same')(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Activation('relu')(x)
-    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)
+    x = keras.layers.Conv2D(64, (3, 3), padding='same')(x)
+    x = keras.layers.BatchNormalization()(x)
+    x = keras.layers.Activation('relu')(x)
+    x = keras.layers.MaxPooling2D(pool_size=(2, 2))(x)
     
     # Flatten and dense layers
-    x = tf.keras.layers.Flatten()(x)
-    x = tf.keras.layers.Dropout(0.4)(x)
-    x = tf.keras.layers.Dense(256, activation='relu')(x)
-    x = tf.keras.layers.Dropout(0.4)(x)
+    x = keras.layers.Flatten()(x)
+    x = keras.layers.Dropout(0.4)(x)
+    x = keras.layers.Dense(256, activation='relu')(x)
+    x = keras.layers.Dropout(0.4)(x)
     
     # Output layer
     if activation_top is None:
-        outputs = tf.keras.layers.Dense(nb_classes)(x)
+        outputs = keras.layers.Dense(nb_classes)(x)
     else:
-        outputs = tf.keras.layers.Dense(nb_classes, activation=activation_top)(x)
+        outputs = keras.layers.Dense(nb_classes, activation=activation_top)(x)
     
-    model = tf.keras.Model(inputs=inputs, outputs=outputs)
+    model = keras.Model(inputs=inputs, outputs=outputs)
     return model
 
 def create_original_haverland():

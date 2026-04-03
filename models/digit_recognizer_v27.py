@@ -32,6 +32,7 @@ Output: single softmax [NB_CLASSES]. Apply transition rule in C++ or Python:
 """
 
 import tensorflow as tf
+from utils.keras_helper import keras
 import parameters as params
 
 try:
@@ -49,7 +50,7 @@ try:
     from utils.augmentation import PolarityInversionAugmentation
 except ImportError:
     # Fallback when models/ is not on sys.path (e.g. standalone run)
-    class PolarityInversionAugmentation(tf.keras.layers.Layer):
+    class PolarityInversionAugmentation(keras.layers.Layer):
         """Fallback inline definition — prefer utils.augmentation version."""
         def __init__(self, probability=0.5, **kwargs):
             super().__init__(**kwargs)
@@ -79,7 +80,7 @@ except ImportError:
 # FIX 3 — SOFT CONTRAST NORMALIZATION
 # ============================================================================
 
-class SoftContrastNormalization(tf.keras.layers.Layer):
+class SoftContrastNormalization(keras.layers.Layer):
     """
     Per-image z-score normalization + sigmoid squash.
         output = sigmoid((x − mean) / (std + eps))
@@ -98,7 +99,7 @@ class SoftContrastNormalization(tf.keras.layers.Layer):
     def build(self, input_shape):
         self.eps = self.add_weight(
             name='eps', shape=(), trainable=False,
-            initializer=tf.keras.initializers.Constant(self.eps_val)
+            initializer=keras.initializers.Constant(self.eps_val)
         )
         super().build(input_shape)
 
@@ -119,7 +120,7 @@ class SoftContrastNormalization(tf.keras.layers.Layer):
 # FIX 4 — LEARNABLE SOFT BINARIZATION (from v26)
 # ============================================================================
 
-class LearnableSoftBinarization(tf.keras.layers.Layer):
+class LearnableSoftBinarization(keras.layers.Layer):
     """
     Differentiable binary thresholding.
         output = sigmoid(sharpness × (x − threshold))
@@ -137,7 +138,7 @@ class LearnableSoftBinarization(tf.keras.layers.Layer):
     def build(self, input_shape):
         self.threshold = self.add_weight(
             name='threshold', shape=(),
-            initializer=tf.keras.initializers.Constant(self.initial_threshold),
+            initializer=keras.initializers.Constant(self.initial_threshold),
             trainable=True,
         )
         super().build(input_shape)
@@ -171,32 +172,32 @@ def _get_adaptive_config():
 
 def _build_v27_backbone(x, filters, dense_units, use_batch_norm=False):
     with tf.name_scope('backbone'):
-        x = tf.keras.layers.Conv2D(filters[0], (3, 3), padding='same',
+        x = keras.layers.Conv2D(filters[0], (3, 3), padding='same',
                                    kernel_initializer='he_normal', name='conv1')(x)
-        if use_batch_norm: x = tf.keras.layers.BatchNormalization(name='bn1')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
-        x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+        if use_batch_norm: x = keras.layers.BatchNormalization(name='bn1')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
+        x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
 
-        x = tf.keras.layers.Conv2D(filters[1], (3, 3), padding='same',
+        x = keras.layers.Conv2D(filters[1], (3, 3), padding='same',
                                    kernel_initializer='he_normal', name='conv2')(x)
-        if use_batch_norm: x = tf.keras.layers.BatchNormalization(name='bn2')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
-        x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
+        if use_batch_norm: x = keras.layers.BatchNormalization(name='bn2')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
+        x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
 
-        x = tf.keras.layers.Conv2D(filters[2], (3, 3), padding='same',
+        x = keras.layers.Conv2D(filters[2], (3, 3), padding='same',
                                    kernel_initializer='he_normal', name='conv3')(x)
-        if use_batch_norm: x = tf.keras.layers.BatchNormalization(name='bn3')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
+        if use_batch_norm: x = keras.layers.BatchNormalization(name='bn3')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
 
-        x = tf.keras.layers.Conv2D(filters[3], (3, 3), padding='same',
+        x = keras.layers.Conv2D(filters[3], (3, 3), padding='same',
                                    kernel_initializer='he_normal', name='conv4')(x)
-        if use_batch_norm: x = tf.keras.layers.BatchNormalization(name='bn4')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
+        if use_batch_norm: x = keras.layers.BatchNormalization(name='bn4')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
 
-        x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
-        x = tf.keras.layers.Dense(dense_units, activation=None, name='feature_dense')(x)
-        x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
-        x = tf.keras.layers.Dropout(0.25, name='dropout')(x)
+        x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+        x = keras.layers.Dense(dense_units, activation=None, name='feature_dense')(x)
+        x = keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
+        x = keras.layers.Dropout(0.25, name='dropout')(x)
     return x
 
 
@@ -222,12 +223,12 @@ def create_digit_recognizer_v27(use_batch_norm=False):
     print(f"v27 config: classes={params.NB_CLASSES}  filters={filters}  "
           f"dense={dense_units}  binarization_sharpness={sharpness}")
 
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
 
     # 1. Luminance conversion (frozen: fixed BT.601 constants)
     input_channels = params.INPUT_SHAPE[-1]
     if input_channels is not None and input_channels == 3:
-        x = tf.keras.layers.Lambda(
+        x = keras.layers.Lambda(
             lambda t: 0.299 * t[..., 0:1] + 0.587 * t[..., 1:2] + 0.114 * t[..., 2:3],
             name='luminance_grayscale'
         )(inputs)
@@ -249,11 +250,11 @@ def create_digit_recognizer_v27(use_batch_norm=False):
     x = _build_v27_backbone(x, filters, dense_units, use_batch_norm=use_batch_norm)
 
     # 6. Classification output
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, activation='softmax', name='output'
     )(x)
 
-    model = tf.keras.Model(inputs, outputs, name='digit_recognizer_v27')
+    model = keras.Model(inputs, outputs, name='digit_recognizer_v27')
 
     # Lock fixed preprocessing layers
     frozen = 0

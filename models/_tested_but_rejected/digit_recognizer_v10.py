@@ -29,9 +29,10 @@ Notes:
 Estimated: ~700K+ parameters → not intended for ESP32 deployment.
 """
 
-import tensorflow as tf
 import parameters as params
-from tensorflow.keras import layers, Model
+from utils.keras_helper import keras
+layers = keras.layers
+Model = keras.Model
 
 class SimplifiedAttention(layers.Layer):
     """CNN-based attention mechanism that's QAT compatible"""
@@ -56,7 +57,7 @@ def create_digit_recognizer_v10():
     Quantization-friendly hybrid architecture with CNN-based attention
     Combines efficient convolutions with global context mechanisms
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Initial feature extraction
     x = layers.Conv2D(32, 3, padding='same', use_bias=False, name='conv1')(inputs)
@@ -119,13 +120,13 @@ def create_digit_recognizer_v10():
     
     outputs = layers.Dense(params.NB_CLASSES, activation='softmax', name='output')(x)
     
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v10")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v10")
 
 def create_digit_recognizer_v10_light():
     """
     Ultra QAT-compatible version with maximum quantization stability
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Simple, clean architecture that quantizes well
     x = layers.Conv2D(32, 3, padding='same', activation='relu', name='conv1')(inputs)
@@ -156,7 +157,7 @@ def create_digit_recognizer_v10_light():
     
     outputs = layers.Dense(params.NB_CLASSES, activation='softmax', name='output')(x)
     
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v10_light")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v10_light")
 
 # Test QAT compatibility
 def test_qat_compatibility():
@@ -165,7 +166,7 @@ def test_qat_compatibility():
         model = create_digit_recognizer_v10()
         
         # Test basic forward pass
-        test_input = tf.ones((1,) + params.INPUT_SHAPE)
+        test_input = keras.ops.ones((1,) + params.INPUT_SHAPE)
         output = model(test_input)
         print(f"✓ Forward pass successful: {output.shape}")
         

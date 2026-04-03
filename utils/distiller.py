@@ -16,6 +16,7 @@ EnsembleDistiller – weighted combination of multiple teachers.
 """
 
 import tensorflow as tf
+from utils.keras_helper import keras
 import numpy as np
 from typing import Optional, Callable, Dict, Any, Tuple, Union
 import logging
@@ -24,7 +25,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class DistillationProgressCallback(tf.keras.callbacks.Callback):
+class DistillationProgressCallback(keras.callbacks.Callback):
     """
     Keras callback to update the distiller's current epoch.
     Crucial for ProgressiveDistiller temperature and alpha scheduling.
@@ -35,7 +36,7 @@ class DistillationProgressCallback(tf.keras.callbacks.Callback):
             logger.info(f"Distiller epoch updated to {epoch}")
 
 
-class Distiller(tf.keras.Model):
+class Distiller(keras.Model):
     """
     Knowledge distillation wrapper with multiple distillation modes.
     
@@ -54,8 +55,8 @@ class Distiller(tf.keras.Model):
     
     def __init__(
         self,
-        student: tf.keras.Model,
-        teacher: tf.keras.Model,
+        student: keras.Model,
+        teacher: keras.Model,
         temperature: float = 4.0,
         alpha: float = 0.7,
         mode: str = 'soft',
@@ -102,7 +103,7 @@ class Distiller(tf.keras.Model):
     
     def compile(
         self,
-        optimizer: Union[str, tf.keras.optimizers.Optimizer],
+        optimizer: Union[str, keras.optimizers.Optimizer],
         metrics: Optional[list] = None,
         student_loss_fn: Optional[Callable] = None,
         distillation_loss_fn: Optional[Callable] = None,
@@ -124,10 +125,10 @@ class Distiller(tf.keras.Model):
         super().compile(optimizer=optimizer, metrics=metrics or [], **kwargs)
 
         # from_logits=False because models output softmax probabilities
-        self.student_loss_fn = student_loss_fn or tf.keras.losses.SparseCategoricalCrossentropy(
+        self.student_loss_fn = student_loss_fn or keras.losses.SparseCategoricalCrossentropy(
             from_logits=False, name="student_loss"
         )
-        self.distillation_loss_fn = distillation_loss_fn or tf.keras.losses.KLDivergence(
+        self.distillation_loss_fn = distillation_loss_fn or keras.losses.KLDivergence(
             name="distill_loss"
         )
         self.temperature_schedule = temperature_schedule
@@ -170,8 +171,14 @@ class Distiller(tf.keras.Model):
         grads = tape.gradient(loss, trainable_vars)
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
 
-        # Update compiled metrics (e.g. accuracy) using stateful update
-        self.compiled_metrics.update_state(y, student_probs)
+        # Update metrics (e.g. accuracy)
+        # Using self.compute_metrics is the preferred Keras 3 way
+        if hasattr(self, 'compute_metrics'):
+            self.compute_metrics(x, y, student_probs, sample_weight=None)
+        else:
+            for metric in self.metrics:
+                if metric.name != "loss":
+                    metric.update_state(y, student_probs)
 
         # Build results dict: start with the scalar loss, then append metric states
         results = {m.name: m.result() for m in self.metrics}
@@ -190,12 +197,21 @@ class Distiller(tf.keras.Model):
         # Compute the plain cross-entropy loss against hard labels for monitoring
         loss = self.student_loss_fn(y, student_probs)
         
-        # Update compiled metrics (e.g. accuracy) using stateful update
-        self.compiled_metrics.update_state(y, student_probs)
+        # Update metrics (e.g. accuracy)
+        if hasattr(self, 'compute_metrics'):
+            self.compute_metrics(x, y, student_probs, sample_weight=None)
+        else:
+            for metric in self.metrics:
+                if metric.name != "loss":
+                    metric.update_state(y, student_probs)
 
         # Build results dict: scalar loss + metric states
         results = {m.name: m.result() for m in self.metrics}
-        results["loss"] = loss
+        
+        # Ensure 'loss' is present (Keras expects it for val_loss)
+        if "loss" not in results:
+            results["loss"] = loss
+            
         return results
 
     def call(self, inputs: tf.Tensor, training: bool = False) -> tf.Tensor:
@@ -272,7 +288,7 @@ class Distiller(tf.keras.Model):
         # For now, returns zero loss
         return tf.constant(0.0, dtype=tf.float32)
     
-    def get_student(self) -> tf.keras.Model:
+    def get_student(self) -> keras.Model:
         """Return the trained student model."""
         return self.student
     
@@ -298,8 +314,8 @@ class ProgressiveDistiller(Distiller):
     
     def __init__(
         self,
-        student: tf.keras.Model,
-        teacher: tf.keras.Model,
+        student: keras.Model,
+        teacher: keras.Model,
         initial_temperature: float = 8.0,
         final_temperature: float = 2.0,
         initial_alpha: float = 0.3,
@@ -381,7 +397,7 @@ class EnsembleDistiller(Distiller):
     
     def __init__(
         self,
-        student: tf.keras.Model,
+        student: keras.Model,
         teachers: list,
         teacher_weights: Optional[list] = None,
         temperature: float = 4.0,
@@ -465,8 +481,13 @@ class EnsembleDistiller(Distiller):
         grads = tape.gradient(loss, trainable_vars)
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
         
-        # Update compiled metrics (e.g. accuracy) using stateful update
-        self.compiled_metrics.update_state(y, student_logits)
+        # Update metrics (e.g. accuracy)
+        if hasattr(self, 'compute_metrics'):
+            self.compute_metrics(x, y, student_logits, sample_weight=None)
+        else:
+            for metric in self.metrics:
+                if metric.name != "loss":
+                    metric.update_state(y, student_logits)
 
         # NOTE: current_epoch should NOT be incremented here (batch-level).
         # It is managed by DistillationProgressCallback on_epoch_begin.
@@ -489,8 +510,8 @@ class MixedInputDistiller(Distiller):
 
     def __init__(
         self,
-        student: tf.keras.Model,
-        teacher: tf.keras.Model,
+        student: keras.Model,
+        teacher: keras.Model,
         teacher_input_fn: Optional[Callable] = None,
         **kwargs
     ):
@@ -544,8 +565,13 @@ class MixedInputDistiller(Distiller):
         grads = tape.gradient(loss, trainable_vars)
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
 
-        # 9. Update compiled metrics using stateful update
-        self.compiled_metrics.update_state(y, student_probs)
+        # 9. Update metrics
+        if hasattr(self, 'compute_metrics'):
+             self.compute_metrics(x_student, y, student_probs, sample_weight=None)
+        else:
+             for metric in self.metrics:
+                  if metric.name != "loss":
+                       metric.update_state(y, student_probs)
 
         # Build results dict: scalar loss + metric states
         results = {m.name: m.result() for m in self.metrics}
@@ -564,12 +590,18 @@ class MixedInputDistiller(Distiller):
         # Compute the plain cross-entropy loss for monitoring
         loss = self.student_loss_fn(y, student_probs)
         
-        # Update compiled metrics using stateful update
-        self.compiled_metrics.update_state(y, student_probs)
+        # Update metrics help
+        if hasattr(self, 'compute_metrics'):
+            self.compute_metrics(x_student, y, student_probs, sample_weight=None)
+        else:
+            for metric in self.metrics:
+                if metric.name != "loss":
+                    metric.update_state(y, student_probs)
 
-        # Build results dict: scalar loss + metric states
+        # Build results dict
         results = {m.name: m.result() for m in self.metrics}
-        results["loss"] = loss
+        if "loss" not in results:
+            results["loss"] = loss
         return results
 
     def get_config(self) -> Dict[str, Any]:

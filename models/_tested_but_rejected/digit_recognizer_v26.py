@@ -40,9 +40,8 @@ ESP32 C++ transition rule (same as v25):
         digit = (digit + 1) % 10;
 """
 
-import tensorflow as tf
-import numpy as np
 import parameters as params
+from utils.keras_helper import keras
 
 try:
     import tensorflow_model_optimization as tfmot
@@ -76,7 +75,7 @@ except ImportError:
 # LEARNABLE SOFT BINARIZATION LAYER
 # ============================================================================
 
-class LearnableSoftBinarization(tf.keras.layers.Layer):
+class LearnableSoftBinarization(keras.layers.Layer):
     """
     Differentiable approximation of binary thresholding.
 
@@ -106,15 +105,15 @@ class LearnableSoftBinarization(tf.keras.layers.Layer):
         self.threshold = self.add_weight(
             name='threshold',
             shape=(),
-            initializer=tf.keras.initializers.Constant(self.initial_threshold),
+            initializer=keras.initializers.Constant(self.initial_threshold),
             trainable=True,
         )
         super().build(input_shape)
 
     def call(self, inputs):
         # Clip threshold to valid range in the forward pass (no-op at save/load)
-        threshold = tf.clip_by_value(self.threshold, 0.1, 0.9)
-        return tf.sigmoid(self.sharpness * (inputs - threshold))
+        threshold = keras.ops.clip(self.threshold, 0.1, 0.9)
+        return keras.activations.sigmoid(self.sharpness * (inputs - threshold))
 
     def compute_output_shape(self, input_shape):
         return input_shape
@@ -153,7 +152,7 @@ def create_digit_recognizer_v26(use_batch_norm=False):
                           'transition_dir': 0.5, 'digit_confidence': 0.1},
         )
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
 
     # Step 1: Luminance conversion (RGB → gray, no-op for 1-channel)
     x = _luminance_layer(inputs)
@@ -172,26 +171,26 @@ def create_digit_recognizer_v26(use_batch_norm=False):
     features = _build_v25_backbone(x, use_batch_norm=use_batch_norm)
 
     # Step 5: Digit classification head
-    d = tf.keras.layers.Dense(64, activation=None, name='digit_dense')(features)
-    d = tf.keras.layers.ReLU(max_value=6.0, name='relu6_digit')(d)
-    digit_probs = tf.keras.layers.Dense(
+    d = keras.layers.Dense(64, activation=None, name='digit_dense')(features)
+    d = keras.layers.ReLU(max_value=6.0, name='relu6_digit')(d)
+    digit_probs = keras.layers.Dense(
         params.NB_CLASSES, activation='softmax', name='digit_probs'
     )(d)
-    digit_confidence = tf.keras.layers.Dense(
+    digit_confidence = keras.layers.Dense(
         1, activation='sigmoid', name='digit_confidence'
     )(d)
 
     # Step 6: Transition detection head
-    t = tf.keras.layers.Dense(32, activation=None, name='trans_dense')(features)
-    t = tf.keras.layers.ReLU(max_value=6.0, name='relu6_trans')(t)
-    transition_prob = tf.keras.layers.Dense(
+    t = keras.layers.Dense(32, activation=None, name='trans_dense')(features)
+    t = keras.layers.ReLU(max_value=6.0, name='relu6_trans')(t)
+    transition_prob = keras.layers.Dense(
         1, activation='sigmoid', name='transition_prob'
     )(t)
-    transition_dir = tf.keras.layers.Dense(
+    transition_dir = keras.layers.Dense(
         1, activation='sigmoid', name='transition_dir'
     )(t)
 
-    model = tf.keras.Model(
+    model = keras.Model(
         inputs=inputs,
         outputs=[digit_probs, digit_confidence, transition_prob, transition_dir],
         name='digit_recognizer_v26',

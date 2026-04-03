@@ -15,13 +15,10 @@ Estimated: ~80K params / ~70KB INT8. Fully QAT-compatible.
 """
 
 import tensorflow as tf
+from utils.keras_helper import keras, tfmot
 import parameters as params
 
-try:
-    import tensorflow_model_optimization as tfmot
-    QAT_AVAILABLE = True
-except ImportError:
-    QAT_AVAILABLE = False
+QAT_AVAILABLE = tfmot is not None
 
 
 # ---------------------------------------------------------------------------
@@ -41,34 +38,34 @@ def _inv_res(x, filters_out, expand_ratio, stride, name_prefix):
     use_shortcut = (stride == 1 and ch_in == filters_out)
 
     # 1. Pointwise expansion (1×1 Conv + BN + ReLU6)
-    y = tf.keras.layers.Conv2D(
+    y = keras.layers.Conv2D(
         ch_exp, (1, 1), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name=f'{name_prefix}_expand'
     )(x)
-    y = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_exp_bn')(y)
-    y = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_exp_relu6')(y)
+    y = keras.layers.BatchNormalization(name=f'{name_prefix}_exp_bn')(y)
+    y = keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_exp_relu6')(y)
 
     # 2. Depthwise conv (3×3 + BN + ReLU6)
-    y = tf.keras.layers.DepthwiseConv2D(
+    y = keras.layers.DepthwiseConv2D(
         (3, 3), strides=stride, padding='same',
         depthwise_initializer='he_normal', use_bias=False,
         name=f'{name_prefix}_dw'
     )(y)
-    y = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_dw_bn')(y)
-    y = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_dw_relu6')(y)
+    y = keras.layers.BatchNormalization(name=f'{name_prefix}_dw_bn')(y)
+    y = keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_dw_relu6')(y)
 
     # 3. Pointwise projection (1×1 Conv + BN, NO activation — linear bottleneck)
-    y = tf.keras.layers.Conv2D(
+    y = keras.layers.Conv2D(
         filters_out, (1, 1), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name=f'{name_prefix}_project'
     )(y)
-    y = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_proj_bn')(y)
+    y = keras.layers.BatchNormalization(name=f'{name_prefix}_proj_bn')(y)
 
     # 4. Shortcut (identity or skip)
     if use_shortcut:
-        y = tf.keras.layers.Add(name=f'{name_prefix}_add')([x, y])
+        y = keras.layers.Add(name=f'{name_prefix}_add')([x, y])
 
     return y
 
@@ -82,16 +79,16 @@ def create_digit_recognizer_v16():
     MobileNetV2-style IoT digit recognizer optimised for ESP32 TFLite Micro.
     All ops map to ESP-NN hardware-accelerated kernels.
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
 
     # Entry conv
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         16, (3, 3), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name='entry_conv'
     )(inputs)
-    x = tf.keras.layers.BatchNormalization(name='entry_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='entry_relu6')(x)
+    x = keras.layers.BatchNormalization(name='entry_bn')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='entry_relu6')(x)
 
     # Inverted residual stages
     # (out_ch, expand_ratio, stride)
@@ -107,23 +104,23 @@ def create_digit_recognizer_v16():
                      name_prefix=f'ir{i+1}')
 
     # Final 1×1 Conv to widen representation before GAP
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         96, (1, 1), padding='same',
         kernel_initializer='he_normal', use_bias=False,
         name='head_conv'
     )(x)
-    x = tf.keras.layers.BatchNormalization(name='head_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='head_relu6')(x)
+    x = keras.layers.BatchNormalization(name='head_bn')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='head_relu6')(x)
 
     # Final GAP - use keepdims=True to help TFLite avoid certain rank-changing Reshape ops
-    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='gap')(x)
-    x = tf.keras.layers.Flatten(name='flatten')(x)
+    x = keras.layers.GlobalAveragePooling2D(keepdims=True, name='gap')(x)
+    x = keras.layers.Flatten(name='flatten')(x)
 
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, activation='softmax', name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name='digit_recognizer_v16')
+    return keras.Model(inputs, outputs, name='digit_recognizer_v16')
 
 
 # ---------------------------------------------------------------------------

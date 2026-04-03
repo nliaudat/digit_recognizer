@@ -29,6 +29,7 @@ Achieved accuracy: 99.0% (same as v4, now with color robustness)
 """
 
 import tensorflow as tf
+from utils.keras_helper import keras
 import parameters as params
 try:
     import tensorflow_model_optimization as tfmot
@@ -79,14 +80,14 @@ def create_luminance_grayscale_conv(input_tensor):
         luminance_bias = tf.constant([0.0], dtype=tf.float32)
         
         # Apply 1x1 convolution with fixed weights
-        grayscale = tf.keras.layers.Conv2D(
+        grayscale = keras.layers.Conv2D(
             filters=1,
             kernel_size=(1, 1),
             strides=(1, 1),
             padding='same',
             use_bias=True,
-            kernel_initializer=tf.keras.initializers.Constant(luminance_weights),
-            bias_initializer=tf.keras.initializers.Constant(luminance_bias),
+            kernel_initializer=keras.initializers.Constant(luminance_weights),
+            bias_initializer=keras.initializers.Constant(luminance_bias),
             trainable=False,  # Freeze these weights
             name='luminance_grayscale_conv'
         )(input_tensor)
@@ -96,7 +97,7 @@ def create_luminance_grayscale_conv(input_tensor):
         # Fallback for dynamic or unknown channel counts
         # Must wrap in Lambda layer for functional API compatibility
         print(f"Warning: Unknown channel count {channels}, using average fallback")
-        grayscale = tf.keras.layers.Lambda(
+        grayscale = keras.layers.Lambda(
             lambda t: tf.reduce_mean(t, axis=-1, keepdims=True),
             name='average_grayscale_fallback'
         )(input_tensor)
@@ -125,47 +126,47 @@ def _build_v23_backbone(x):
     d     = max(int(64 * scale), 64)
 
     # Layer 1
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         f[0], (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv1_{}f'.format(f[0])
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
 
     # Layer 2
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         f[1], (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv2_{}f'.format(f[1])
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
 
     # Layer 3
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         f[2], (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv3_{}f'.format(f[2])
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
 
     # Layer 4
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         f[3], (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv4_{}f'.format(f[3])
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
 
     # Global pooling + dense
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
-    x = tf.keras.layers.Dense(d, activation=None, name='feature_dense')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
+    x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    x = keras.layers.Dense(d, activation=None, name='feature_dense')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
 
     return x
 
@@ -194,7 +195,7 @@ def create_digit_recognizer_v23_grayscale():
     """
     v23 Grayscale model - no conversion needed, direct v4 architecture
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # No conversion needed for grayscale input
     x = inputs
@@ -203,19 +204,19 @@ def create_digit_recognizer_v23_grayscale():
     x = _build_v23_backbone(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
     
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v23_grayscale")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v23_grayscale")
 
 def create_digit_recognizer_v23_rgb():
     """
     v23 RGB model with luminance grayscale conversion entry layer
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Apply luminance grayscale conversion as first layer
     x = create_luminance_grayscale_conv(inputs)
@@ -224,13 +225,13 @@ def create_digit_recognizer_v23_rgb():
     x = _build_v23_backbone(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
     
-    model = tf.keras.Model(inputs, outputs, name="digit_recognizer_v23_rgb")
+    model = keras.Model(inputs, outputs, name="digit_recognizer_v23_rgb")
     
     # Double-check luminance layer is frozen
     for layer in model.layers:
@@ -244,7 +245,7 @@ def create_digit_recognizer_v23_adaptive():
     """
     v23 Adaptive model - dynamically handles input channels with fallback
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # create_luminance_grayscale_conv handles 1-channel, 3-channel, and fallback robustly
     x = create_luminance_grayscale_conv(inputs)
@@ -253,13 +254,13 @@ def create_digit_recognizer_v23_adaptive():
     x = _build_v23_backbone(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
     
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v23_adaptive")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v23_adaptive")
 
 # ============================================================================
 # QUANTIZATION-AWARE TRAINING
@@ -331,9 +332,9 @@ def test_luminance_conversion():
     }
     
     # Build a proper test model using symbolic graph
-    test_input = tf.keras.Input(shape=(1, 1, 3), name='test_input')
+    test_input = keras.Input(shape=(1, 1, 3), name='test_input')
     test_output = create_luminance_grayscale_conv(test_input)
-    test_model = tf.keras.Model(test_input, test_output)
+    test_model = keras.Model(test_input, test_output)
     
     print("\nLuminance weights:")
     print("Red:   0.299  (29.9%)")

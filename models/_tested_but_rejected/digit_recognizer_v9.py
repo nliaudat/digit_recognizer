@@ -29,15 +29,16 @@ Notes:
 Estimated: ~150–200K parameters → not intended for ESP32 deployment.
 """
 
-import tensorflow as tf
 import parameters as params
-from tensorflow.keras import layers, Model
-import tensorflow.keras.backend as K
+from utils.keras_helper import keras
+layers = keras.layers
+Model = keras.Model
+K = keras.backend
 
 class SwishLayer(layers.Layer):
     """Custom layer for Swish activation"""
     def call(self, inputs):
-        return tf.nn.swish(inputs)
+        return keras.activations.swish(inputs)
 
 class SEBlock(layers.Layer):
     """Squeeze-and-Excitation block as a separate layer"""
@@ -60,7 +61,7 @@ class SEBlock(layers.Layer):
         se = self.dense1(se)
         se = self.dense2(se)
         # Reshape for broadcasting
-        se = tf.reshape(se, [-1, 1, 1, self.channels])
+        se = keras.ops.reshape(se, [-1, 1, 1, self.channels])
         # Scale
         return inputs * se
 
@@ -68,7 +69,7 @@ def create_digit_recognizer_v9():
     """
     EfficientNet-style architecture for optimal performance/accuracy balance
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     def mb_conv_block(x, filters, stride=1, expansion=4, se_ratio=0.25, name=""):
         """Mobile Inverted Residual Bottleneck with Squeeze-and-Excitation"""
@@ -135,14 +136,14 @@ def create_digit_recognizer_v9():
     
     outputs = layers.Dense(params.NB_CLASSES, activation='softmax', name='output')(x)
     
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v9")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v9")
 
 # Alternative simpler version without SE blocks if you still have issues
 def create_digit_recognizer_v9_simple():
     """
     Simplified EfficientNet-style without SE blocks for maximum compatibility
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     def mb_conv_block_simple(x, filters, stride=1, expansion=4, name=""):
         """Mobile Inverted Residual Bottleneck without SE"""
@@ -205,7 +206,7 @@ def create_digit_recognizer_v9_simple():
     
     outputs = layers.Dense(params.NB_CLASSES, activation='softmax', name='output')(x)
     
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v9_simple")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v9_simple")
 
 if __name__ == "__main__":
     model = create_digit_recognizer_v9()

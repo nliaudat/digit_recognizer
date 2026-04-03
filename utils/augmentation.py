@@ -68,7 +68,7 @@ def _augment_one_image(image, label, pipeline):
     The pipeline expects a rank 3 tensor (H, W, C) and returns the
     same rank 3 tensor.  The label is passed through unchanged.
     """
-    # `pipeline` is a `tf.keras.Sequential` that expects a single image.
+    # `pipeline` is a `keras.Sequential` that expects a single image.
     # We keep `training=True` so that random transforms are active.
     aug_img = pipeline(image, training=True)
     return aug_img, label

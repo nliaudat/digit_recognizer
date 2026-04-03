@@ -20,7 +20,7 @@ Architecture (RGB):
   - Dense(72) classification head
 
 Notes:
-  - ReLU6 via tf.keras.layers.ReLU(max_value=6.0) — avoids double-relu
+  - ReLU6 via keras.layers.ReLU(max_value=6.0) — avoids double-relu
     issue that could confuse the TFLite converter
   - No BatchNormalization → cleaner, faster quantization
   - Full QAT wrapper provided via create_qat_model()
@@ -30,14 +30,10 @@ Achieved accuracy: 99.0% (best in lineup for this size class).
 """
 
 import tensorflow as tf
+from utils.keras_helper import keras, tfmot
 import parameters as params
-try:
-    import tensorflow_model_optimization as tfmot
-    QAT_AVAILABLE = True
-    print(f"QAT available: TF {tf.__version__}, TFMo {tfmot.__version__}")
-except ImportError as e:
-    QAT_AVAILABLE = False
-    print(f"QAT not available: {e}")
+
+QAT_AVAILABLE = tfmot is not None
 
 def create_digit_recognizer_v4():
     """
@@ -59,76 +55,76 @@ def create_digit_recognizer_v4_grayscale():
     """
     Balanced grayscale model - optimized for TF 2.20 compatibility
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Layer 1
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         20, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         # activation='relu', # relu and next relu6 may confuse converter
         name='conv1_20f'
     )(inputs)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     
     # Layer 2
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         36, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         # activation='relu',
         name='conv2_36f'
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
     
     # Layer 3
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         48, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         # activation='relu',
         name='conv3_48f'
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
     
     # Additional conv layer
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         56, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         # activation='relu',
         name='conv4_56f'
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
     
     # Global pooling - use keepdims=True to help TFLite avoid certain rank-changing Reshape ops
-    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='global_avg_pool')(x)
-    x = tf.keras.layers.Flatten(name='flatten')(x)
+    x = keras.layers.GlobalAveragePooling2D(keepdims=True, name='global_avg_pool')(x)
+    x = keras.layers.Flatten(name='flatten')(x)
     
     # Dense layer
-    # x = tf.keras.layers.Dense(64, activation='relu', name='feature_dense')(x)
-    x = tf.keras.layers.Dense(64, activation=None, name='feature_dense')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
+    # x = keras.layers.Dense(64, activation='relu', name='feature_dense')(x)
+    x = keras.layers.Dense(64, activation=None, name='feature_dense')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v4_grayscale")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v4_grayscale")
 
 def create_digit_recognizer_v4_rgb():
     """
     Balanced RGB model
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Layer 1
-    x = tf.keras.layers.SeparableConv2D(
+    x = keras.layers.SeparableConv2D(
         24, (3, 3), padding='same',
         depthwise_initializer='he_normal',
         pointwise_initializer='he_normal',
@@ -136,57 +132,57 @@ def create_digit_recognizer_v4_rgb():
         # activation='relu',
         name='sep_conv1_24f'
     )(inputs)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_1')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool1')(x)
     
     # Layer 2
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         40, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         # activation='relu',
         name='conv2_40f'
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_2')(x)
+    x = keras.layers.MaxPooling2D((2, 2), strides=2, name='pool2')(x)
     
     # Layer 3
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         56, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         # activation='relu',
         name='conv3_56f'
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_3')(x)
     
     # Bottleneck layer
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         64, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         # activation='relu',
         name='conv4_bottleneck'
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
     
     # Global pooling - use keepdims=True to help TFLite avoid certain rank-changing Reshape ops
-    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='global_avg_pool_rgb')(x)
-    x = tf.keras.layers.Flatten(name='flatten_rgb')(x)
+    x = keras.layers.GlobalAveragePooling2D(keepdims=True, name='global_avg_pool_rgb')(x)
+    x = keras.layers.Flatten(name='flatten_rgb')(x)
     
     # Dense layer
-    # x = tf.keras.layers.Dense(72, activation='relu', name='feature_dense')(x)
-    x = tf.keras.layers.Dense(72, activation=None, name='feature_dense')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
+    # x = keras.layers.Dense(72, activation='relu', name='feature_dense')(x)
+    x = keras.layers.Dense(72, activation=None, name='feature_dense')(x)
+    x = keras.layers.ReLU(max_value=6.0, name='relu6_dense')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         params.NB_CLASSES, 
         activation='softmax', 
         name='output'
     )(x)
 
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v4_rgb")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v4_rgb")
 
 # ... (keep the other model creation functions similar to above)
 

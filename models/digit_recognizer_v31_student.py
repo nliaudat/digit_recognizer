@@ -21,6 +21,7 @@ Size variants:
 """
 
 import tensorflow as tf
+from utils.keras_helper import keras
 from typing import Tuple, Optional, Dict, Any
 import sys
 from pathlib import Path
@@ -98,17 +99,17 @@ def _se_block(x: tf.Tensor, prefix: str) -> tf.Tensor:
     channels = x.shape[-1]
     reduction = max(1, channels // 16)
 
-    se = tf.keras.layers.GlobalAveragePooling2D(name=f"{prefix}_se_gap")(x)
-    se = tf.keras.layers.Reshape((1, 1, channels), name=f"{prefix}_se_reshape")(se)
-    se = tf.keras.layers.Conv2D(
+    se = keras.layers.GlobalAveragePooling2D(name=f"{prefix}_se_gap")(x)
+    se = keras.layers.Reshape((1, 1, channels), name=f"{prefix}_se_reshape")(se)
+    se = keras.layers.Conv2D(
         reduction, 1, activation="relu",
         kernel_initializer="he_normal", name=f"{prefix}_se_squeeze"
     )(se)
-    se = tf.keras.layers.Conv2D(
+    se = keras.layers.Conv2D(
         channels, 1, activation="sigmoid",
         kernel_initializer="he_normal", name=f"{prefix}_se_excite"
     )(se)
-    return tf.keras.layers.Multiply(name=f"{prefix}_se_scale")([x, se])
+    return keras.layers.Multiply(name=f"{prefix}_se_scale")([x, se])
 
 
 def _inv_res_block(
@@ -132,38 +133,38 @@ def _inv_res_block(
     use_skip    = (stride == 1 and in_channels == filters_out)
 
     # 1. Pointwise expansion
-    y = tf.keras.layers.Conv2D(
+    y = keras.layers.Conv2D(
         hidden, 1, padding="same",
         kernel_initializer="he_normal", use_bias=False,
         name=f"{prefix}_expand"
     )(x)
-    y = tf.keras.layers.BatchNormalization(name=f"{prefix}_exp_bn")(y)
-    y = tf.keras.layers.ReLU(max_value=6.0, name=f"{prefix}_exp_relu6")(y)
+    y = keras.layers.BatchNormalization(name=f"{prefix}_exp_bn")(y)
+    y = keras.layers.ReLU(max_value=6.0, name=f"{prefix}_exp_relu6")(y)
 
     # 2. Depthwise conv
-    y = tf.keras.layers.DepthwiseConv2D(
+    y = keras.layers.DepthwiseConv2D(
         3, strides=stride, padding="same",
         depthwise_initializer="he_normal", use_bias=False,
         name=f"{prefix}_dw"
     )(y)
-    y = tf.keras.layers.BatchNormalization(name=f"{prefix}_dw_bn")(y)
-    y = tf.keras.layers.ReLU(max_value=6.0, name=f"{prefix}_dw_relu6")(y)
+    y = keras.layers.BatchNormalization(name=f"{prefix}_dw_bn")(y)
+    y = keras.layers.ReLU(max_value=6.0, name=f"{prefix}_dw_relu6")(y)
 
     # 3. Optional SE attention
     if use_se:
         y = _se_block(y, prefix)
 
     # 4. Pointwise projection (linear — no activation)
-    y = tf.keras.layers.Conv2D(
+    y = keras.layers.Conv2D(
         filters_out, 1, padding="same",
         kernel_initializer="he_normal", use_bias=False,
         name=f"{prefix}_project"
     )(y)
-    y = tf.keras.layers.BatchNormalization(name=f"{prefix}_proj_bn")(y)
+    y = keras.layers.BatchNormalization(name=f"{prefix}_proj_bn")(y)
 
     # 5. Skip connection
     if use_skip:
-        y = tf.keras.layers.Add(name=f"{prefix}_add")([x, y])
+        y = keras.layers.Add(name=f"{prefix}_add")([x, y])
 
     return y
 
@@ -178,19 +179,19 @@ def _build_v31_student(
     variant: str,
     use_se: bool,
     name: str,
-) -> tf.keras.Model:
+) -> keras.Model:
     """Build V31 student as Keras Functional model (QAT-compatible)."""
     config = _VARIANT_CONFIGS.get(variant, _VARIANT_CONFIGS["medium"])
 
-    inputs = tf.keras.Input(shape=input_shape, name="input")
+    inputs = keras.Input(shape=input_shape, name="input")
 
     # Entry conv
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         config["initial_filters"], 3, padding="same",
         kernel_initializer="he_normal", use_bias=False, name="init_conv"
     )(inputs)
-    x = tf.keras.layers.BatchNormalization(name="init_bn")(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name="init_relu6")(x)
+    x = keras.layers.BatchNormalization(name="init_bn")(x)
+    x = keras.layers.ReLU(max_value=6.0, name="init_relu6")(x)
 
     # Inverted residual stages
     for i, blk in enumerate(config["blocks"]):
@@ -204,27 +205,27 @@ def _build_v31_student(
         )
 
     # Head
-    x = tf.keras.layers.GlobalAveragePooling2D(name="gap")(x)
-    x = tf.keras.layers.Dense(
+    x = keras.layers.GlobalAveragePooling2D(name="gap")(x)
+    x = keras.layers.Dense(
         config["dense_units"], kernel_initializer="he_normal", name="dense"
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name="dense_relu6")(x)
+    x = keras.layers.ReLU(max_value=6.0, name="dense_relu6")(x)
     if config["dropout"] > 0:
-        x = tf.keras.layers.Dropout(config["dropout"], name="dropout")(x)
+        x = keras.layers.Dropout(config["dropout"], name="dropout")(x)
 
     # Softmax output — same convention as v4 / v16
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         num_classes, activation="softmax", name="output"
     )(x)
 
-    return tf.keras.Model(inputs=inputs, outputs=outputs, name=name)
+    return keras.Model(inputs=inputs, outputs=outputs, name=name)
 
 
 # ---------------------------------------------------------------------------
 # QAT wrapper  (same pattern as v16)
 # ---------------------------------------------------------------------------
 
-def create_qat_model(base_model: Optional[tf.keras.Model] = None) -> tf.keras.Model:
+def create_qat_model(base_model: Optional[keras.Model] = None) -> keras.Model:
     """
     Wrap a V31 student for Quantization-Aware Training.
 
@@ -260,7 +261,7 @@ def create_v31_student(
     input_shape: Tuple[int, int, int] = (32, 20, 1),
     variant: str = "medium",
     use_se: bool = False,
-) -> tf.keras.Model:
+) -> keras.Model:
     """
     Create a V31 student model.
 
@@ -299,7 +300,7 @@ def create_v31_student_micro(
     num_classes: int = 10,
     input_shape: Tuple[int, int, int] = (32, 20, 1),
     use_se: bool = False,
-) -> tf.keras.Model:
+) -> keras.Model:
     """Ultra-light student for ESP32-C3 (< 30 KB)."""
     return create_v31_student(num_classes, input_shape=input_shape, variant="micro", use_se=use_se)
 
@@ -308,7 +309,7 @@ def create_v31_student_small(
     num_classes: int = 10,
     input_shape: Tuple[int, int, int] = (32, 20, 1),
     use_se: bool = False,
-) -> tf.keras.Model:
+) -> keras.Model:
     """Small student for ESP32 (< 50 KB)."""
     return create_v31_student(num_classes, input_shape=input_shape, variant="small", use_se=use_se)
 
@@ -317,7 +318,7 @@ def create_v31_student_medium(
     num_classes: int = 10,
     input_shape: Tuple[int, int, int] = (32, 20, 1),
     use_se: bool = False,
-) -> tf.keras.Model:
+) -> keras.Model:
     """Medium student for balanced accuracy/size (< 100 KB)."""
     return create_v31_student(num_classes, input_shape=input_shape, variant="medium", use_se=use_se)
 
@@ -326,7 +327,7 @@ def create_v31_student_large(
     num_classes: int = 10,
     input_shape: Tuple[int, int, int] = (32, 20, 1),
     use_se: bool = False,
-) -> tf.keras.Model:
+) -> keras.Model:
     """Large student for high accuracy deployment (< 200 KB)."""
     return create_v31_student(num_classes, input_shape=input_shape, variant="large", use_se=use_se)
 

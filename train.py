@@ -44,6 +44,7 @@ from pathlib import Path
 # --------------------------------------------------------------------------- #
 import numpy as np
 import tensorflow as tf
+from utils.keras_helper import keras
 from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 
@@ -463,7 +464,7 @@ def test_all_models(debug: bool = False):
             (_, _), (_, _), (x_test_raw, y_test_raw) = get_data_splits()
             x_test = preprocess_for_inference(x_test_raw)
             if arch == "original_haverland":
-                y_test = tf.keras.utils.to_categorical(
+                y_test = keras.utils.to_categorical(
                     y_test_raw, params.NB_CLASSES
                 )
             else:
@@ -475,7 +476,7 @@ def test_all_models(debug: bool = False):
             print(f"❌ {arch} failed: {exc}")
             results[arch] = {"accuracy": 0.0, "dir": None}
         finally:
-            tf.keras.backend.clear_session()
+            keras.backend.clear_session()
 
     # Restore original architecture
     params.MODEL_ARCHITECTURE = original
@@ -513,7 +514,7 @@ def train_specific_models(models_to_train, debug: bool = False, no_cleanup: bool
             (_, _), (_, _), (x_test_raw, y_test_raw) = get_data_splits()
             x_test = preprocess_for_inference(x_test_raw)
             if arch == "original_haverland":
-                y_test = tf.keras.utils.to_categorical(
+                y_test = keras.utils.to_categorical(
                     y_test_raw, params.NB_CLASSES
                 )
             else:
@@ -525,7 +526,7 @@ def train_specific_models(models_to_train, debug: bool = False, no_cleanup: bool
             print(f"❌ {arch} failed: {exc}")
             results[arch] = {"accuracy": 0.0, "dir": None}
         finally:
-            tf.keras.backend.clear_session()
+            keras.backend.clear_session()
 
     params.MODEL_ARCHITECTURE = original
 
@@ -646,8 +647,8 @@ def main():
         # Only one-hot encode if specifically using categorical_crossentropy
         # (original_haverland default or manual setting)
         if params.LOSS_TYPE == "categorical_crossentropy":
-            y_train = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
-            y_val   = tf.keras.utils.to_categorical(y_val_raw,   params.NB_CLASSES)
+            y_train = keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
+            y_val   = keras.utils.to_categorical(y_val_raw,   params.NB_CLASSES)
             print("🔧 One-hot encoding labels (for categorical_crossentropy)")
         else:
             y_train = y_train_raw
@@ -803,9 +804,9 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         
         # Handle labels based on model type
         if params.MODEL_ARCHITECTURE == "original_haverland":
-            y_train_final = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
-            y_val_final = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES) 
-            y_test_final = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)
+            y_train_final = keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
+            y_val_final = keras.utils.to_categorical(y_val_raw, params.NB_CLASSES) 
+            y_test_final = keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)
         else:
             y_train_final = y_train_raw.copy()
             y_val_final = y_val_raw.copy()

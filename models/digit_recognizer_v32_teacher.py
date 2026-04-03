@@ -19,13 +19,20 @@ Why this design:
 """
 
 import sys
+import tensorflow as tf
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Optional, Any, Dict
 
 sys.path.append(str(Path(__file__).parent.parent))
 
 import parameters as params
 from utils.keras_helper import keras
+
+try:
+    import tensorflow_model_optimization as tfmot
+    QAT_AVAILABLE = True
+except ImportError:
+    QAT_AVAILABLE = False
 
 
 # ---------------------------------------------------------------------------
@@ -33,10 +40,10 @@ from utils.keras_helper import keras
 # ---------------------------------------------------------------------------
 
 def squeeze_excite_block(
-    x: keras.Tensor,
+    x: Any,
     reduction: int = 16,
     name_prefix: str = "se"
-) -> keras.Tensor:
+) -> Any:
     """
     Squeeze-and-Excitation block for channel attention.
 
@@ -60,18 +67,18 @@ def squeeze_excite_block(
         channels, 1, activation="sigmoid",
         kernel_initializer="he_normal", name=f"{name_prefix}_expand"
     )(se)
-    return tf.keras.layers.Multiply(name=f"{name_prefix}_scale")([x, se])
+    return keras.layers.Multiply(name=f"{name_prefix}_scale")([x, se])
 
 
 
 def inverted_residual_block(
-    x: tf.Tensor,
+    x: Any,
     filters_out: int,
     expansion: int = 6,
     stride: int = 1,
     use_se: bool = True,
     name_prefix: str = "irb"
-) -> tf.Tensor:
+) -> Any:
     """
     MobileNetV2-style inverted residual block.
     
@@ -89,40 +96,40 @@ def inverted_residual_block(
     
     # Expansion
     if expansion > 1:
-        y = tf.keras.layers.Conv2D(
+        y = keras.layers.Conv2D(
             hidden_channels, 1, padding="same",
             kernel_initializer="he_normal", use_bias=False,
             name=f"{name_prefix}_expand"
         )(x)
-        y = tf.keras.layers.BatchNormalization(name=f"{name_prefix}_exp_bn")(y)
-        y = tf.keras.layers.ReLU(max_value=6.0, name=f"{name_prefix}_exp_relu6")(y)
+        y = keras.layers.BatchNormalization(name=f"{name_prefix}_exp_bn")(y)
+        y = keras.layers.ReLU(max_value=6.0, name=f"{name_prefix}_exp_relu6")(y)
     else:
         y = x
     
     # Depthwise convolution
-    y = tf.keras.layers.DepthwiseConv2D(
+    y = keras.layers.DepthwiseConv2D(
         3, strides=stride, padding="same",
         depthwise_initializer="he_normal", use_bias=False,
         name=f"{name_prefix}_dwconv"
     )(y)
-    y = tf.keras.layers.BatchNormalization(name=f"{name_prefix}_dw_bn")(y)
-    y = tf.keras.layers.ReLU(max_value=6.0, name=f"{name_prefix}_dw_relu6")(y)
+    y = keras.layers.BatchNormalization(name=f"{name_prefix}_dw_bn")(y)
+    y = keras.layers.ReLU(max_value=6.0, name=f"{name_prefix}_dw_relu6")(y)
     
     # Squeeze-and-Excitation
     if use_se:
         y = squeeze_excite_block(y, reduction=16, name_prefix=f"{name_prefix}_se")
     
     # Projection
-    y = tf.keras.layers.Conv2D(
+    y = keras.layers.Conv2D(
         filters_out, 1, padding="same",
         kernel_initializer="he_normal", use_bias=False,
         name=f"{name_prefix}_project"
     )(y)
-    y = tf.keras.layers.BatchNormalization(name=f"{name_prefix}_proj_bn")(y)
+    y = keras.layers.BatchNormalization(name=f"{name_prefix}_proj_bn")(y)
     
     # Skip connection
     if use_skip:
-        y = tf.keras.layers.Add(name=f"{name_prefix}_add")([x, y])
+        y = keras.layers.Add(name=f"{name_prefix}_add")([x, y])
     
     return y
 
@@ -139,7 +146,7 @@ def create_digit_recognizer_v32_teacher(
     width_multiplier: float = 1.0,
     use_se: bool = True,
     **kwargs
-) -> tf.keras.Model:
+) -> keras.Model:
     """
     Create V32 Teacher model - enhanced version designed to surpass v16.
     
@@ -168,20 +175,20 @@ def create_digit_recognizer_v32_teacher(
     if input_shape is None:
         input_shape = params.INPUT_SHAPE
     
-    inputs = tf.keras.Input(shape=input_shape, name="input")
+    inputs = keras.Input(shape=input_shape, name="input")
     
     # Scale channels based on width multiplier
     def scale_channels(c):
         return max(8, int(c * width_multiplier))
     
     # ── Initial convolution ─────────────────────────────────────────────────
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         scale_channels(32), 3, padding="same",
         kernel_initializer="he_normal", use_bias=False,
         name="init_conv"
     )(inputs)
-    x = tf.keras.layers.BatchNormalization(name="init_bn")(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name="init_relu6")(x)
+    x = keras.layers.BatchNormalization(name="init_bn")(x)
+    x = keras.layers.ReLU(max_value=6.0, name="init_relu6")(x)
     
     # ── Inverted residual blocks (progressive expansion) ───────────────────
     # Block configuration: (filters, expansion, stride, use_se)
@@ -216,24 +223,24 @@ def create_digit_recognizer_v32_teacher(
     x = keras.layers.Flatten(name="flatten")(x)
     
     # Dense head (larger than v16 for better capacity)
-    x = tf.keras.layers.Dense(
+    x = keras.layers.Dense(
         scale_channels(512), kernel_initializer="he_normal", name="dense_1"
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name="relu6_1")(x)
-    x = tf.keras.layers.Dropout(0.4, name="dropout_1")(x)
+    x = keras.layers.ReLU(max_value=6.0, name="relu6_1")(x)
+    x = keras.layers.Dropout(0.4, name="dropout_1")(x)
     
-    x = tf.keras.layers.Dense(
+    x = keras.layers.Dense(
         scale_channels(256), kernel_initializer="he_normal", name="dense_2"
     )(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name="relu6_2")(x)
-    x = tf.keras.layers.Dropout(0.3, name="dropout_2")(x)
+    x = keras.layers.ReLU(max_value=6.0, name="relu6_2")(x)
+    x = keras.layers.Dropout(0.3, name="dropout_2")(x)
     
     # Output (softmax, compatible with existing pipeline)
-    outputs = tf.keras.layers.Dense(
+    outputs = keras.layers.Dense(
         num_classes, activation="softmax", name="output"
     )(x)
     
-    model = tf.keras.Model(
+    model = keras.Model(
         inputs=inputs, outputs=outputs, name=f"teacher_v32_w{width_multiplier}"
     )
     
@@ -259,7 +266,7 @@ def create_v32_teacher_small(
     num_classes: int = None,
     input_shape: Tuple[int, int, int] = None,
     **kwargs
-) -> tf.keras.Model:
+) -> keras.Model:
     """Small V32 teacher (~v16 size but better architecture)."""
     return create_digit_recognizer_v32_teacher(
         num_classes=num_classes,
@@ -274,7 +281,7 @@ def create_v32_teacher_medium(
     num_classes: int = None,
     input_shape: Tuple[int, int, int] = None,
     **kwargs
-) -> tf.keras.Model:
+) -> keras.Model:
     """Medium V32 teacher (default, ~2x v16 size)."""
     return create_digit_recognizer_v32_teacher(
         num_classes=num_classes,
@@ -289,7 +296,7 @@ def create_v32_teacher_large(
     num_classes: int = None,
     input_shape: Tuple[int, int, int] = None,
     **kwargs
-) -> tf.keras.Model:
+) -> keras.Model:
     """Large V32 teacher (high capacity)."""
     return create_digit_recognizer_v32_teacher(
         num_classes=num_classes,
@@ -304,7 +311,7 @@ def create_v32_teacher_xl(
     num_classes: int = None,
     input_shape: Tuple[int, int, int] = None,
     **kwargs
-) -> tf.keras.Model:
+) -> keras.Model:
     """Extra large V32 teacher (maximum capacity)."""
     return create_digit_recognizer_v32_teacher(
         num_classes=num_classes,
@@ -323,7 +330,7 @@ create_v32_teacher = create_v32_teacher_medium
 # QAT Wrapper
 # ---------------------------------------------------------------------------
 
-def create_qat_model(base_model: Optional[tf.keras.Model] = None) -> tf.keras.Model:
+def create_qat_model(base_model: Optional[keras.Model] = None) -> keras.Model:
     """
     Wrap V32 teacher for Quantization-Aware Training.
     """

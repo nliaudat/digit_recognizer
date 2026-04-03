@@ -148,8 +148,8 @@ class MultiSourceDataLoader:
     def load_builtin_dataset(self, dataset_name):
         """Load built-in datasets"""
         if dataset_name.lower() == 'mnist':
-            import tensorflow as tf
-            (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+            from utils.keras_helper import keras
+            (x_train, y_train), (x_test, y_test) = keras.datasets.mnist.load_data()
             
             # Combine train and test
             images = np.concatenate([x_train, x_test])

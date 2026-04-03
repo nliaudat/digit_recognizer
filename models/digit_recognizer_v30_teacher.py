@@ -19,6 +19,7 @@ Note on EfficientNetB0 ImageNet weights:
 """
 
 import tensorflow as tf
+from utils.keras_helper import keras
 from typing import Tuple, Optional, Dict, Any
 import sys
 from pathlib import Path
@@ -42,7 +43,7 @@ def create_digit_recognizer_v30_teacher(
     input_shape: Tuple[int, int, int] = None,
     pretrained: bool = True,
     freeze_backbone: bool = False,
-) -> tf.keras.Model:
+) -> keras.Model:
     """
     Factory for the V30 Teacher (EfficientNetB0).
 
@@ -66,13 +67,13 @@ def create_digit_recognizer_v30_teacher(
         input_shape = params.INPUT_SHAPE
 
     h, w, c = input_shape
-    inputs = tf.keras.Input(shape=input_shape, name="input")
+    inputs = keras.Input(shape=input_shape, name="input")
 
     # ── Channel expansion for grayscale ──────────────────────────────────────
     # EfficientNetB0 expects 3-channel input.
     # Learned 1×1 conv: no bias, no activation — pure linear projection.
     if c == 1:
-        x = tf.keras.layers.Conv2D(
+        x = keras.layers.Conv2D(
             3, 1, padding="same", use_bias=False, name="gray_to_rgb"
         )(inputs)
     else:
@@ -80,7 +81,7 @@ def create_digit_recognizer_v30_teacher(
 
     # ── Upsample to satisfy EfficientNetB0 minimum resolution ────────────────
     if h < 32 or w < 32:
-        x = tf.keras.layers.Resizing(
+        x = keras.layers.Resizing(
             max(h, 32), max(w, 32), name="spatial_upscale"
         )(x)
 
@@ -90,7 +91,6 @@ def create_digit_recognizer_v30_teacher(
     effnet_shape = (max(h, 32), max(w, 32), 3)
     print(f"DEBUG inside v30_teacher: incoming c={c}, effnet_shape={effnet_shape}")
     
-    from utils.keras_helper import keras
     try:
         backbone = keras.applications.EfficientNetB0(
             include_top=False,
@@ -145,7 +145,7 @@ def create_digit_recognizer_v30_teacher(
 # QAT wrapper  (same pattern as v16)
 # ---------------------------------------------------------------------------
 
-def create_qat_model(base_model: Optional[tf.keras.Model] = None) -> tf.keras.Model:
+def create_qat_model(base_model: Optional[keras.Model] = None) -> keras.Model:
     """
     Wrap the V30 teacher for Quantization-Aware Training.
 
@@ -181,7 +181,7 @@ def create_v30_teacher(
     input_shape: Tuple[int, int, int] = (32, 20, 3),
     pretrained: bool = True,
     freeze_backbone: bool = False,
-) -> tf.keras.Model:
+) -> keras.Model:
     """Alias used by the distillation pipeline."""
     return create_digit_recognizer_v30_teacher(
         num_classes=num_classes,

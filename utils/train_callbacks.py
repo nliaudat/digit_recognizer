@@ -6,6 +6,7 @@ Handles: early stopping, model checkpointing, LR scheduling, CSV logging, etc.
 
 import os
 import tensorflow as tf
+from utils.keras_helper import keras
 from utils.train_checkpoint import TFLiteCheckpoint
 from utils.train_progressbar import TQDMProgressBar
 
@@ -21,7 +22,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         mode = 'max' if 'accuracy' in params.EARLY_STOPPING_MONITOR else 'min'
             
         callbacks.append(
-            tf.keras.callbacks.EarlyStopping(
+            keras.callbacks.EarlyStopping(
                 monitor=params.EARLY_STOPPING_MONITOR,
                 patience=params.EARLY_STOPPING_PATIENCE,
                 min_delta=params.EARLY_STOPPING_MIN_DELTA,
@@ -44,7 +45,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     
     # Best model checkpoint
     callbacks.append(
-        tf.keras.callbacks.ModelCheckpoint(
+        keras.callbacks.ModelCheckpoint(
             filepath=os.path.join(output_dir, "best_model.keras"),
             monitor='val_accuracy',
             save_best_only=True,
@@ -72,13 +73,13 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         # Phase-0 scheduler is activated in DynamicSchedulerController.on_train_begin;
         # register the proxy as a LearningRateScheduler now so Keras picks it up.
         callbacks.append(
-            tf.keras.callbacks.LearningRateScheduler(lr_proxy, verbose=0)
+            keras.callbacks.LearningRateScheduler(lr_proxy, verbose=0)
         )
         # Also keep ReduceLROnPlateau if the sequence contains it, so it still operates
         # as an additional layer of decay within the reduce_on_plateau phases.
         if 'reduce_on_plateau' in getattr(params, 'LR_SCHEDULER_SEQUENCE', []):
             callbacks.append(
-                tf.keras.callbacks.ReduceLROnPlateau(
+                keras.callbacks.ReduceLROnPlateau(
                     monitor=params.LR_SCHEDULER_MONITOR,
                     factor=params.LR_SCHEDULER_FACTOR,
                     patience=params.LR_SCHEDULER_PATIENCE,
@@ -98,17 +99,17 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         decay_steps  = max(1, total_epochs - warmup_steps)
         min_lr = getattr(params, 'COSINE_DECAY_ALPHA', 1e-6)
         peak_lr = params.LEARNING_RATE
-        warmup_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
+        warmup_schedule = keras.optimizers.schedules.PolynomialDecay(
             initial_learning_rate=peak_lr * 0.1, decay_steps=warmup_steps,
             end_learning_rate=peak_lr, power=1.0,
         )
-        cosine_schedule = tf.keras.optimizers.schedules.CosineDecay(
+        cosine_schedule = keras.optimizers.schedules.CosineDecay(
             initial_learning_rate=peak_lr, decay_steps=decay_steps, alpha=min_lr / peak_lr,
         )
         def _onecycle_lr(epoch):
             return float(warmup_schedule(epoch) if epoch < warmup_steps
                          else cosine_schedule(epoch - warmup_steps))
-        callbacks.append(tf.keras.callbacks.LearningRateScheduler(_onecycle_lr, verbose=0))
+        callbacks.append(keras.callbacks.LearningRateScheduler(_onecycle_lr, verbose=0))
         if debug:
             print(f"🔁 OneCycleLR scheduler added (warmup={warmup_steps} epochs → "
                   f"peak {peak_lr:.2e}, then cosine → {min_lr:.0e})")
@@ -116,14 +117,14 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     elif scheduler_type == 'cosine':
         # CosineDecayRestarts: cyclic warm restarts to escape local minima.
         first_decay_steps = max(1, getattr(params, 'LR_WARMUP_EPOCHS', 10))
-        lr_schedule = tf.keras.optimizers.schedules.CosineDecayRestarts(
+        lr_schedule = keras.optimizers.schedules.CosineDecayRestarts(
             initial_learning_rate=params.LEARNING_RATE,
             first_decay_steps=first_decay_steps,
             t_mul=2.0, m_mul=0.9,
             alpha=getattr(params, 'COSINE_DECAY_ALPHA', 1e-6),
         )
         callbacks.append(
-            tf.keras.callbacks.LearningRateScheduler(
+            keras.callbacks.LearningRateScheduler(
                 lambda epoch: float(lr_schedule(epoch)), verbose=0,
             )
         )
@@ -133,7 +134,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
 
     elif scheduler_type == 'exponential':
         callbacks.append(
-            tf.keras.callbacks.LearningRateScheduler(
+            keras.callbacks.LearningRateScheduler(
                 lambda epoch: params.LEARNING_RATE * (params.EXPONENTIAL_DECAY_RATE ** (epoch // params.EXPONENTIAL_DECAY_STEPS)),
                 verbose=0,
             )
@@ -143,7 +144,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
 
     elif scheduler_type == 'step':
         callbacks.append(
-            tf.keras.callbacks.LearningRateScheduler(
+            keras.callbacks.LearningRateScheduler(
                 lambda epoch: params.LEARNING_RATE * (params.STEP_DECAY_GAMMA ** (epoch // params.STEP_DECAY_STEP_SIZE)),
                 verbose=0,
             )
@@ -153,7 +154,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
 
     else:  # 'reduce_on_plateau' (default / fallback)
         callbacks.append(
-            tf.keras.callbacks.ReduceLROnPlateau(
+            keras.callbacks.ReduceLROnPlateau(
                 monitor=params.LR_SCHEDULER_MONITOR,
                 factor=params.LR_SCHEDULER_FACTOR,
                 patience=params.LR_SCHEDULER_PATIENCE,
@@ -203,7 +204,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         if debug:
             print(f"🔄 Using fallback path: {csv_path}")
     
-    csv_logger = tf.keras.callbacks.CSVLogger(
+    csv_logger = keras.callbacks.CSVLogger(
         filename=csv_path,
         separator=',',
         append=False
@@ -253,7 +254,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
 
     # TensorBoard Logger
     tb_log_dir = os.path.join(output_dir, 'tensorboard_logs')
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(
+    tensorboard_callback = keras.callbacks.TensorBoard(
         log_dir=tb_log_dir,
         histogram_freq=1 if debug else 0,
         update_freq='epoch'

@@ -28,10 +28,11 @@ Notes:
 Estimated: ~300K+ parameters → not intended for ESP32.
 """
 
-import tensorflow as tf
 import parameters as params
-from tensorflow.keras import layers, Model
-import tensorflow.keras.backend as K
+from utils.keras_helper import keras
+layers = keras.layers
+Model = keras.Model
+K = keras.backend
 
 class AttentionModule(layers.Layer):
     """Squeeze-and-Excitation Attention for channel-wise feature recalibration"""
@@ -92,14 +93,14 @@ class ResidualUnit(layers.Layer):
 class SwishLayer(layers.Layer):
     """Custom layer for Swish activation"""
     def call(self, inputs):
-        return tf.nn.swish(inputs)
+        return keras.activations.swish(inputs)
 
 def create_digit_recognizer_v8():
     """
     State-of-the-art digit recognizer with residual connections and attention
     Target: Maximum accuracy on 32x20 images
     """
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
     
     # Initial stem with aggressive feature extraction
     x = layers.Conv2D(32, 3, strides=1, padding='same', use_bias=False,
@@ -152,7 +153,7 @@ def create_digit_recognizer_v8():
     outputs = layers.Dense(params.NB_CLASSES, activation='softmax', 
                           name='output')(x)
     
-    return tf.keras.Model(inputs, outputs, name="digit_recognizer_v8")
+    return keras.Model(inputs, outputs, name="digit_recognizer_v8")
 
 if __name__ == "__main__":
     model = create_digit_recognizer_v8()

@@ -8,8 +8,9 @@ import numpy as np
 from datetime import datetime
 from tqdm.auto import tqdm
 import tensorflow as tf
+from utils.keras_helper import keras
 
-class TQDMProgressBar(tf.keras.callbacks.Callback):
+class TQDMProgressBar(keras.callbacks.Callback):
     """
     Parameters
     ----------

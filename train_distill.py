@@ -102,7 +102,7 @@ logger = logging.getLogger(__name__)
 # CLI
 # ---------------------------------------------------------------------------
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(
         description="Digit Recognition Knowledge Distillation Pipeline"
     )
@@ -140,7 +140,9 @@ def main():
 
     # ── Model selection ────────────────────────────────────────────────────
     parser.add_argument(
+        "--teacher",
         "--teachers",
+        dest="teachers",
         type=str,
         nargs="+",
         default=["v30"],

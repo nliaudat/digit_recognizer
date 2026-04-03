@@ -15,13 +15,14 @@ import argparse
 
 from models.model_factory import create_model, compile_model
 from utils.preprocess import preprocess_for_inference
+from utils.keras_helper import keras
 
 
 # ============================================================================
 # CUSTOM LAYERS (Copied from models to avoid dependencies)
 # ============================================================================
 
-class AdaptiveHybridBinarization(tf.keras.layers.Layer):
+class AdaptiveHybridBinarization(keras.layers.Layer):
     """
     Hybrid approach: outputs both binary (for shape) AND soft gradient (for transition).
     Copied from models.digit_recognizer_v29 to avoid circular or missing dependencies.
@@ -58,17 +59,7 @@ class GradCAM:
         self.model = model
         self.grad_model = None
         
-        # Detect which Keras engine to use based on the model
-        model_module = model.__class__.__module__
-        if "tf_keras" in model_module:
-            import tf_keras
-            self.keras = tf_keras
-        elif "keras" in model_module:
-            import keras
-            self.keras = keras
-        else:
-            import tensorflow as tf
-            self.keras = tf.keras
+        self.keras = keras
         print(f"GradCAM using engine: {self.keras.__name__}")
 
         self.target_layer = self._find_target_layer(layer_name)
@@ -214,19 +205,7 @@ def load_model_and_weights(model_arch, weights_path=None):
     import tensorflow as tf
     import parameters as params
     
-    # Try multiple keras engines for loading
-    engines = []
-    try:
-        import keras as k3
-        engines.append(('keras3', k3))
-    except ImportError:
-        pass
-    try:
-        import tf_keras as k2
-        engines.append(('tf_keras', k2))
-    except ImportError:
-        pass
-    engines.append(('tf.keras', tf.keras))
+    engines = [('keras', keras)]
         
     params.MODEL_ARCHITECTURE = model_arch
     params.update_derived_parameters()
@@ -305,7 +284,7 @@ def get_binarization_overlap(model, image_input):
         # Try to find a normalization layer (v28/v29)
         norm_layer_name = 'polarity_norm'
         if norm_layer_name in [l.name for l in model.layers]:
-            intermediate_model = tf.keras.Model(model.input, model.get_layer(norm_layer_name).output)
+            intermediate_model = keras.Model(model.input, model.get_layer(norm_layer_name).output)
             return intermediate_model.predict(image_input, verbose=0)[0]
     except Exception as e:
         print(f"Could not extract binarization: {e}")

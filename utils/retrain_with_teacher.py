@@ -12,6 +12,7 @@ import json
 import re
 import tensorflow as tf
 import numpy as np
+from utils.keras_helper import keras
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
@@ -243,7 +244,7 @@ def load_or_create_model(
     num_classes: int,
     color_mode: str,
     load_path: Optional[str] = None
-) -> tf.keras.Model:
+) -> keras.Model:
     """
     Load existing model or create new one.
     """
@@ -255,24 +256,25 @@ def load_or_create_model(
     # Create model dynamically
     model = create_model_by_name(model_name, num_classes=num_classes, input_shape=input_shape)
     
+    # Load weights if provided BEFORE wrapping for QAT
+    # This prevents the "quantize_layer expected 3 variables but received 0" error
+    if load_path and os.path.exists(load_path):
+        logger.info(f"Loading weights from {load_path}")
+        model.load_weights(load_path)
+
     # Wrap for QAT if active in parameters
     if getattr(params, 'USE_QAT', False) and getattr(params, 'QUANTIZE_MODEL', False):
         from utils.train_qat_helper import create_qat_model
         logger.info(f"🎯 Wrapping student {model_name} for QAT...")
         model = create_qat_model(model)
-
-    # Load weights if provided
-    if load_path and os.path.exists(load_path):
-        logger.info(f"Loading weights from {load_path}")
-        model.load_weights(load_path)
     
     logger.info(f"Model: {model_name}, params: {model.count_params():,}")
     return model
 
 
 def retrain_with_teacher(
-    model: tf.keras.Model,
-    teacher: tf.keras.Model,
+    model: keras.Model,
+    teacher: keras.Model,
     x_train: np.ndarray,
     y_train: np.ndarray,
     x_val: np.ndarray,
@@ -343,7 +345,7 @@ def retrain_with_teacher(
             )
     
     distiller.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=args.lr),
+        optimizer=keras.optimizers.Adam(learning_rate=args.lr),
         metrics=["accuracy"],
     )
     
@@ -364,13 +366,13 @@ def retrain_with_teacher(
     
     callbacks = [
         DistillationProgressCallback(),  # Sync current_epoch for schedules
-        tf.keras.callbacks.ReduceLROnPlateau(
+        keras.callbacks.ReduceLROnPlateau(
             monitor="val_accuracy", factor=0.5, patience=3, min_lr=1e-6, verbose=1
         ),
-        tf.keras.callbacks.EarlyStopping(
+        keras.callbacks.EarlyStopping(
             monitor="val_accuracy", patience=10, restore_best_weights=True, verbose=1
         ),
-        tf.keras.callbacks.ModelCheckpoint(
+        keras.callbacks.ModelCheckpoint(
             ckpt_path, monitor="val_accuracy", save_best_only=True, verbose=1
         ),
     ]
@@ -473,8 +475,23 @@ def main():
             "DynamicSparseFocalLoss": DynamicSparseFocalLoss,
             "DynamicFocalLoss": DynamicFocalLoss,
             "sparse_focal_loss": sparse_focal_loss,
-            "focal_loss": focal_loss
+            "focal_loss": focal_loss,
+            # Handle Keras 3 InputLayer patterns in Keras 2 (tf-keras)
+            "InputLayer": keras.layers.InputLayer,
+            "Input": keras.layers.InputLayer
         }
+        
+        # Add Functional to custom_objects just in case backend patches miss it
+        try:
+             from tf_keras.src.engine.functional import Functional
+             custom_objects["Functional"] = Functional
+        except ImportError:
+             try:
+                 from keras.src.engine.functional import Functional
+                 custom_objects["Functional"] = Functional
+             except ImportError:
+                 pass
+                 
         # Auto-inject any custom layers from the teacher's script
         clean_name = args.teacher.replace('digit_recognizer_', '').replace('_teacher', '')
         for prefix in ["models.", "models.digit_recognizer_"]:
@@ -482,13 +499,13 @@ def main():
                 import importlib, inspect
                 mod = importlib.import_module(f"{prefix}{clean_name}")
                 for name, obj in inspect.getmembers(mod, inspect.isclass):
-                    if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
+                    if issubclass(obj, keras.layers.Layer) and obj is not keras.layers.Layer:
                         custom_objects[name] = obj
                 break # Success
             except (ModuleNotFoundError, Exception):
                 continue
             
-        teacher = tf.keras.models.load_model(actual_teacher_checkpoint, custom_objects=custom_objects, safe_mode=False)
+        teacher = keras.robust_load_model(actual_teacher_checkpoint, custom_objects=custom_objects, safe_mode=False)
     else:
         logger.warning(f"No trained teacher found for {args.teacher}. Using random-weight teacher (not recommended!)")
         teacher = create_model_by_name(

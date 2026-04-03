@@ -22,8 +22,8 @@ Notes:
 Estimated: ~250K parameters → ~250 KB after INT8 quantization.
 """
 
-import tensorflow as tf
 import parameters as params
+from utils.keras_helper import keras
 
 def create_esp_quantization_ready_v3():
     """
@@ -33,57 +33,57 @@ def create_esp_quantization_ready_v3():
     - Dropout for better generalization
     - Still quantization-friendly
     """
-    model = tf.keras.Sequential([
-        tf.keras.layers.Input(shape=params.INPUT_SHAPE),
+    model = keras.Sequential([
+        keras.layers.Input(shape=params.INPUT_SHAPE),
         
         # First conv layer - increased filters
-        tf.keras.layers.Conv2D(
+        keras.layers.Conv2D(
             64, (3, 3), padding='same',
             kernel_initializer='he_normal',
-            kernel_regularizer=tf.keras.regularizers.l2(0.001),
+            kernel_regularizer=keras.regularizers.l2(0.001),
             use_bias=True,
             name='conv1'
         ),
-        tf.keras.layers.ReLU(name='relu1'),
-        tf.keras.layers.MaxPooling2D((2, 2), name='pool1'),
+        keras.layers.ReLU(name='relu1'),
+        keras.layers.MaxPooling2D((2, 2), name='pool1'),
         
         # Second conv layer
-        tf.keras.layers.Conv2D(
+        keras.layers.Conv2D(
             128, (3, 3), padding='same',
             kernel_initializer='he_normal',
-            kernel_regularizer=tf.keras.regularizers.l2(0.001),
+            kernel_regularizer=keras.regularizers.l2(0.001),
             use_bias=True,
             name='conv2'
         ),
-        tf.keras.layers.ReLU(name='relu2'),
-        tf.keras.layers.MaxPooling2D((2, 2), name='pool2'),
+        keras.layers.ReLU(name='relu2'),
+        keras.layers.MaxPooling2D((2, 2), name='pool2'),
         
         # Third conv layer - depthwise separable for efficiency
-        tf.keras.layers.DepthwiseConv2D(
+        keras.layers.DepthwiseConv2D(
             (3, 3), padding='same',
             depthwise_initializer='he_normal',
-            depthwise_regularizer=tf.keras.regularizers.l2(0.001),
+            depthwise_regularizer=keras.regularizers.l2(0.001),
             use_bias=True,
             name='depthwise1'
         ),
-        tf.keras.layers.ReLU(name='depthwise_relu1'),
-        tf.keras.layers.Conv2D(
+        keras.layers.ReLU(name='depthwise_relu1'),
+        keras.layers.Conv2D(
             128, (1, 1),
             kernel_initializer='he_normal',
-            kernel_regularizer=tf.keras.regularizers.l2(0.001),
+            kernel_regularizer=keras.regularizers.l2(0.001),
             use_bias=True,
             name='pointwise1'
         ),
-        tf.keras.layers.ReLU(name='relu3'),
+        keras.layers.ReLU(name='relu3'),
         
         # Global average pooling
-        tf.keras.layers.GlobalAveragePooling2D(name='gap'),
+        keras.layers.GlobalAveragePooling2D(name='gap'),
         
         # Dropout for regularization (removed during quantization)
-        tf.keras.layers.Dropout(0.2, name='dropout1'),
+        keras.layers.Dropout(0.2, name='dropout1'),
         
         # Output layer
-        tf.keras.layers.Dense(params.NB_CLASSES, activation='softmax', name='output')
+        keras.layers.Dense(params.NB_CLASSES, activation='softmax', name='output')
     ])
     
     return model

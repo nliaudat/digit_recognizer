@@ -21,8 +21,8 @@ Reference: https://www.tensorflow.org/model_optimization/guide/quantization/trai
 Estimated: ~50K parameters → ~50 KB after INT8 quantization.
 """
 
-import tensorflow as tf
 import parameters as params
+from utils.keras_helper import keras
 
 def create_digit_recognizer_v2():
     """
@@ -36,29 +36,29 @@ def create_digit_recognizer_v2():
     """
     def relu6(x, name=None):
         # Equivalent to tf.nn.relu6(x) but ensures ops are supported everywhere
-        return tf.clip_by_value(tf.nn.relu(x), 0.0, 6.0, name=name)
+        return keras.ops.clip(keras.activations.relu(x), 0.0, 6.0)
 
-    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    inputs = keras.Input(shape=params.INPUT_SHAPE, name='input')
 
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         32, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv1'
     )(inputs)
     x = relu6(x, name='relu6_1')
-    x = tf.keras.layers.MaxPooling2D((2, 2), name='pool1')(x)
+    x = keras.layers.MaxPooling2D((2, 2), name='pool1')(x)
 
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         64, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
         name='conv2'
     )(x)
     x = relu6(x, name='relu6_2')
-    x = tf.keras.layers.MaxPooling2D((2, 2), name='pool2')(x)
+    x = keras.layers.MaxPooling2D((2, 2), name='pool2')(x)
 
-    x = tf.keras.layers.Conv2D(
+    x = keras.layers.Conv2D(
         64, (3, 3), padding='same',
         kernel_initializer='he_normal',
         use_bias=True,
@@ -66,9 +66,9 @@ def create_digit_recognizer_v2():
     )(x)
     x = relu6(x, name='relu6_3')
 
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
-    outputs = tf.keras.layers.Dense(params.NB_CLASSES, activation='softmax', name='output')(x)
+    x = keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    outputs = keras.layers.Dense(params.NB_CLASSES, activation='softmax', name='output')(x)
 
-    model = tf.keras.Model(inputs, outputs, name="digit_recognizer_v2")
+    model = keras.Model(inputs, outputs, name="digit_recognizer_v2")
 
     return model
