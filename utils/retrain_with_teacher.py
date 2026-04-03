@@ -470,18 +470,17 @@ def main():
             "focal_loss": focal_loss
         }
         # Auto-inject any custom layers from the teacher's script
-        try:
-            import importlib, inspect
-            clean_name = args.teacher.replace('digit_recognizer_', '').replace('_teacher', '')
+        clean_name = args.teacher.replace('digit_recognizer_', '').replace('_teacher', '')
+        for prefix in ["models.", "models.digit_recognizer_"]:
             try:
-                mod = importlib.import_module(f"models.{clean_name}")
-            except ModuleNotFoundError:
-                mod = importlib.import_module(f"models.digit_recognizer_{clean_name}")
-            for name, obj in inspect.getmembers(mod, inspect.isclass):
-                if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
-                    custom_objects[name] = obj
-        except Exception as e:
-            logger.warning(f"Could not auto-import custom layers from {args.teacher}: {e}")
+                import importlib, inspect
+                mod = importlib.import_module(f"{prefix}{clean_name}")
+                for name, obj in inspect.getmembers(mod, inspect.isclass):
+                    if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
+                        custom_objects[name] = obj
+                break # Success
+            except (ModuleNotFoundError, Exception):
+                continue
             
         teacher = tf.keras.models.load_model(actual_teacher_checkpoint, custom_objects=custom_objects, safe_mode=False)
     else:

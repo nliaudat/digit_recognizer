@@ -15,6 +15,22 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def create_tflite_interpreter(model_path):
+    """
+    Centralized way to create a TFLite interpreter with the correct options.
+    Specifically, it disables default delegates like XNNPACK which can
+    silently fail on non-XNNPACK compatible models (like TFLM on ESP32).
+    """
+    kwargs = {"model_path": str(model_path)}
+    # Disable XNNPACK which causes silent failures on non-XNNPACK targets
+    kwargs["experimental_op_resolver_type"] = (
+        tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+    )
+    interp = tf.lite.Interpreter(**kwargs)
+    interp.allocate_tensors()
+    return interp
+
+
 def freeze_teacher_model(teacher: tf.keras.Model) -> tf.keras.Model:
     """
     Freeze teacher model for distillation.
@@ -100,7 +116,7 @@ def export_student_for_edge(
         shape[0] = 1
         def _gen():
             for _ in range(100):
-                yield [np.random.randn(*shape).astype(np.float32)]
+                yield [np.random.uniform(0.0, 1.0, size=shape).astype(np.float32)]
         return _gen
 
     rep_gen = None
