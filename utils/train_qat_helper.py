@@ -54,16 +54,8 @@ def apply_qat_to_model(model) -> tf.keras.Model:
         # Check if the model itself is compatible with the active Keras (should be Keras 2 if QAT=True)
         # However, if we receive a Keras 3 model, we must be careful.
         
-        # Annotate the model for quantization
-        # Note: In tfmot 0.8.0, quantize_annotate is at tfmot.quantization.keras.quantize_annotate
-        annotated_model = tfmot.quantization.keras.quantize_annotate(model)
-        
-        # Apply quantization with the default 8-bit cluster preset
-        qat_model = tfmot.quantization.keras.quantize_apply(
-            annotated_model,
-            tfmot.experimental.combine.Default8BitClusterPreset()
-        )
-        return qat_model
+        # Apply standard quantization aware training for TFLite Micro compatibility
+        return tfmot.quantization.keras.quantize_model(model)
     except Exception as e:
         print(f"❌ QAT application failed: {e}")
         # Final fallback - try simple quantize_model if annotate/apply fails

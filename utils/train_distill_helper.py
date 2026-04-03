@@ -713,21 +713,29 @@ def run_distillation_pipeline(
     # Save model summary
     save_model_summary_to_file(student, output_dir)
     
-    # Copy logs/plots from checkpoint_dir
-    for file in ["training_history.png", "training_log.csv"]:
-        src = os.path.join(checkpoint_dir, file)
-        if os.path.exists(src):
-            shutil.copy(src, os.path.join(output_dir, file))
+    # Copy logs/plots from checkpoint_dir IF they are not already in output_dir
+    if checkpoint_dir != output_dir:
+        for file in ["training_history.png", "training_log.csv"]:
+            src = os.path.join(checkpoint_dir, file)
+            dst = os.path.join(output_dir, file)
+            if os.path.exists(src) and src != dst:
+                shutil.copy(src, dst)
             
-    # Generate Confusion Matrix
-    analysis_dir = os.path.join(output_dir, "analysis")
-    os.makedirs(analysis_dir, exist_ok=True)
-    analyze_confusion_matrix(student, x_test, y_test, save_path=analysis_dir)
+    # Generate Confusion Matrix (wrap in try/except for safety)
+    try:
+        analysis_dir = os.path.join(output_dir, "analysis")
+        os.makedirs(analysis_dir, exist_ok=True)
+        analyze_confusion_matrix(student, x_test, y_test, save_path=analysis_dir)
+    except Exception as e:
+        logger.warning(f"⚠️ Could not generate confusion matrix: {e}")
 
     # Generate Detailed Training plot from CSV if possible
-    csv_log = os.path.join(output_dir, "training_log.csv")
-    if os.path.exists(csv_log):
-        analyze_training_history(csv_log, save_path=analysis_dir)
+    try:
+        csv_log = os.path.join(output_dir, "training_log.csv")
+        if os.path.exists(csv_log):
+            analyze_training_history(csv_log, save_path=analysis_dir)
+    except Exception as e:
+        logger.warning(f"⚠️ Could not generate training history plot: {e}")
         
     logger.info(f"Results saved → {results_path}")
     

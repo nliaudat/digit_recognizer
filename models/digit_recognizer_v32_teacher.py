@@ -20,13 +20,12 @@ Why this design:
 
 import sys
 from pathlib import Path
+from typing import Tuple
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.keras_helper import keras, tfmot
-QAT_AVAILABLE = (tfmot is not None)
-
 import parameters as params
+from utils.keras_helper import keras
 
 
 # ---------------------------------------------------------------------------
@@ -48,14 +47,16 @@ def squeeze_excite_block(
     """
     channels = int(x.shape[-1])
     # keepdims=True → output is (batch, 1, 1, C), no Reshape needed
+    # Squeeze: Global Average Pool
+    # use keepdims=True in GlobalAveragePooling2D to output shape (B, 1, 1, C)
     se = keras.layers.GlobalAveragePooling2D(
-        keepdims=True, name=f"{name_prefix}_gap"
+        keepdims=True, name=f"{name_prefix}_se_gap"
     )(x)
     se = keras.layers.Conv2D(
         max(1, channels // reduction), 1, activation="relu",
         kernel_initializer="he_normal", name=f"{name_prefix}_reduce"
     )(se)
-    se = tf.keras.layers.Conv2D(
+    se = keras.layers.Conv2D(
         channels, 1, activation="sigmoid",
         kernel_initializer="he_normal", name=f"{name_prefix}_expand"
     )(se)
@@ -210,7 +211,9 @@ def create_digit_recognizer_v32_teacher(
         )
     
     # ── Final pooling and classification ────────────────────────────────────
-    x = tf.keras.layers.GlobalAveragePooling2D(name="gap")(x)
+    # Use keepdims=True + Flatten to help TFLite avoid certain rank-changing Reshape ops
+    x = keras.layers.GlobalAveragePooling2D(keepdims=True, name="gap")(x)
+    x = keras.layers.Flatten(name="flatten")(x)
     
     # Dense head (larger than v16 for better capacity)
     x = tf.keras.layers.Dense(
