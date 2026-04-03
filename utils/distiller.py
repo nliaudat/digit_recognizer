@@ -459,10 +459,11 @@ class EnsembleDistiller(Distiller):
         grads = tape.gradient(loss, trainable_vars)
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
         
-        # 9. Update metrics
+        # Update metrics
         results = self.compute_metrics(x, y, student_logits)
         
-        self.current_epoch += 1
+        # NOTE: current_epoch should NOT be incremented here (batch-level).
+        # It is managed by DistillationProgressCallback on_epoch_begin.
         
         # Return results including our custom losses
         results.update({

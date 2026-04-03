@@ -687,15 +687,8 @@ class TFLiteModelManager:
     def test_tflite_model(self, tflite_path: str) -> bool:
         """Load a TFLite model and (optionally) print a short summary."""
         try:
-            interpreter = tf.lite.Interpreter(model_path=tflite_path)
-            try:
-                interpreter.allocate_tensors()
-            except Exception as e:
-                msg = str(e).lower()
-                if "xnnpack" in msg or "delegate" in msg:
-                    print(f"⚠️  TFLite test warning (non-fatal): {e}")
-                else:
-                    raise e
+            from utils.model_distiller_utils import create_tflite_interpreter
+            interpreter = create_tflite_interpreter(tflite_path)
 
             if self.debug:
                 input_details = interpreter.get_input_details()

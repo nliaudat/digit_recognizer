@@ -528,17 +528,16 @@ def run_distillation_pipeline(
                 "focal_loss": focal_loss
             }
             # Auto-inject any custom layers from the teacher's script
-            try:
-                clean_name = t_type.replace('digit_recognizer_', '').replace('_teacher', '')
+            clean_name = t_type.replace('digit_recognizer_', '').replace('_teacher', '')
+            for prefix in ["models.", "models.digit_recognizer_"]:
                 try:
-                    mod = importlib.import_module(f"models.{clean_name}")
-                except ModuleNotFoundError:
-                    mod = importlib.import_module(f"models.digit_recognizer_{clean_name}")
-                for name, obj in inspect.getmembers(mod, inspect.isclass):
-                    if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
-                        custom_objects[name] = obj
-            except Exception as e:
-                logger.warning(f"Could not auto-import custom layers from {t_type}: {e}")
+                    mod = importlib.import_module(f"{prefix}{clean_name}")
+                    for name, obj in inspect.getmembers(mod, inspect.isclass):
+                        if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
+                            custom_objects[name] = obj
+                    break # Success
+                except (ModuleNotFoundError, Exception):
+                    continue
 
             t_model = tf.keras.models.load_model(t_checkpoint, custom_objects=custom_objects, safe_mode=False)
         else:
@@ -704,37 +703,31 @@ def run_distillation_pipeline(
         json.dump(results, f, indent=2)
     
     # ── 7. Generate Training Resume (parity with train.py) ───────────────
-    try:
-        from utils.train_helpers import save_model_summary_to_file
-        from utils.train_analyse import analyze_confusion_matrix, analyze_training_history
-        import shutil
-        
-        # Save standard best_model.keras in the root
-        student.save(os.path.join(output_dir, "best_model.keras"))
-        
-        # Save model summary
-        save_model_summary_to_file(student, output_dir)
-        
-        # Copy logs/plots from checkpoint_dir
-        for file in ["training_history.png", "training_log.csv"]:
-            src = os.path.join(checkpoint_dir, file)
-            if os.path.exists(src):
-                shutil.copy(src, os.path.join(output_dir, file))
-                
-        # Generate Confusion Matrix
-        analysis_dir = os.path.join(output_dir, "analysis")
-        os.makedirs(analysis_dir, exist_ok=True)
-        analyze_confusion_matrix(student, x_test, y_test, save_path=analysis_dir)
-
-        # Generate Detailed Training plot from CSV if possible
-        csv_log = os.path.join(output_dir, "training_log.csv")
-        if os.path.exists(csv_log):
-            analyze_training_history(csv_log, save_path=analysis_dir)
+    from utils.train_helpers import save_model_summary_to_file
+    from utils.train_analyse import analyze_confusion_matrix, analyze_training_history
+    import shutil
+    
+    # Save standard best_model.keras in the root
+    student.save(os.path.join(output_dir, "best_model.keras"))
+    
+    # Save model summary
+    save_model_summary_to_file(student, output_dir)
+    
+    # Copy logs/plots from checkpoint_dir
+    for file in ["training_history.png", "training_log.csv"]:
+        src = os.path.join(checkpoint_dir, file)
+        if os.path.exists(src):
+            shutil.copy(src, os.path.join(output_dir, file))
             
-    except Exception as e:
-        logger.warning(f"Could not generate full training resume: {e}")
-        import traceback
-        traceback.print_exc()
+    # Generate Confusion Matrix
+    analysis_dir = os.path.join(output_dir, "analysis")
+    os.makedirs(analysis_dir, exist_ok=True)
+    analyze_confusion_matrix(student, x_test, y_test, save_path=analysis_dir)
+
+    # Generate Detailed Training plot from CSV if possible
+    csv_log = os.path.join(output_dir, "training_log.csv")
+    if os.path.exists(csv_log):
+        analyze_training_history(csv_log, save_path=analysis_dir)
         
     logger.info(f"Results saved → {results_path}")
     

@@ -41,32 +41,7 @@ import pandas as pd
 from PIL import Image
 import shutil
 
-def create_tflite_interpreter(model_path=None, model_content=None):
-    """Create a TFLite interpreter without XNNPACK delegates.
-
-    XNNPACK is a CPU-only acceleration library irrelevant to ESP32 deployment.
-    Using it in bench_predict caused silent failures (RuntimeError at invoke()
-    for models with ops not supported by XNNPACK INT8 kernels), which were
-    caught by the broad except in predict() and returned -1 for every image.
-
-    We skip XNNPACK entirely: correctness > speed for a PC benchmarking tool.
-    """
-    kwargs = {}
-    if model_path:
-        kwargs["model_path"] = model_path
-    else:
-        kwargs["model_content"] = model_content
-    kwargs["experimental_op_resolver_type"] = (
-        tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
-    )
-    try:
-        interp = tf.lite.Interpreter(**kwargs)
-        interp.allocate_tensors()
-        return interp
-    except Exception as e:
-        print(f"❌ Failed to load TFLite model: {e}")
-        raise e
-
+from utils.model_distiller_utils import create_tflite_interpreter
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
         self.model_path = model_path
@@ -415,7 +390,7 @@ def is_valid_tflite_model(model_path):
     except Exception as e:
         if "Flex" in str(e) or "Select TensorFlow op(s)" in str(e):
             print(f"⚠️  Skipping GPU-only or Flex-dependent model {os.path.basename(model_path)}")
-        elif "XNNPACK failed" not in str(e) and "Fallback failed" not in str(e):
+        else:
             print(f"❌ Invalid TFLite model {os.path.basename(model_path)}: {str(e).split(chr(10))[0][:150]}...")
         return False
 

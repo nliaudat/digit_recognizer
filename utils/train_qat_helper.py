@@ -34,38 +34,41 @@ from utils.preprocess import preprocess_for_training, preprocess_for_inference
 # --------------------------------------------------------------------------- #
 #  QAT model creation
 # --------------------------------------------------------------------------- #
-def create_qat_model() -> tf.keras.Model:
+def apply_qat_to_model(model: tf.keras.Model) -> tf.keras.Model:
     """
-    Create QAT model using quantization scope - the approach that works for your model.
+    Apply QAT wrappers using modern clustering presets.
     """
     try:
         import tensorflow_model_optimization as tfmot
         print(f"✅ QAT available: TF {tf.__version__}, TFMo {tfmot.__version__}")
-    except Exception as exc:
-        print("⚠️  QAT library not available – building a standard model")
-        from models import create_model
-        return create_model()
-
-    try:
-        # Use quantization scope - this works for your Functional model
-        with tfmot.quantization.keras.quantize_scope():
-            from models import create_model
-            qat_model = create_model()
-            print("✅ QAT model created with quantization scope")
-            
-            # Verify the model
-            if verify_qat_model(qat_model, debug=True):
-                print("🎯 QAT model verified successfully")
-            else:
-                print("⚠️  QAT model verification inconclusive - proceeding anyway")
-            
-            return qat_model
-            
+        # Annotate the model for quantization
+        annotated_model = tfmot.quantization.keras.quantize_annotate(model)
+        # Apply quantization with the default 8-bit cluster preset
+        qat_model = tfmot.quantization.keras.quantize_apply(
+            annotated_model,
+            tfmot.experimental.combine.Default8BitClusterPreset()
+        )
+        return qat_model
     except Exception as e:
-        print(f"❌ QAT failed: {e}")
-        print("🔄 Returning standard model without quantization")
+        print(f"❌ QAT application failed: {e}")
+        return model
+
+def create_qat_model(model: tf.keras.Model = None) -> tf.keras.Model:
+    """
+    Create a new model or wrap an existing one for QAT using the unified factory.
+    """
+    if model is None:
         from models import create_model
-        return create_model()
+        model = create_model()
+        
+    print(f"🎯 Wrapping {model.name if hasattr(model, 'name') else 'model'} for QAT...")
+    qat_model = apply_qat_to_model(model)
+    
+    # Optional verification
+    if verify_qat_model(qat_model, debug=True):
+        print("🎯 QAT model verified successfully")
+        
+    return qat_model
 
 
 def _rebuild_functional_model(original_model, annotated_layers):
@@ -168,7 +171,7 @@ def debug_preprocessing_flow():
     print("=" * 50)
     
     # Create test data
-    test_images_raw = np.random.randint(0, 255, (2, 28, 28, 1), dtype=np.uint8)
+    test_images_raw = np.random.randint(0, 255, (2, params.INPUT_HEIGHT, params.INPUT_WIDTH, params.INPUT_CHANNELS), dtype=np.uint8)
     print(f"Raw data range: [{test_images_raw.min()}, {test_images_raw.max()}]")
     print(f"Raw data dtype: {test_images_raw.dtype}")
     
