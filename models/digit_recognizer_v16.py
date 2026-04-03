@@ -115,7 +115,9 @@ def create_digit_recognizer_v16():
     x = tf.keras.layers.BatchNormalization(name='head_bn')(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='head_relu6')(x)
 
-    x = tf.keras.layers.GlobalAveragePooling2D(name='gap')(x)
+    # Final GAP - use keepdims=True to help TFLite avoid certain rank-changing Reshape ops
+    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='gap')(x)
+    x = tf.keras.layers.Flatten(name='flatten')(x)
 
     outputs = tf.keras.layers.Dense(
         params.NB_CLASSES, activation='softmax', name='output'
