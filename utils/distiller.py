@@ -170,9 +170,11 @@ class Distiller(tf.keras.Model):
         grads = tape.gradient(loss, trainable_vars)
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
 
-        # Return results including our custom losses
-        # self.compute_metrics returns a dict of results
-        results = self.compute_metrics(x, y, student_probs)
+        # Update compiled metrics (e.g. accuracy) using stateful update
+        self.compiled_metrics.update_state(y, student_probs)
+
+        # Build results dict: start with the scalar loss, then append metric states
+        results = {m.name: m.result() for m in self.metrics}
         results.update({
             "loss": loss,
             "student_loss": student_loss,
@@ -185,10 +187,14 @@ class Distiller(tf.keras.Model):
         x, y = data
         student_probs = self.student(x, training=False)
 
+        # Compute the plain cross-entropy loss against hard labels for monitoring
         loss = self.student_loss_fn(y, student_probs)
         
-        # self.compute_metrics returns a dict of results
-        results = self.compute_metrics(x, y, student_probs)
+        # Update compiled metrics (e.g. accuracy) using stateful update
+        self.compiled_metrics.update_state(y, student_probs)
+
+        # Build results dict: scalar loss + metric states
+        results = {m.name: m.result() for m in self.metrics}
         results["loss"] = loss
         return results
 
@@ -459,13 +465,14 @@ class EnsembleDistiller(Distiller):
         grads = tape.gradient(loss, trainable_vars)
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
         
-        # Update metrics
-        results = self.compute_metrics(x, y, student_logits)
-        
+        # Update compiled metrics (e.g. accuracy) using stateful update
+        self.compiled_metrics.update_state(y, student_logits)
+
         # NOTE: current_epoch should NOT be incremented here (batch-level).
         # It is managed by DistillationProgressCallback on_epoch_begin.
         
-        # Return results including our custom losses
+        # Build results dict: scalar loss + metric states
+        results = {m.name: m.result() for m in self.metrics}
         results.update({
             'loss': loss,
             'student_loss': student_loss,
@@ -537,10 +544,11 @@ class MixedInputDistiller(Distiller):
         grads = tape.gradient(loss, trainable_vars)
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
 
-        # 9. Update metrics
-        results = self.compute_metrics(x_student, y, student_probs)
+        # 9. Update compiled metrics using stateful update
+        self.compiled_metrics.update_state(y, student_probs)
 
-        # Return results including our custom losses
+        # Build results dict: scalar loss + metric states
+        results = {m.name: m.result() for m in self.metrics}
         results.update({
             "loss": loss,
             "student_loss": student_loss,
@@ -553,10 +561,14 @@ class MixedInputDistiller(Distiller):
         x_student, y = data
         student_probs = self.student(x_student, training=False)
 
+        # Compute the plain cross-entropy loss for monitoring
         loss = self.student_loss_fn(y, student_probs)
         
-        # self.compute_metrics returns a dict of results
-        results = self.compute_metrics(x_student, y, student_probs)
+        # Update compiled metrics using stateful update
+        self.compiled_metrics.update_state(y, student_probs)
+
+        # Build results dict: scalar loss + metric states
+        results = {m.name: m.result() for m in self.metrics}
         results["loss"] = loss
         return results
 

@@ -14,21 +14,9 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from utils.train_helpers import create_tflite_interpreter
 
-def create_tflite_interpreter(model_path):
-    """
-    Centralized way to create a TFLite interpreter with the correct options.
-    Specifically, it disables default delegates like XNNPACK which can
-    silently fail on non-XNNPACK compatible models (like TFLM on ESP32).
-    """
-    kwargs = {"model_path": str(model_path)}
-    # Disable XNNPACK which causes silent failures on non-XNNPACK targets
-    kwargs["experimental_op_resolver_type"] = (
-        tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
-    )
-    interp = tf.lite.Interpreter(**kwargs)
-    interp.allocate_tensors()
-    return interp
+
 
 
 def freeze_teacher_model(teacher: tf.keras.Model) -> tf.keras.Model:
@@ -324,9 +312,7 @@ def load_distilled_model(
         Loaded model or interpreter
     """
     if is_tflite:
-        interpreter = tf.lite.Interpreter(model_path=model_path)
-        interpreter.allocate_tensors()
-        return interpreter
+        return create_tflite_interpreter(model_path)
     else:
         return tf.keras.models.load_model(model_path)
 

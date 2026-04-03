@@ -26,12 +26,7 @@ Features
 import os
 import sys
 
-# Set default environment variables strictly before importing parameters.py
-# This prevents parameters.py from triggering the interactive input prompt
-if "DIGIT_NB_CLASSES" not in os.environ:
-    os.environ["DIGIT_NB_CLASSES"] = "10"
-if "DIGIT_INPUT_CHANNELS" not in os.environ:
-    os.environ["DIGIT_INPUT_CHANNELS"] = "1"
+# Initial delay: configuration will be handled by interactive_digit_config in main()
 
 import argparse
 import logging
@@ -75,14 +70,10 @@ from utils.augmentation import (
     setup_augmentation_for_training,
 )
 
-# --------------------------------------------------------------------------- #
-#  Parameter handling
-# --------------------------------------------------------------------------- #
+# Parameter handling: import here for module-level defaults (e.g. function signatures).
+# main() will do a deferred re-import *after* env-vars are set by interactive_digit_config,
+# ensuring NB_CLASSES / INPUT_CHANNELS are correct before any model is created.
 import parameters as params
-from parameters import (
-    get_hyperparameter_summary_text,
-    validate_quantization_parameters,
-)
 
 # --------------------------------------------------------------------------- #
 #  Optional QAT import
@@ -211,7 +202,7 @@ def set_all_seeds(seed=params.SHUFFLE_SEED):
     os.environ["PYTHONHASHSEED"] = str(seed)
     os.environ["TF_DETERMINISTIC_OPS"] = "1"
     os.environ["TF_CUDNN_DETERMINISTIC"] = "1"
-    tf.config.experimental.enable_op_determinism()
+    tf.config.experimental.enable_op_determinism()  # still in experimental as of TF 2.x
 
 
 # --------------------------------------------------------------------------- #
@@ -362,8 +353,8 @@ def parse_arguments():
 def setup_gpu():
     """Detect GPUs, enable memory growth / limits, and optionally MirroredStrategy."""
     print("🔧 Configuring hardware …")
-    gpus = tf.config.experimental.list_physical_devices("GPU")
-    cpus = tf.config.experimental.list_physical_devices("CPU")
+    gpus = tf.config.list_physical_devices("GPU")
+    cpus = tf.config.list_physical_devices("CPU")
     print(f"📋 Devices – CPUs: {len(cpus)}  GPUs: {len(gpus)}")
 
     if not params.USE_GPU:
@@ -377,13 +368,13 @@ def setup_gpu():
     try:
         for gpu in gpus:
             if params.GPU_MEMORY_GROWTH:
-                tf.config.experimental.set_memory_growth(gpu, True)
+                tf.config.set_memory_growth(gpu, True)
                 print("   ✅ Memory growth enabled")
             if params.GPU_MEMORY_LIMIT is not None:
-                tf.config.experimental.set_virtual_device_configuration(
+                tf.config.set_virtual_device_configuration(
                     gpu,
                     [
-                        tf.config.experimental.VirtualDeviceConfiguration(
+                        tf.config.VirtualDeviceConfiguration(
                             memory_limit=params.GPU_MEMORY_LIMIT
                         )
                     ],
@@ -555,6 +546,7 @@ def train_specific_models(models_to_train, debug: bool = False, no_cleanup: bool
 #  Entry point – parse arguments and dispatch to the appropriate mode
 # --------------------------------------------------------------------------- #
 def main():
+    global params  # declare before any use of params in this scope
     # Now parse arguments
     args = parse_arguments()
 
@@ -585,6 +577,18 @@ def main():
     elif args.no_focal_loss:
         params.LOSS_TYPE = "sparse_categorical_crossentropy"
 
+    # NEW: Centralized interactive configuration handling
+    from utils.input_helper import interactive_digit_config
+    nb_classes, channels = interactive_digit_config(override_classes=args.classes, override_color=args.color)
+    
+    # Sync with parameters module after it gets imported
+    # (The actual import happens after this in the original structure, 
+    # but we need to ensure the env vars are set FIRST)
+    
+    # Re-import parameters now that env vars are set
+    import parameters as p
+    params = p
+    
     if args.classes is not None:
         params.NB_CLASSES = args.classes
     if args.color is not None:
@@ -733,11 +737,15 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             MLFLOW_AVAILABLE = False
             print("ℹ️ MLflow not installed. Skipping experiment tracking. (Run `pip install mlflow` to enable)")
         
-        # Validate quantization parameters
-        # Validate quantization parameters
+        # ==============================================================================
+        # INITIALIZATION
+        # ==============================================================================
+
+        # Note: We NO LONGER validate or print on import to allow external 
+        # configuration management (e.g., interactive_digit_config)
         print("🎯 VALIDATING QUANTIZATION PARAMETERS...")
         try:
-            is_valid, corrected_params, message = validate_quantization_parameters()
+            is_valid, corrected_params, message = params.validate_quantization_parameters()
             print(message)
         except Exception as e:
             print(f"❌ Quantization parameter validation failed: {e}")

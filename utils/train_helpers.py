@@ -5,6 +5,7 @@ import numpy as np
 from datetime import datetime
 from tensorflow.keras import backend as K
 import parameters as params
+import warnings
 
 def normalize_validation_data(data, batch_size=32):
     """
@@ -323,6 +324,37 @@ def save_training_csv(training_dir, history):
         
         return history_df
     return None
+
+def create_tflite_interpreter(model_path):
+    """
+    Centralized way to create a TFLite interpreter with the correct options.
+    Handles the TF 2.20+ deprecation of tf.lite.Interpreter by attempting to
+    use ai_edge_litert if available.
+    """
+    try:
+        # Modern path: use the new ai_edge_litert package
+        import ai_edge_litert.interpreter as litert
+        
+        # Determine if we should use the builtin without default delegates
+        # NOTE: ai_edge_litert might have different naming for these specs
+        # but for now we'll attempt a direct drop-in if possible.
+        interp = litert.Interpreter(model_path=str(model_path))
+        interp.allocate_tensors()
+        return interp
+        
+    except (ImportError, AttributeError):
+        # Fallback path: use standard tf.lite with suppressed warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message=".*tf.lite.Interpreter is deprecated.*")
+            
+            kwargs = {"model_path": str(model_path)}
+            # Disable XNNPACK which causes silent failures on non-XNNPACK targets
+            kwargs["experimental_op_resolver_type"] = (
+                tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+            )
+            interp = tf.lite.Interpreter(**kwargs)
+            interp.allocate_tensors()
+            return interp
 
 # ──────────────────────────────────────────────────────────────────────────────
 # LR Warm-up Callback

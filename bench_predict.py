@@ -41,7 +41,7 @@ import pandas as pd
 from PIL import Image
 import shutil
 
-from utils.model_distiller_utils import create_tflite_interpreter
+from utils.train_helpers import create_tflite_interpreter
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
         self.model_path = model_path
@@ -382,6 +382,29 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
     
     return list(unique_models.values())
     
+def list_available_models(quantized_only=False, subfolder=None, input_dir=None, exclude_model=None, model_list=None):
+    """List all compatible models found without benchmarking"""
+    if input_dir is None:
+        input_dir = params.OUTPUT_DIR
+        
+    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, 
+                            input_dir=input_dir, exclude_model=exclude_model, 
+                            debug=False, model_list=model_list)
+    
+    if not models:
+        print(f"❌ No models found in {input_dir}")
+        return
+        
+    print(f"\n📂 Compatible models in {input_dir}:")
+    headers = ['Model', 'Type', 'Params', 'Size (KB)']
+    table_data = []
+    for m in models:
+        # Use comma separator for params count
+        p_count = f"{m['parameters']:,}" if m['parameters'] > 0 else "Unknown"
+        table_data.append([m['name'], m['type'], p_count, f"{m['size_kb']:.1f}"])
+    
+    print(tabulate(table_data, headers=headers, tablefmt='simple_grid'))
+
 def is_valid_tflite_model(model_path):
     """Check if a TFLite model file is valid and can be loaded"""
     try:
@@ -1881,15 +1904,13 @@ def main():
     
     args, unknown = parser.parse_known_args()
     
-    # We must explicitly define the environment before initializing `parameters.py`
-    # Otherwise `import parameters` will block awaiting standard IO.
-    if args.classes:
-        os.environ['DIGIT_NB_CLASSES'] = str(args.classes)
-    if args.color:
-        if args.color.lower() == 'gray':
-            os.environ['DIGIT_INPUT_CHANNELS'] = '1'
-        elif args.color.lower() == 'rgb':
-            os.environ['DIGIT_INPUT_CHANNELS'] = '3'
+    # NEW: Centralized interactive configuration handling
+    from utils.input_helper import interactive_digit_config
+    nb_classes, channels = interactive_digit_config(override_classes=args.classes, override_color=args.color)
+    
+    # Sync with args object for downstream logic
+    args.classes = nb_classes
+    args.color = 'gray' if channels == 1 else 'rgb'
             
     # Now map the delayed imports globally
     global params

@@ -18,18 +18,13 @@ Why this design:
 - Maintain compatibility with existing training pipeline
 """
 
-import tensorflow as tf
-from typing import Tuple, Optional, Dict, Any, List
 import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-try:
-    import tensorflow_model_optimization as tfmot
-    QAT_AVAILABLE = True
-except ImportError:
-    QAT_AVAILABLE = False
+from utils.keras_helper import keras, tfmot
+QAT_AVAILABLE = (tfmot is not None)
 
 import parameters as params
 
@@ -39,10 +34,10 @@ import parameters as params
 # ---------------------------------------------------------------------------
 
 def squeeze_excite_block(
-    x: tf.Tensor,
+    x: keras.Tensor,
     reduction: int = 16,
     name_prefix: str = "se"
-) -> tf.Tensor:
+) -> keras.Tensor:
     """
     Squeeze-and-Excitation block for channel attention.
 
@@ -53,10 +48,10 @@ def squeeze_excite_block(
     """
     channels = int(x.shape[-1])
     # keepdims=True → output is (batch, 1, 1, C), no Reshape needed
-    se = tf.keras.layers.GlobalAveragePooling2D(
+    se = keras.layers.GlobalAveragePooling2D(
         keepdims=True, name=f"{name_prefix}_gap"
     )(x)
-    se = tf.keras.layers.Conv2D(
+    se = keras.layers.Conv2D(
         max(1, channels // reduction), 1, activation="relu",
         kernel_initializer="he_normal", name=f"{name_prefix}_reduce"
     )(se)

@@ -2,6 +2,7 @@
 import tensorflow as tf
 import importlib
 import parameters as params
+from utils.keras_helper import keras
 
 def create_model():
     """Factory function to automatically create model based on parameters"""
@@ -457,7 +458,7 @@ def create_learning_rate_scheduler():
             power=1.0,
         )
         # Phase 2: cosine decay from peak to floor
-        cosine_schedule = tf.keras.optimizers.schedules.CosineDecay(
+        cosine_schedule = keras.optimizers.schedules.CosineDecay(
             initial_learning_rate=peak_lr,
             decay_steps=decay_steps,
             alpha=min_lr / peak_lr,

@@ -3,9 +3,10 @@ import tensorflow as tf
 import numpy as np
 import parameters as params
 from utils.data_pipeline import create_tf_dataset_from_arrays
+from utils.keras_helper import keras
 
 
-class PolarityInversionAugmentation(tf.keras.layers.Layer):
+class PolarityInversionAugmentation(keras.layers.Layer):
     """
     Random per-sample polarity inversion: output = 1 - input (with 50% probability).
     Applies per image in the batch independently, training only — no-op at inference.
@@ -80,7 +81,7 @@ def create_augmentation_pipeline():
     
     # Ensure float32 for augmentation operations
     augmentation_layers.append(
-        tf.keras.layers.Lambda(
+        keras.layers.Lambda(
             lambda x: tf.cast(x, tf.float32),
             name='ensure_float32'
         )
@@ -88,7 +89,7 @@ def create_augmentation_pipeline():
     
     # Verify and clamp data range for augmentation
     augmentation_layers.append(
-        tf.keras.layers.Lambda(
+        keras.layers.Lambda(
             lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure [0,1] range
             name='verify_range_before_augmentation'
         )
@@ -107,7 +108,7 @@ def create_augmentation_pipeline():
     if params.AUGMENTATION_ROTATION_RANGE > 0:
         rotation_factor = params.AUGMENTATION_ROTATION_RANGE / 360.0
         augmentation_layers.append(
-            tf.keras.layers.RandomRotation(
+            keras.layers.RandomRotation(
                 factor=rotation_factor,
                 fill_mode='constant',
                 fill_value=0.0,
@@ -118,7 +119,7 @@ def create_augmentation_pipeline():
     # Translation
     if params.AUGMENTATION_WIDTH_SHIFT_RANGE > 0 or params.AUGMENTATION_HEIGHT_SHIFT_RANGE > 0:
         augmentation_layers.append(
-            tf.keras.layers.RandomTranslation(
+            keras.layers.RandomTranslation(
                 height_factor=params.AUGMENTATION_HEIGHT_SHIFT_RANGE,
                 width_factor=params.AUGMENTATION_WIDTH_SHIFT_RANGE,
                 fill_mode='constant',
@@ -130,7 +131,7 @@ def create_augmentation_pipeline():
     # Zoom
     if params.AUGMENTATION_ZOOM_RANGE > 0:
         augmentation_layers.append(
-            tf.keras.layers.RandomZoom(
+            keras.layers.RandomZoom(
                 height_factor=params.AUGMENTATION_ZOOM_RANGE,
                 width_factor=params.AUGMENTATION_ZOOM_RANGE,
                 fill_mode='constant',
@@ -144,7 +145,7 @@ def create_augmentation_pipeline():
         min_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[0] - 1.0
         max_delta = params.AUGMENTATION_BRIGHTNESS_RANGE[1] - 1.0
         augmentation_layers.append(
-            tf.keras.layers.RandomBrightness(
+            keras.layers.RandomBrightness(
                 factor=(min_delta, max_delta),
                 value_range=(0, 1),  # Explicitly define expected range
                 name='random_brightness'
@@ -155,13 +156,13 @@ def create_augmentation_pipeline():
     if params.AUGMENTATION_CONTRAST_RANGE > 0:
         # Add protection before contrast to prevent extreme values
         augmentation_layers.append(
-            tf.keras.layers.Lambda(
+            keras.layers.Lambda(
                 lambda x: tf.clip_by_value(x, 0.1, 0.9),  # Clip before contrast
                 name='pre_contrast_clip'
             )
         )
         augmentation_layers.append(
-            tf.keras.layers.RandomContrast(
+            keras.layers.RandomContrast(
                 factor=params.AUGMENTATION_CONTRAST_RANGE,
                 name='random_contrast'
             )
@@ -170,7 +171,7 @@ def create_augmentation_pipeline():
     # Flips
     if params.AUGMENTATION_HORIZONTAL_FLIP:
         augmentation_layers.append(
-            tf.keras.layers.RandomFlip(
+            keras.layers.RandomFlip(
                 mode='horizontal',
                 name='random_horizontal_flip'
             )
@@ -178,7 +179,7 @@ def create_augmentation_pipeline():
 
     if params.AUGMENTATION_VERTICAL_FLIP:
         augmentation_layers.append(
-            tf.keras.layers.RandomFlip(
+            keras.layers.RandomFlip(
                 mode='vertical',
                 name='random_vertical_flip'
             )
@@ -186,7 +187,7 @@ def create_augmentation_pipeline():
         
     # Add small random noise to prevent dead neurons (helps stability)
     augmentation_layers.append(
-        tf.keras.layers.GaussianNoise(
+        keras.layers.GaussianNoise(
             stddev=0.001,  # Very small noise
             name='stability_noise'
         )
@@ -194,7 +195,7 @@ def create_augmentation_pipeline():
     
     # FINAL VALUE CLAMPING 
     augmentation_layers.append(
-        tf.keras.layers.Lambda(
+        keras.layers.Lambda(
             lambda x: tf.clip_by_value(x, 0.0, 1.0),  # Ensure valid range
             name='final_value_clamp'
         )
@@ -202,14 +203,14 @@ def create_augmentation_pipeline():
     
     # Ensure final float32 output
     augmentation_layers.append(
-        tf.keras.layers.Lambda(
+        keras.layers.Lambda(
             lambda x: tf.cast(x, tf.float32),
             name='ensure_float32_output'
         )
     )
     
     # Create augmentation pipeline
-    augmentation_pipeline = tf.keras.Sequential(augmentation_layers, name='augmentation_pipeline')
+    augmentation_pipeline = keras.Sequential(augmentation_layers, name='augmentation_pipeline')
     
     return augmentation_pipeline, len(augmentation_layers)
 
@@ -298,7 +299,7 @@ def print_augmentation_summary():
     
     print("   " + "-" * 40)
 
-class AugmentationSafetyMonitor(tf.keras.callbacks.Callback):
+class AugmentationSafetyMonitor(keras.callbacks.Callback):
     """
     Monitor training to detect if augmentation is causing issues
     """

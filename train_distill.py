@@ -82,12 +82,10 @@ if _ROOT not in sys.path:
 # Set class/channel env-vars BEFORE importing parameters.py
 # (will be overridden again inside load_distillation_data, but avoids the
 #  interactive prompt that parameters.py triggers when both env-vars are absent)
-if "DIGIT_NB_CLASSES" not in os.environ:
-    os.environ["DIGIT_NB_CLASSES"] = "10"
-if "DIGIT_INPUT_CHANNELS" not in os.environ:
-    os.environ["DIGIT_INPUT_CHANNELS"] = "1"
+# Parameter handling - Deferred to main() to allow interactive config
+params = None
 
-import parameters as params
+# params import moved to main()
 from utils.train_distill_helper import (
     TEACHERS,
     STUDENTS,
@@ -104,7 +102,23 @@ logger = logging.getLogger(__name__)
 # CLI
 # ---------------------------------------------------------------------------
 
-def parse_args() -> argparse.Namespace:
+def main():
+    parser = argparse.ArgumentParser(
+        description="Digit Recognition Knowledge Distillation Pipeline"
+    )
+    
+    # NEW: Centralized interactive configuration handling
+    # We parse known args first to see if user provided classes/color
+    temp_args, _ = parser.parse_known_args()
+    from utils.input_helper import interactive_digit_config
+    nb_classes, channels = interactive_digit_config(override_classes=getattr(temp_args, 'classes', None), 
+                                                 override_color=getattr(temp_args, 'color', None))
+    
+    # Now import parameters with env vars properly set
+    global params
+    import parameters as p
+    params = p
+
     parser = argparse.ArgumentParser(
         description="Knowledge distillation for digit recognizer",
         formatter_class=argparse.RawTextHelpFormatter,

@@ -78,23 +78,26 @@ if MANUAL_NB_CLASSES is not None:
 elif _nb_classes_env is not None:
     NB_CLASSES = int(_nb_classes_env)
 elif "-h" in sys.argv or "--help" in sys.argv:
-    # Avoid interactive prompt when just showing help
     NB_CLASSES = 100
+elif "--classes" in sys.argv:
+    _idx = sys.argv.index("--classes")
+    if _idx + 1 < len(sys.argv):
+        NB_CLASSES = int(sys.argv[_idx + 1])
+        os.environ["DIGIT_NB_CLASSES"] = str(NB_CLASSES)
 else:
-    # Not set via environment – ask the user to avoid silently using a wrong default
     if sys.stdin.isatty():
         while True:
             try:
                 _user_input = input("Enter number of classes [10 or 100]: ").strip()
                 if _user_input in ("10", "100"):
                     NB_CLASSES = int(_user_input)
+                    os.environ["DIGIT_NB_CLASSES"] = str(NB_CLASSES)
                     break
                 print("  Please enter 10 or 100.")
             except EOFError:
                 NB_CLASSES = 100
                 break
     else:
-        # Non-interactive context (subprocess, CI, etc.) – keep a safe default and warn
         NB_CLASSES = 100
         print("WARNING: DIGIT_NB_CLASSES not set and no interactive terminal – defaulting to 100. "
               "Set the env var explicitly to avoid this.")
@@ -107,26 +110,31 @@ if MANUAL_INPUT_CHANNELS is not None:
 elif _input_channels_env is not None:
     INPUT_CHANNELS = int(_input_channels_env)
 elif "-h" in sys.argv or "--help" in sys.argv:
-    # Avoid interactive prompt when just showing help
     INPUT_CHANNELS = 1
+elif "--color" in sys.argv:
+    _idx = sys.argv.index("--color")
+    if _idx + 1 < len(sys.argv):
+        _val = sys.argv[_idx + 1].lower()
+        INPUT_CHANNELS = 1 if _val == "gray" else 3
+        os.environ["DIGIT_INPUT_CHANNELS"] = str(INPUT_CHANNELS)
 else:
-    # Not set via environment – ask the user to avoid silently using a wrong default
     if sys.stdin.isatty():
         while True:
             try:
                 _user_input = input("Enter color mode [gray or rgb]: ").strip().lower()
                 if _user_input == "gray":
                     INPUT_CHANNELS = 1
+                    os.environ["DIGIT_INPUT_CHANNELS"] = "1"
                     break
                 elif _user_input == "rgb":
                     INPUT_CHANNELS = 3
+                    os.environ["DIGIT_INPUT_CHANNELS"] = "3"
                     break
                 print("  Please enter 'gray' or 'rgb'.")
             except EOFError:
                 INPUT_CHANNELS = 3
                 break
     else:
-        # Non-interactive context (subprocess, CI, etc.) – keep a safe default and warn
         INPUT_CHANNELS = 3
         print("WARNING: DIGIT_INPUT_CHANNELS not set and no interactive terminal – defaulting to 3 (RGB). "
               "Set the env var explicitly to avoid this.")

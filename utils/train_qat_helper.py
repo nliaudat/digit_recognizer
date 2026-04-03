@@ -30,19 +30,34 @@ import tensorflow as tf
 import parameters as params
 from utils.preprocess import preprocess_for_training, preprocess_for_inference
 
+from utils.keras_helper import keras
+
 
 # --------------------------------------------------------------------------- #
 #  QAT model creation
 # --------------------------------------------------------------------------- #
-def apply_qat_to_model(model: tf.keras.Model) -> tf.keras.Model:
+def apply_qat_to_model(model) -> tf.keras.Model:
     """
     Apply QAT wrappers using modern clustering presets.
+    
+    If model was created in Keras 3, this will likely fail or need careful handling.
+    For QAT, models should be created using the Keras 2 (tf-keras) backend.
     """
     try:
-        import tensorflow_model_optimization as tfmot
+        from utils.keras_helper import tfmot
+        if tfmot is None:
+            print("❌ QAT application failed: tensorflow-model-optimization not installed")
+            return model
+            
         print(f"✅ QAT available: TF {tf.__version__}, TFMo {tfmot.__version__}")
+        
+        # Check if the model itself is compatible with the active Keras (should be Keras 2 if QAT=True)
+        # However, if we receive a Keras 3 model, we must be careful.
+        
         # Annotate the model for quantization
+        # Note: In tfmot 0.8.0, quantize_annotate is at tfmot.quantization.keras.quantize_annotate
         annotated_model = tfmot.quantization.keras.quantize_annotate(model)
+        
         # Apply quantization with the default 8-bit cluster preset
         qat_model = tfmot.quantization.keras.quantize_apply(
             annotated_model,
@@ -51,7 +66,13 @@ def apply_qat_to_model(model: tf.keras.Model) -> tf.keras.Model:
         return qat_model
     except Exception as e:
         print(f"❌ QAT application failed: {e}")
-        return model
+        # Final fallback - try simple quantize_model if annotate/apply fails
+        try:
+             print("🔄 Retrying with simple quantize_model...")
+             import tensorflow_model_optimization as tfmot
+             return tfmot.quantization.keras.quantize_model(model)
+        except:
+             return model
 
 def create_qat_model(model: tf.keras.Model = None) -> tf.keras.Model:
     """

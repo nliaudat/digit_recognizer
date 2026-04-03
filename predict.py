@@ -7,6 +7,7 @@ import argparse
 from utils.preprocess import preprocess_for_inference
 from pathlib import Path
 import parameters as params
+from utils.train_helpers import create_tflite_interpreter
 
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
@@ -17,10 +18,9 @@ class TFLiteDigitPredictor:
         self.load_model()
     
     def load_model(self):
-        """Load TFLite model"""
+        """Load TFLite model using centralized factory"""
         print(f"Loading TFLite model: {self.model_path}")
-        self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
-        self.interpreter.allocate_tensors()
+        self.interpreter = create_tflite_interpreter(self.model_path)
         
         self.input_details = self.interpreter.get_input_details()
         self.output_details = self.interpreter.get_output_details()

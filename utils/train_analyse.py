@@ -12,6 +12,7 @@ import tempfile
 import shutil
 
 import parameters as params
+from utils.train_helpers import create_tflite_interpreter
 
 
 def get_analysis_samples(x_data, y_data):
@@ -52,9 +53,8 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
     x_test_analysis, y_test_analysis = get_analysis_samples(x_test, y_test)
     total_samples = len(x_test_analysis)
     
-    # Load TFLite model
-    interpreter = tf.lite.Interpreter(model_path=tflite_path)
-    interpreter.allocate_tensors()
+    # Load TFLite model using centralized helper for better hardware compatibility and warning suppression
+    interpreter = create_tflite_interpreter(tflite_path)
     
     # Get input and output tensors
     input_details = interpreter.get_input_details()

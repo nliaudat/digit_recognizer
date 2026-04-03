@@ -1,7 +1,7 @@
-# utils/losses.py
 import tensorflow as tf
-from tensorflow.keras import backend as K
 import numpy as np
+from utils.keras_helper import keras
+K = keras.backend
 
 def sparse_focal_loss(gamma=2.0, alpha=0.25):
     """
@@ -70,7 +70,7 @@ def focal_loss(gamma=2.0, alpha=0.25):
     
     return loss
 
-class DynamicSparseFocalLoss(tf.keras.losses.Loss):
+class DynamicSparseFocalLoss(keras.losses.Loss):
     """
     Keras 3 compatible Focal Loss that allows updating gamma and alpha 
     during training without model recompilation.
@@ -123,7 +123,7 @@ class DynamicSparseFocalLoss(tf.keras.losses.Loss):
         
         return tf.reduce_sum(weights * alpha_t * cross_entropy, axis=-1)
 
-class DynamicFocalLoss(tf.keras.losses.Loss):
+class DynamicFocalLoss(keras.losses.Loss):
     """Same as DynamicSparseFocalLoss but for one-hot labels."""
     def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None,
                  label_smoothing=None, name='dynamic_focal_loss', **kwargs):

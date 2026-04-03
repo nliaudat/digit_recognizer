@@ -19,6 +19,7 @@ pillow==10.4.0
 h5py==3.11.0
 
 # Utilities & dependencies
+ai-edge-litert
 absl-py==1.4.0
 protobuf==6.32.1
 flatbuffers==24.3.25
