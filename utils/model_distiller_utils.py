@@ -8,6 +8,7 @@ import numpy as np
 import os
 import json
 import logging
+import parameters as params
 from typing import Optional, Tuple, Dict, Any, Union, List, Callable
 from pathlib import Path
 
@@ -91,7 +92,9 @@ def export_student_for_edge(
     # 1. Build representative dataset generator (shared by both conversion attempts)
     def _make_rep_gen(rep_data):
         """Create a representative dataset generator from a numpy array."""
-        n = min(100, len(rep_data))
+        # Increase calibration samples - 100 was too few for some models
+        n_samples = getattr(params, 'QUANTIZE_NUM_SAMPLES', 1000)
+        n = min(n_samples, len(rep_data))
         def _gen():
             for i in range(n):
                 yield [rep_data[i:i+1].astype(np.float32)]
@@ -102,8 +105,9 @@ def export_student_for_edge(
         shape = list(model.input_shape if not isinstance(model.input_shape, list)
                      else model.input_shape[0])
         shape[0] = 1
+        n_samples = getattr(params, 'QUANTIZE_NUM_SAMPLES', 1000)
         def _gen():
-            for _ in range(100):
+            for _ in range(min(500, n_samples)):
                 yield [np.random.uniform(0.0, 1.0, size=shape).astype(np.float32)]
         return _gen
 
@@ -135,12 +139,14 @@ def export_student_for_edge(
 
     if quantize and target_hardware == "esp32":
         # Full integer quantization (INT8 I/O) for ESP-DL / TFLite Micro.
-        # NOTE: We do NOT validate with XNNPACK here. XNNPACK is a PC-only delegate;
-        # the ESP32 uses ESP-DL or TFLite Micro which have their own kernels.
-        # A model that fails XNNPACK on the host may be perfectly valid on-device.
-        logger.info(f"Applying full INT8 quantization for {target_hardware}")
+        # NOTE: We now respect params.ESP_DL_QUANTIZE for input/output types
+        # to ensure consistency with preprocessing logic.
+        input_type = tf.int8 if getattr(params, 'ESP_DL_QUANTIZE', False) else tf.uint8
+        output_type = tf.int8 if getattr(params, 'ESP_DL_QUANTIZE', False) else tf.uint8
+        
+        logger.info(f"Applying full INT8 quantization for {target_hardware} (I/O: {input_type.name})")
         conv = _build_converter(
-            input_type=tf.int8, output_type=tf.int8,
+            input_type=input_type, output_type=output_type,
             ops=[tf.lite.OpsSet.TFLITE_BUILTINS_INT8, tf.lite.OpsSet.TFLITE_BUILTINS]
         )
         tflite_model = conv.convert()

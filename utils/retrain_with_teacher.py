@@ -255,6 +255,12 @@ def load_or_create_model(
     # Create model dynamically
     model = create_model_by_name(model_name, num_classes=num_classes, input_shape=input_shape)
     
+    # Wrap for QAT if active in parameters
+    if getattr(params, 'USE_QAT', False) and getattr(params, 'QUANTIZE_MODEL', False):
+        from utils.train_qat_helper import create_qat_model
+        logger.info(f"🎯 Wrapping student {model_name} for QAT...")
+        model = create_qat_model(model)
+
     # Load weights if provided
     if load_path and os.path.exists(load_path):
         logger.info(f"Loading weights from {load_path}")
@@ -535,11 +541,14 @@ def main():
     if args.quantize:
         # Path where Keras/TFLite models will be saved (flat like train.py)
         export_path = os.path.join(export_dir, args.model)
+        
+        # Increase calibration data for PTQ (ignored if QAT was already active)
+        n_calib = min(1000, len(x_test))
         tflite_path = export_student_for_edge(
             retrained_model,
             export_path,
             quantize=True,
-            representative_dataset=x_test[:100],
+            representative_dataset=x_test[:n_calib],
             target_hardware="esp32"
         )
         logger.info(f"Exported to: {tflite_path}")

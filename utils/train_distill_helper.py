@@ -304,6 +304,12 @@ def train_student_distillation(
     else:
         from models.model_factory import create_model_by_name
         student = create_model_by_name(student_variant, num_classes=num_classes, input_shape=input_shape)
+    
+    # Wrap student for QAT if enabled in parameters
+    if getattr(params, 'USE_QAT', False) and getattr(params, 'QUANTIZE_MODEL', False):
+        from utils.train_qat_helper import create_qat_model
+        logger.info(f"🎯 Wrapping student {student_variant} for QAT...")
+        student = create_qat_model(student)
     logger.info(f"Student parameters: {student.count_params():,}")
     logger.info(f"Estimated INT8 size: {get_model_size_kb(student):.1f} KB")
 
@@ -651,11 +657,14 @@ def run_distillation_pipeline(
     # Save student artifacts into the output_dir
     export_path = os.path.join(output_dir, student_variant)
     if export_quantized:
+        # Increase calibration data for PTQ
+        # (This is a fallback if QAT scales aren't present)
+        n_calib = min(1000, len(x_test))
         tflite_path = export_student_for_edge(
             student,
             export_path,
             quantize=True,
-            representative_dataset=x_test[:100],
+            representative_dataset=x_test[:n_calib],
             target_hardware=target_hardware,
         )
         logger.info(f"Student TFLite → {tflite_path}")
