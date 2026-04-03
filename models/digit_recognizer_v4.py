@@ -103,8 +103,9 @@ def create_digit_recognizer_v4_grayscale():
     )(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
     
-    # Global pooling
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    # Global pooling - use keepdims=True to help TFLite avoid certain rank-changing Reshape ops
+    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='global_avg_pool')(x)
+    x = tf.keras.layers.Flatten(name='flatten')(x)
     
     # Dense layer
     # x = tf.keras.layers.Dense(64, activation='relu', name='feature_dense')(x)
@@ -169,8 +170,9 @@ def create_digit_recognizer_v4_rgb():
     )(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='relu6_4')(x)
     
-    # Global pooling
-    x = tf.keras.layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    # Global pooling - use keepdims=True to help TFLite avoid certain rank-changing Reshape ops
+    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='global_avg_pool_rgb')(x)
+    x = tf.keras.layers.Flatten(name='flatten_rgb')(x)
     
     # Dense layer
     # x = tf.keras.layers.Dense(72, activation='relu', name='feature_dense')(x)
