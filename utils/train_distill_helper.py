@@ -46,27 +46,6 @@ from utils.model_distiller_utils import (
     freeze_teacher_model,
 )
 
-from models.digit_recognizer_v30_teacher import create_v30_teacher
-from models.digit_recognizer_v31_teacher import create_v31_teacher
-from models.digit_recognizer_v30_student import (
-    create_v30_student_micro,
-    create_v30_student_small,
-    create_v30_student_medium,
-    create_v30_student_large,
-)
-from models.digit_recognizer_v31_student import (
-    create_v31_student_micro,
-    create_v31_student_small,
-    create_v31_student_medium,
-    create_v31_student_large,
-)
-from models.digit_recognizer_v32_teacher import (
-    create_v32_teacher_small,
-    create_v32_teacher_medium,
-    create_v32_teacher_large,
-    create_v32_teacher_xl,
-)
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -74,25 +53,9 @@ logger = logging.getLogger(__name__)
 # Registry maps
 # ---------------------------------------------------------------------------
 
-TEACHERS: Dict[str, Any] = {
-    "v30": create_v30_teacher,   # EfficientNetB0
-    "v31": create_v31_teacher,   # ResNet50
-}
+TEACHERS: Dict[str, Any] = {}
 
-STUDENTS: Dict[str, Any] = {
-    "v30_micro":  create_v30_student_micro,
-    "v30_small":  create_v30_student_small,
-    "v30_medium": create_v30_student_medium,
-    "v30_large":  create_v30_student_large,
-    "v31_micro":  create_v31_student_micro,
-    "v31_small":  create_v31_student_small,
-    "v31_medium": create_v31_student_medium,
-    "v31_large":  create_v31_student_large,
-    "v32_small":  create_v32_teacher_small,
-    "v32_medium": create_v32_teacher_medium,
-    "v32_large":  create_v32_teacher_large,
-    "v32_xl":     create_v32_teacher_xl,
-}
+STUDENTS: Dict[str, Any] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -212,13 +175,28 @@ def train_teacher(
     os.makedirs(checkpoint_dir, exist_ok=True)
     
     # Standardize checkpoint path to follow project pattern: exported_models/xxx/model/
-    # If checkpoint_dir doesn't end in 'model', we add it if appropriate, 
-    # but for teacher training we'll rely on the caller to provide the full path.
     ckpt_path = os.path.join(
         checkpoint_dir,
         f"best_model.keras"
     )
+    
+    # ── Parity with train.py: Logging and Monitoring ─────────────────────
+    from utils.train_trainingmonitor import TrainingMonitor
+    from utils.train_helpers import save_model_summary_to_file
+    from utils.train_analyse import analyze_confusion_matrix, analyze_training_history
+    
+    # Training logs and monitor
+    log_csv_path = os.path.join(checkpoint_dir, "training_log.csv")
+    monitor = TrainingMonitor(checkpoint_dir)
+
+    class TrainingMonitorCallbackWrapper(tf.keras.callbacks.Callback):
+        def on_epoch_end(self, epoch, logs=None):
+            monitor.model = self.model
+            monitor.on_epoch_end(epoch, logs)
+
     callbacks = [
+        tf.keras.callbacks.CSVLogger(log_csv_path),
+        TrainingMonitorCallbackWrapper(),
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor="val_accuracy", factor=0.5, patience=5, min_lr=1e-6, verbose=1
         ),
@@ -238,6 +216,22 @@ def train_teacher(
         callbacks=callbacks,
         verbose=2,
     )
+    
+    monitor.save_training_plots()
+    
+    # Save model summary
+    save_model_summary_to_file(teacher, checkpoint_dir)
+    
+    # Generate Analysis folder
+    try:
+        analysis_dir = os.path.join(checkpoint_dir, "analysis")
+        os.makedirs(analysis_dir, exist_ok=True)
+        # We use whole x_val for teacher since it's small usually
+        analyze_confusion_matrix(teacher, x_val, y_val, save_path=analysis_dir)
+        if os.path.exists(log_csv_path):
+            analyze_training_history(log_csv_path, save_path=analysis_dir)
+    except Exception as e:
+        logger.warning(f"⚠️ Teacher analysis failed: {e}")
 
     best_val_acc = max(history.history.get("val_accuracy", [0.0]))
     logger.info(f"Teacher best val_accuracy: {best_val_acc:.4f}")
@@ -304,6 +298,12 @@ def train_student_distillation(
     else:
         from models.model_factory import create_model_by_name
         student = create_model_by_name(student_variant, num_classes=num_classes, input_shape=input_shape)
+    
+    # Wrap student for QAT if enabled in parameters
+    if getattr(params, 'USE_QAT', False) and getattr(params, 'QUANTIZE_MODEL', False):
+        from utils.train_qat_helper import create_qat_model
+        logger.info(f"🎯 Wrapping student {student_variant} for QAT...")
+        student = create_qat_model(student)
     logger.info(f"Student parameters: {student.count_params():,}")
     logger.info(f"Estimated INT8 size: {get_model_size_kb(student):.1f} KB")
 
@@ -529,7 +529,7 @@ def run_distillation_pipeline(
             }
             # Auto-inject any custom layers from the teacher's script
             clean_name = t_type.replace('digit_recognizer_', '').replace('_teacher', '')
-            for prefix in ["models.", "models.digit_recognizer_"]:
+            for prefix in ["models.", "models.digit_recognizer_", "models._tested_but_rejected.", "models._tested_but_rejected.digit_recognizer_"]:
                 try:
                     mod = importlib.import_module(f"{prefix}{clean_name}")
                     for name, obj in inspect.getmembers(mod, inspect.isclass):
@@ -651,11 +651,14 @@ def run_distillation_pipeline(
     # Save student artifacts into the output_dir
     export_path = os.path.join(output_dir, student_variant)
     if export_quantized:
+        # Increase calibration data for PTQ
+        # (This is a fallback if QAT scales aren't present)
+        n_calib = min(1000, len(x_test))
         tflite_path = export_student_for_edge(
             student,
             export_path,
             quantize=True,
-            representative_dataset=x_test[:100],
+            representative_dataset=x_test[:n_calib],
             target_hardware=target_hardware,
         )
         logger.info(f"Student TFLite → {tflite_path}")
@@ -702,6 +705,10 @@ def run_distillation_pipeline(
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     
+    # Save alias for parity with train.py
+    with open(os.path.join(output_dir, "training_config.json"), "w") as f:
+        json.dump(results, f, indent=2)
+    
     # ── 7. Generate Training Resume (parity with train.py) ───────────────
     from utils.train_helpers import save_model_summary_to_file
     from utils.train_analyse import analyze_confusion_matrix, analyze_training_history
@@ -713,21 +720,52 @@ def run_distillation_pipeline(
     # Save model summary
     save_model_summary_to_file(student, output_dir)
     
-    # Copy logs/plots from checkpoint_dir
-    for file in ["training_history.png", "training_log.csv"]:
-        src = os.path.join(checkpoint_dir, file)
-        if os.path.exists(src):
-            shutil.copy(src, os.path.join(output_dir, file))
-            
-    # Generate Confusion Matrix
-    analysis_dir = os.path.join(output_dir, "analysis")
-    os.makedirs(analysis_dir, exist_ok=True)
-    analyze_confusion_matrix(student, x_test, y_test, save_path=analysis_dir)
+    # Copy logs/plots from checkpoint_dir IF they are not already in output_dir
+    if checkpoint_dir != output_dir:
+        for file in ["training_history.png", "training_log.csv"]:
+            src = os.path.join(checkpoint_dir, file)
+            dst = os.path.join(output_dir, file)
+            if os.path.exists(src) and src != dst:
+                shutil.copy(src, dst)
+
+    # Generate Confusion Matrix (wrap in try/except for safety)
+    try:
+        analysis_dir = os.path.join(output_dir, "analysis")
+        os.makedirs(analysis_dir, exist_ok=True)
+        analyze_confusion_matrix(student, x_test, y_test, save_path=analysis_dir)
+    except Exception as e:
+        logger.warning(f"⚠️ Could not generate confusion matrix: {e}")
 
     # Generate Detailed Training plot from CSV if possible
-    csv_log = os.path.join(output_dir, "training_log.csv")
-    if os.path.exists(csv_log):
-        analyze_training_history(csv_log, save_path=analysis_dir)
+    try:
+        csv_log = os.path.join(output_dir, "training_log.csv")
+        if os.path.exists(csv_log):
+            analyze_training_history(csv_log, save_path=analysis_dir)
+    except Exception as e:
+        logger.warning(f"⚠️ Could not generate training history plot: {e}")
+
+    # ── 8. Full QAT Verification ──
+    try:
+        if export_quantized:
+            from utils.train_analyse import verify_tflite_full_qat
+            tflite_path = results['student'].get('tflite_path')
+            if tflite_path and os.path.exists(tflite_path):
+                qat_report = verify_tflite_full_qat(tflite_path, debug=True)
+                if qat_report:
+                    results['student']['qat_verification'] = qat_report
+                    if qat_report['is_full_qat']:
+                        logger.info("✅ TFLite QAT Verification: Model is FULL QAT (integer only)")
+                    else:
+                        logger.warning("⚠️ TFLite QAT Verification: Model may NOT be full QAT (float ops detected)")
+                        logger.warning(f"   I/O: {qat_report['input_dtype']} / {qat_report['output_dtype']}")
+                        logger.warning(f"   Quantized tensors: {qat_report['quantization_ratio']:.1%} of total")
+                else:
+                    logger.warning("⚠️ Could not perform QAT verification")
+            else:
+                 logger.warning(f"⚠️ TFLite path (to verify) not found: {tflite_path}")
+
+    except Exception as e:
+        logger.warning(f"⚠️ QAT status verification failed: {e}")
         
     logger.info(f"Results saved → {results_path}")
     

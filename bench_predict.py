@@ -41,7 +41,7 @@ import pandas as pd
 from PIL import Image
 import shutil
 
-from utils.model_distiller_utils import create_tflite_interpreter
+
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
         self.model_path = model_path
@@ -54,6 +54,7 @@ class TFLiteDigitPredictor:
         """Load TFLite model"""
         print(f"Loading TFLite model: {self.model_path}")
         
+        from utils.model_distiller_utils import create_tflite_interpreter
         self.interpreter = create_tflite_interpreter(self.model_path)
         
         self.input_details = self.interpreter.get_input_details()
@@ -246,6 +247,7 @@ def find_model_path(model_name=None, input_dir=None):
 def get_model_parameters_count(model_path):
     """Get the number of parameters in a TFLite model"""
     try:
+        from utils.model_distiller_utils import create_tflite_interpreter
         interpreter = create_tflite_interpreter(model_path)
         
         total_params = 0
@@ -270,6 +272,7 @@ def is_quantized_model(model_path):
         if 'qat' in path_lower or 'quant' in path_lower:
             return True
             
+        from utils.model_distiller_utils import create_tflite_interpreter
         interpreter = create_tflite_interpreter(model_path)
         input_details = interpreter.get_input_details()
         input_dtype = input_details[0]['dtype']
@@ -285,8 +288,7 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
     Args:
         quantized_only: If True, only return quantized models
         subfolder: If specified, only look in this specific subfolder
-        input_dir: Base directory to search for models. If None, defaults to params.OUTPUT_DIR.
-        exclude_model: Model name to exclude from testing
+        exclude_model: List of model names or strings to exclude from testing
         debug: Enable debug output
         model_list: Optional list of specific models to include (names or directories)
     """
@@ -325,11 +327,14 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
         tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
         
         for model_file in tflite_files:
-            # Skip excluded model if specified
-            if exclude_model and (exclude_model in model_file or exclude_model in training_dir):
-                if debug:
-                    print(f"Skipping excluded model: {training_dir}/{model_file}")
-                continue
+            # Skip excluded models if specified
+            if exclude_model:
+                # Handle both single string and list of strings for flexibility
+                exclude_list = [exclude_model] if isinstance(exclude_model, str) else exclude_model
+                if any(excl in model_file or excl in training_dir for excl in exclude_list):
+                    if debug:
+                        print(f"Skipping excluded model: {training_dir}/{model_file}")
+                    continue
                 
             # Filter by model_list if provided
             if model_list:
@@ -385,6 +390,7 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
 def is_valid_tflite_model(model_path):
     """Check if a TFLite model file is valid and can be loaded"""
     try:
+        from utils.model_distiller_utils import create_tflite_interpreter
         interpreter = create_tflite_interpreter(model_path)
         return True
     except Exception as e:
@@ -410,6 +416,39 @@ def _decode_bench_image(image_path, label, fname, target_h, target_w, grayscale)
 
 _cached_test_data = None
 _cached_test_data_params = None
+
+def list_available_models(quantized_only=False, subfolder=None, input_dir=None, exclude_model=None, model_list=None):
+    """List all available models in a table format and exit."""
+    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, 
+                            input_dir=input_dir, exclude_model=exclude_model, 
+                            model_list=model_list)
+    
+    if not models:
+        print("No models found.")
+        return
+
+    headers = ['Directory', 'Model', 'Type', 'Params', 'Size (KB)']
+    table_data = []
+    
+    for m in models:
+        params_count = m['parameters']
+        if params_count >= 1_000_000:
+            params_str = f"{params_count/1_000_000:.1f}M"
+        elif params_count >= 1_000:
+            params_str = f"{params_count/1_000:.1f}K"
+        else:
+            params_str = str(params_count)
+            
+        table_data.append([
+            m['directory'],
+            m['name'],
+            m['type'],
+            params_str,
+            f"{m['size_kb']:.1f}"
+        ])
+    
+    print("\nAvailable models found:")
+    print(tabulate(table_data, headers=headers, tablefmt='simple_grid', stralign='right'))
 
 def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     """
@@ -1033,7 +1072,8 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
 def test_all_models(num_test_images=0, quantized_only=False, debug=False, 
                     use_all_datasets=True, list_failed=False, save_failed=False,
                     subfolder=None, input_dir=None, exclude_model=None,
-                    override_classes=None, override_color=None, model_list=None, tolerance=0.1):
+                    override_classes=None, override_color=None, 
+                    model_list=None, tolerance=0.1, update_csv=False):
     """Test all valid models with optional subfolder filtering and model exclusion
     
     Args:
@@ -1170,7 +1210,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
         print(f"DATASETS: {num_test_images} sampled images")
     print(f"MODELS: {'Quantized only' if quantized_only else 'All models'}")
     if exclude_model:
-        print(f"EXCLUDED MODEL: '{exclude_model}'")
+        excl_str = ", ".join(exclude_model) if not isinstance(exclude_model, str) else exclude_model
+        print(f"EXCLUDED MODELS: {excl_str}")
     if list_failed or save_failed:
         print(f"FAILED PREDICTIONS: {len(all_failed_predictions)} total across all models")
     print(f"{'='*80}")
@@ -1218,7 +1259,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
         quantized_only=quantized_only,
         use_all_images=use_all_datasets,
         test_images_count=num_test_images,
-        output_dir=input_dir
+        output_dir=input_dir,
+        update_csv=update_csv # Use specified update_csv flag
     )
     
     # Generate markdown report
@@ -1241,8 +1283,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
     
     return results, all_failed_predictions
 
-def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_images_count=0, output_dir=None):
-    """Save FULL results to CSV file with all information"""
+def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_images_count=0, output_dir=None, update_csv=False):
+    """Save FULL results to CSV file with all information - optionally update instead of overwrite."""
     if output_dir is None:
         output_dir = params.OUTPUT_DIR
         
@@ -1276,6 +1318,28 @@ def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_
             'Inferences_per_second': float(result['Inf/s']),
             'Tested_Images': result['Tested']
         })
+    
+    # Update logic - Load existing CSV and merge
+    if update_csv and os.path.exists(csv_path):
+        try:
+            existing_data = []
+            with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                existing_data = list(reader)
+            
+            # Merge logic: if (Directory + Model) exists, update it. Else append it.
+            # Convert existing_data to a dict for easier lookup
+            data_map = {(row['Directory'], row['Model']): row for row in existing_data}
+            
+            for new_row in csv_data:
+                key = (new_row['Directory'], new_row['Model'])
+                data_map[key] = {k: str(v) for k, v in new_row.items()}
+            
+            csv_data = list(data_map.values())
+            print(f"🔄 Appended/Updated {len(results)} models into existing CSV (total: {len(csv_data)})")
+            
+        except Exception as e:
+            print(f"⚠️  Could not update existing CSV: {e}. Falling back to overwrite.")
     
     # Write to CSV
     with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
@@ -1854,8 +1918,10 @@ def main():
                         help='Base directory to search for models (default: exported_models)')
     parser.add_argument('--subfolder', type=str, 
                         help='Restrict search to a specific subfolder within the input directory.')
-    parser.add_argument('--exclude_model', type=str, default=None,
-                        help='Exclude models containing this string from the benchmark.')
+    parser.add_argument('--exclude_model', '--exclude_models',
+                        dest='exclude_model',
+                        type=str, nargs='+', default=None,
+                        help='Exclude models containing these strings from the benchmark.')
     parser.add_argument('--quantized', action='store_true', default=True, 
                         help='Only include quantized models (True by default).')
     parser.add_argument('--no-quantized', action='store_false', dest='quantized', 
@@ -1878,6 +1944,8 @@ def main():
                         help='Enable verbose output for debugging model predictions and data loading.')
     parser.add_argument('--tolerance', type=float, default=0.1, 
                         help='Acceptable error tolerance in decimal scale (default: 0.1). E.g. +-0.1 allows +-1 class for 100 classes.')
+    parser.add_argument('--new', type=str, 
+                        help='Test a new model and update the existing CSV results (e.g. distilled_many_to_v16_10cls_RGB).')
     
     args, unknown = parser.parse_known_args()
     
@@ -1907,6 +1975,27 @@ def main():
         list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, 
                               input_dir=args.input_dir, exclude_model=args.exclude_model,
                               model_list=args.model_list)
+        return
+    
+    # Handle --new model (highest priority after list)
+    if args.new:
+        print(f"🚀 Benchmarking new model and updating CSV: {args.new}")
+        test_all_models(
+            num_test_images=args.test_images, 
+            quantized_only=args.quantized, 
+            debug=args.debug,
+            use_all_datasets=args.all_datasets,
+            list_failed=args.list_failed,
+            save_failed=args.save_failed,
+            subfolder=args.subfolder,
+            input_dir=args.input_dir,
+            exclude_model=args.exclude_model,
+            override_classes=args.classes,
+            override_color=args.color,
+            model_list=[args.new],
+            tolerance=args.tolerance,
+            update_csv=True # Flag to signal updating instead of overwriting
+        )
         return
     
     # Handle single model prediction (highest priority)

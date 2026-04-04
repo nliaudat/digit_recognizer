@@ -31,6 +31,8 @@ from utils.model_distiller_utils import (
 )
 from utils.train_distill_helper import load_distillation_data
 from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss
+from utils.train_trainingmonitor import TrainingMonitor
+import shutil
 
 # Registry for existing edge models (now dynamic metadata)
 EXISTING_EDGE_MODELS = {
@@ -64,11 +66,12 @@ def parse_args():
         help="Existing edge model to retrain."
     )
     parser.add_argument(
-        "--teacher",
+        "--teacher", "--teachers",
+        dest="teachers",
         type=str,
-        default="v30",
-        choices=params.get_available_model_names(),
-        help="Teacher model for distillation"
+        nargs="+",
+        default=["v16"],
+        help="Teacher model(s) for distillation"
     )
     parser.add_argument(
         "--teacher-color",
@@ -148,10 +151,19 @@ def parse_args():
     
     # Teacher
     parser.add_argument(
-        "--teacher-checkpoint",
+        "--teacher-checkpoint", "--teacher-checkpoints",
+        dest="teacher_checkpoints",
         type=str,
+        nargs="+",
         default=None,
-        help="Path to teacher weights (optional)"
+        help="Path(s) to teacher weights (optional)"
+    )
+    parser.add_argument(
+        "--teacher-weights",
+        type=float,
+        nargs="+",
+        default=None,
+        help="Weights for each teacher in the ensemble"
     )
     parser.add_argument(
         "--teacher-pretrained",
@@ -193,30 +205,45 @@ def find_best_checkpoint(
     ]
     
     # Normalize model name
+    model_name = model_name.strip("\\/")
     short_name = model_name.replace("digit_recognizer_", "").replace("_teacher", "").replace("_student", "")
     
     for base_dir in search_dirs:
         if not base_dir.exists():
             continue
             
-        # Search subdirectories
+        model_lower = model_name.lower()
+        short_lower = short_name.lower()
+
+        # 1. First check for EXACT directory match (this allows passing a full folder name as model_name)
+        exact_dir = base_dir / model_name
+        if exact_dir.is_dir():
+            candidate_paths = [
+                exact_dir / "best_model.keras",
+                exact_dir / "model" / "best_model.keras",
+                exact_dir / "model.keras",
+                exact_dir / "model" / "model.keras"
+            ]
+            for candidate in candidate_paths:
+                if candidate.exists():
+                    logger.info(f"Found exact folder match: {candidate}")
+                    return str(candidate)
+
+        # 2. Search subdirectories
         for sub_dir in base_dir.iterdir():
             if not sub_dir.is_dir():
                 continue
             
-            # Looser matching but safely exclude distillation artifacts
             dir_name_lower = sub_dir.name.lower()
-            if dir_name_lower.startswith("distilled_"):
-                continue
-                
-            model_lower = model_name.lower()
-            short_lower = short_name.lower()
             
-            # Require the directory explicitly start with the model name, or contain digit_recognizer_<model>
-            target_a = f"digit_recognizer_{short_lower}"
-            target_b = f"{short_lower}_"
+            # Strict matching for model name to avoid v3 matching v31
+            pattern_a = f"digit_recognizer_{short_lower}_"
+            pattern_b = f"{short_lower}_"
             
-            if target_a in dir_name_lower or target_b in dir_name_lower or model_lower == dir_name_lower:
+            if (dir_name_lower.startswith(pattern_a) or 
+                dir_name_lower.startswith(pattern_b) or 
+                dir_name_lower == model_lower or
+                dir_name_lower == f"digit_recognizer_{short_lower}"):
                 # Check root of the run folder and the 'model' subfolder 
                 candidate_paths = [
                     sub_dir / "best_model.keras",
@@ -226,13 +253,16 @@ def find_best_checkpoint(
                 ]
                 for candidate in candidate_paths:
                     if candidate.exists():
-                        logger.info(f"Found checkpoint: {candidate}")
+                        logger.info(f"Found fuzzy folder match: {candidate}")
                         return str(candidate)
         
-        # Search direct files
+        # 3. Search direct files (.keras files directly in search_dirs)
         for f in base_dir.glob("*.keras"):
             fname_lower = f.name.lower()
-            if model_lower in fname_lower or short_lower in fname_lower:
+            if (fname_lower.startswith(f"{model_lower}_") or 
+                fname_lower.startswith(f"{short_lower}_") or 
+                fname_lower == f"{model_lower}.keras" or
+                fname_lower == f"{short_lower}.keras"):
                 return str(f)
     
     return None
@@ -255,6 +285,12 @@ def load_or_create_model(
     # Create model dynamically
     model = create_model_by_name(model_name, num_classes=num_classes, input_shape=input_shape)
     
+    # Wrap for QAT if active in parameters
+    if getattr(params, 'USE_QAT', False) and getattr(params, 'QUANTIZE_MODEL', False):
+        from utils.train_qat_helper import create_qat_model
+        logger.info(f"🎯 Wrapping student {model_name} for QAT...")
+        model = create_qat_model(model)
+
     # Load weights if provided
     if load_path and os.path.exists(load_path):
         logger.info(f"Loading weights from {load_path}")
@@ -276,8 +312,11 @@ def retrain_with_teacher(
     """
     Retrain model using teacher distillation.
     """
+    # ── Verify Teacher(s) ────────────────────────────────────────────────
+    teacher_name = "Ensemble" if isinstance(teacher, tf.keras.Model) and teacher.name == "ensemble_teacher" else args.teachers[0]
+    
     logger.info("=" * 60)
-    logger.info(f"Retraining {args.model} with teacher {args.teacher}")
+    logger.info(f"Retraining {args.model} with teacher(s) {args.teachers}")
     logger.info(f"Mode: {args.mode}, T={args.temperature}, α={args.alpha}")
     logger.info("=" * 60)
     
@@ -369,6 +408,19 @@ def retrain_with_teacher(
         ),
     ]
     
+    # Add CSV text logger and Monitor for plots (parity with train.py)
+    log_csv_path = os.path.join(checkpoint_dir, "training_log.csv")
+    callbacks.append(tf.keras.callbacks.CSVLogger(log_csv_path))
+    
+    monitor = TrainingMonitor(checkpoint_dir)
+    
+    class TrainingMonitorCallbackWrapper(tf.keras.callbacks.Callback):
+        def on_epoch_end(self, epoch, logs=None):
+            monitor.model = self.model
+            monitor.on_epoch_end(epoch, logs)
+            
+    callbacks.append(TrainingMonitorCallbackWrapper())
+    
     # Train
     history = distiller.fit(
         x_train, y_train,
@@ -378,6 +430,8 @@ def retrain_with_teacher(
         callbacks=callbacks,
         verbose=2,
     )
+    
+    monitor.save_training_plots()
     
     best_val_acc = max(history.history.get("val_accuracy", [0.0]))
     logger.info(f"Best validation accuracy: {best_val_acc:.4f}")
@@ -415,7 +469,7 @@ def main():
     logger.info("🚀 Retraining Existing Model with Teacher")
     logger.info("=" * 60)
     logger.info(f"  Model:      {args.model}")
-    logger.info(f"  Teacher:    {args.teacher}")
+    logger.info(f"  Teacher(s): {args.teachers}")
     logger.info(f"  Classes:    {args.classes}")
     logger.info(f"  Color:      {args.color.upper()}")
     logger.info(f"  Temperature: {args.temperature}")
@@ -444,53 +498,71 @@ def main():
     # Redirect intermediate checkpoints to this folder
     args.output_dir = export_dir
     
-    # Load or create teacher
+    # ── Load or create teacher(s) ─────────────────────────────────────────
     from models.model_factory import create_model_by_name
     
     teacher_color = args.teacher_color if args.teacher_color else args.color
     teacher_channels = 1 if teacher_color == "gray" else 3
     teacher_input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, teacher_channels)
     
-    # Auto-find teacher if not provided
-    actual_teacher_checkpoint = args.teacher_checkpoint
-    if not actual_teacher_checkpoint:
-        found = find_best_checkpoint(args.teacher, args.classes, teacher_color)
-        if found:
-            logger.info(f"Found existing teacher checkpoint: {found}")
-            actual_teacher_checkpoint = found
+    loaded_teachers = []
+    from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss, sparse_focal_loss, focal_loss
+    import importlib, inspect
+    
+    for i, t_name in enumerate(args.teachers):
+        actual_teacher_checkpoint = None
+        if args.teacher_checkpoints and i < len(args.teacher_checkpoints):
+            actual_teacher_checkpoint = args.teacher_checkpoints[i]
+        
+        # Auto-find teacher if not provided
+        if not actual_teacher_checkpoint:
+            found = find_best_checkpoint(t_name, args.classes, teacher_color)
+            if found:
+                logger.info(f"Found existing teacher checkpoint for {t_name}: {found}")
+                actual_teacher_checkpoint = found
 
-    if actual_teacher_checkpoint and os.path.exists(actual_teacher_checkpoint):
-        logger.info(f"Loading teacher from {actual_teacher_checkpoint}")
-        # Pass custom objects for focal loss if needed
-        from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss, sparse_focal_loss, focal_loss
-        custom_objects = {
-            "DynamicSparseFocalLoss": DynamicSparseFocalLoss,
-            "DynamicFocalLoss": DynamicFocalLoss,
-            "sparse_focal_loss": sparse_focal_loss,
-            "focal_loss": focal_loss
-        }
-        # Auto-inject any custom layers from the teacher's script
-        clean_name = args.teacher.replace('digit_recognizer_', '').replace('_teacher', '')
-        for prefix in ["models.", "models.digit_recognizer_"]:
-            try:
-                import importlib, inspect
-                mod = importlib.import_module(f"{prefix}{clean_name}")
-                for name, obj in inspect.getmembers(mod, inspect.isclass):
-                    if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
-                        custom_objects[name] = obj
-                break # Success
-            except (ModuleNotFoundError, Exception):
-                continue
-            
-        teacher = tf.keras.models.load_model(actual_teacher_checkpoint, custom_objects=custom_objects, safe_mode=False)
+        if actual_teacher_checkpoint and os.path.exists(actual_teacher_checkpoint):
+            logger.info(f"Loading teacher {t_name} from {actual_teacher_checkpoint}")
+            # Pass custom objects for focal loss if needed
+            custom_objects = {
+                "DynamicSparseFocalLoss": DynamicSparseFocalLoss,
+                "DynamicFocalLoss": DynamicFocalLoss,
+                "sparse_focal_loss": sparse_focal_loss,
+                "focal_loss": focal_loss
+            }
+            # Auto-inject any custom layers from the teacher's script
+            clean_name = t_name.replace('digit_recognizer_', '').replace('_teacher', '')
+            for prefix in ["models.", "models.digit_recognizer_", "models._tested_but_rejected.", "models._tested_but_rejected.digit_recognizer_"]:
+                try:
+                    mod = importlib.import_module(f"{prefix}{clean_name}")
+                    for name, obj in inspect.getmembers(mod, inspect.isclass):
+                        if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
+                            custom_objects[name] = obj
+                    break # Success
+                except (ModuleNotFoundError, Exception):
+                    continue
+                
+            t_model = tf.keras.models.load_model(actual_teacher_checkpoint, custom_objects=custom_objects, safe_mode=False)
+        else:
+            logger.warning(f"No trained teacher found for {t_name}. Using random-weight teacher (not recommended!)")
+            t_model = create_model_by_name(
+                t_name,
+                num_classes=args.classes,
+                input_shape=teacher_input_shape,
+                pretrained=args.teacher_pretrained,
+            )
+        
+        # Freeze teacher
+        t_model = freeze_teacher_model(t_model)
+        loaded_teachers.append(t_model)
+    
+    if len(loaded_teachers) > 1:
+        from utils.ensemble_teacher import EnsembleTeacher
+        teacher = EnsembleTeacher(loaded_teachers, teacher_weights=args.teacher_weights)
+        teacher_name_str = "+".join(args.teachers)
     else:
-        logger.warning(f"No trained teacher found for {args.teacher}. Using random-weight teacher (not recommended!)")
-        teacher = create_model_by_name(
-            args.teacher,
-            num_classes=args.classes,
-            input_shape=teacher_input_shape,
-            pretrained=args.teacher_pretrained,
-        )
+        teacher = loaded_teachers[0]
+        teacher_name_str = args.teachers[0]
     
     # Auto-find student baseline if not provided
     actual_student_checkpoint = args.load_checkpoint
@@ -535,11 +607,14 @@ def main():
     if args.quantize:
         # Path where Keras/TFLite models will be saved (flat like train.py)
         export_path = os.path.join(export_dir, args.model)
+        
+        # Increase calibration data for PTQ (ignored if QAT was already active)
+        n_calib = min(1000, len(x_test))
         tflite_path = export_student_for_edge(
             retrained_model,
             export_path,
             quantize=True,
-            representative_dataset=x_test[:100],
+            representative_dataset=x_test[:n_calib],
             target_hardware="esp32"
         )
         logger.info(f"Exported to: {tflite_path}")
@@ -549,7 +624,7 @@ def main():
     # Save results
     results = {
         "model": args.model,
-        "teacher": args.teacher,
+        "teacher": teacher_name_str,
         "classes": args.classes,
         "color_mode": args.color,
         "distillation": {
@@ -569,6 +644,53 @@ def main():
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     
+    # Save alias for parity with train.py
+    with open(os.path.join(export_dir, "training_config.json"), "w") as f:
+        json.dump(results, f, indent=2)
+    
+    # ── 7. Generate Training Resume (parity with train.py) ───────────────
+    from utils.train_helpers import save_model_summary_to_file
+    from utils.train_analyse import analyze_confusion_matrix, analyze_training_history, verify_tflite_full_qat
+    
+    # Save standard best_model.keras in the root
+    retrained_model.save(os.path.join(export_dir, "best_model.keras"))
+    
+    # Save model summary
+    save_model_summary_to_file(retrained_model, export_dir)
+    
+    # Generate Confusion Matrix
+    try:
+        analysis_dir = os.path.join(export_dir, "analysis")
+        os.makedirs(analysis_dir, exist_ok=True)
+        analyze_confusion_matrix(retrained_model, x_test, y_test, save_path=analysis_dir)
+    except Exception as e:
+        logger.warning(f"⚠️ Could not generate confusion matrix: {e}")
+
+    # Generate Detailed Training plot from CSV if possible
+    try:
+        csv_log = os.path.join(export_dir, "training_log.csv")
+        if os.path.exists(csv_log):
+            analyze_training_history(csv_log, save_path=analysis_dir)
+    except Exception as e:
+        logger.warning(f"⚠️ Could not generate training history plot: {e}")
+
+    # ── 8. Full QAT Verification ──
+    try:
+        if args.quantize and tflite_path and os.path.exists(tflite_path):
+            qat_report = verify_tflite_full_qat(tflite_path, debug=False)
+            if qat_report:
+                results['qat_verification'] = qat_report
+                if qat_report['is_full_qat']:
+                    logger.info("✅ TFLite QAT Verification: Model is FULL QAT (integer only)")
+                else:
+                    logger.warning("⚠️ TFLite QAT Verification: Model may NOT be full QAT (float ops detected)")
+                    logger.warning(f"   I/O: {qat_report['input_dtype']} / {qat_report['output_dtype']}")
+                    logger.warning(f"   Quantized Tensors: {qat_report['quantization_ratio']:.1%}")
+            else:
+                logger.warning("⚠️ Could not perform QAT verification")
+    except Exception as e:
+        logger.warning(f"⚠️ QAT status verification failed: {e}")
+
     logger.info(f"\n✅ Results saved to {results_path}")
     
     return retrained_model, results
