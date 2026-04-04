@@ -614,3 +614,82 @@ def model_size_analysis(model_dir):
         return analysis_df
     
     return None
+
+
+def verify_tflite_full_qat(tflite_path, debug=False):
+    """
+    Verify if a TFLite model is "full QAT" (Quantization-Aware Training).
+    Full QAT models should have quantized inputs/outputs and mostly 
+    integer-based operations.
+    """
+    if debug:
+        print(f"\n🔍 VERIFYING FULL QAT: {os.path.basename(tflite_path)}")
+        print("=" * 50)
+    
+    try:
+        import numpy as np
+        import tensorflow as tf
+        
+        # Load TFLite model
+        interpreter = tf.lite.Interpreter(model_path=tflite_path)
+        interpreter.allocate_tensors()
+        
+        input_details = interpreter.get_input_details()
+        output_details = interpreter.get_output_details()
+        tensor_details = interpreter.get_tensor_details()
+        
+        # 1. Check Input/Output Types
+        input_dtype = input_details[0]['dtype']
+        output_dtype = output_details[0]['dtype']
+        
+        # Check if they are quantized types (int8 or uint8)
+        is_io_quantized = input_dtype in [np.int8, np.uint8] and output_dtype in [np.int8, np.uint8]
+        
+        if debug:
+            print(f"📊 I/O Analysis:")
+            print(f"   Input Type:  {input_dtype}")
+            print(f"   Output Type: {output_dtype}")
+            print(f"   I/O Quantized: {'✅ YES' if is_io_quantized else '❌ NO'}")
+
+        # 2. Check internal tensors for quantization parameters
+        quantized_tensors = 0
+        total_tensors = 0
+        
+        for tensor in tensor_details:
+            total_tensors += 1
+            if 'quantization' in tensor and tensor['quantization'][0] != 0.0:
+                quantized_tensors += 1
+        
+        quantization_ratio = quantized_tensors / total_tensors if total_tensors > 0 else 0
+        
+        if debug:
+            print(f"📊 Tensor Analysis:")
+            print(f"   Quantized Tensors: {quantized_tensors}/{total_tensors} ({quantization_ratio:.1%})")
+
+        # 3. Decision
+        is_full_qat = is_io_quantized and quantization_ratio > 0.3
+        
+        if debug:
+            if is_full_qat:
+                print("\n🎯 RESULT: Model appears to be FULL QAT")
+            else:
+                print("\n⚠️  RESULT: Model might NOT be full QAT")
+                if not is_io_quantized:
+                    print(f"   - Reason: I/O are not quantized ({input_dtype}/{output_dtype})")
+                if quantization_ratio <= 0.3:
+                    print(f"   - Reason: Low quantization ratio ({quantization_ratio:.1%})")
+
+        return {
+            'is_full_qat': is_full_qat,
+            'is_io_quantized': is_io_quantized,
+            'input_dtype': str(input_dtype),
+            'output_dtype': str(output_dtype),
+            'quantization_ratio': float(quantization_ratio),
+            'quantized_tensors': quantized_tensors,
+            'total_tensors': total_tensors
+        }
+        
+    except Exception as e:
+        if debug:
+            print(f"❌ Verification failed: {e}")
+        return None

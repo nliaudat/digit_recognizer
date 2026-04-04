@@ -126,7 +126,8 @@ def parse_args() -> argparse.Namespace:
 
     # ── Model selection ────────────────────────────────────────────────────
     parser.add_argument(
-        "--teachers",
+        "--teacher", "--teachers",
+        dest="teachers",
         type=str,
         nargs="+",
         default=["v30"],

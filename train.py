@@ -1148,6 +1148,22 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         if params.QUANTIZE_MODEL:
             print(f"   Quantized Model Size: {quantization_results['tflite_size']:.1f} KB")
             print(f"   Float Model Size: {quantization_results['keras_size']:.1f} KB")
+            
+            # ── Full QAT Verification ──
+            try:
+                if quantized_tflite_path and os.path.exists(quantized_tflite_path):
+                    from utils.train_analyse import verify_tflite_full_qat
+                    qat_report = verify_tflite_full_qat(quantized_tflite_path, debug=debug)
+                    if qat_report:
+                        if qat_report['is_full_qat']:
+                            print("✅ TFLite QAT Verification: Model is FULL QAT (integer only)")
+                        else:
+                            print("⚠️ TFLite QAT Verification: Model may NOT be full QAT (float ops detected)")
+                            print(f"   I/O: {qat_report['input_dtype']} / {qat_report['output_dtype']}")
+                    else:
+                        print("⚠️ Could not perform QAT verification")
+            except Exception as e:
+                print(f"⚠️ QAT status verification failed: {e}")
             if quantization_results['keras_size'] > 0:
                 size_reduction = (
                     (quantization_results['keras_size'] - quantization_results['tflite_size']) / 

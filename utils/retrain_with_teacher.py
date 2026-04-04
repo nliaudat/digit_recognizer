@@ -31,6 +31,8 @@ from utils.model_distiller_utils import (
 )
 from utils.train_distill_helper import load_distillation_data
 from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss
+from utils.train_trainingmonitor import TrainingMonitor
+import shutil
 
 # Registry for existing edge models (now dynamic metadata)
 EXISTING_EDGE_MODELS = {
@@ -212,11 +214,14 @@ def find_best_checkpoint(
             model_lower = model_name.lower()
             short_lower = short_name.lower()
             
-            # Require the directory explicitly start with the model name, or contain digit_recognizer_<model>
-            target_a = f"digit_recognizer_{short_lower}"
-            target_b = f"{short_lower}_"
+            # Strict matching for model name to avoid v3 matching v31
+            pattern_a = f"digit_recognizer_{short_lower}_"
+            pattern_b = f"{short_lower}_"
             
-            if target_a in dir_name_lower or target_b in dir_name_lower or model_lower == dir_name_lower:
+            if (dir_name_lower.startswith(pattern_a) or 
+                dir_name_lower.startswith(pattern_b) or 
+                dir_name_lower == model_lower or
+                dir_name_lower == f"digit_recognizer_{short_lower}"):
                 # Check root of the run folder and the 'model' subfolder 
                 candidate_paths = [
                     sub_dir / "best_model.keras",
@@ -229,10 +234,13 @@ def find_best_checkpoint(
                         logger.info(f"Found checkpoint: {candidate}")
                         return str(candidate)
         
-        # Search direct files
+        # Search direct files (.keras files directly in search_dirs)
         for f in base_dir.glob("*.keras"):
             fname_lower = f.name.lower()
-            if model_lower in fname_lower or short_lower in fname_lower:
+            if (fname_lower.startswith(f"{model_lower}_") or 
+                fname_lower.startswith(f"{short_lower}_") or 
+                fname_lower == f"{model_lower}.keras" or
+                fname_lower == f"{short_lower}.keras"):
                 return str(f)
     
     return None
@@ -255,6 +263,12 @@ def load_or_create_model(
     # Create model dynamically
     model = create_model_by_name(model_name, num_classes=num_classes, input_shape=input_shape)
     
+    # Wrap for QAT if active in parameters
+    if getattr(params, 'USE_QAT', False) and getattr(params, 'QUANTIZE_MODEL', False):
+        from utils.train_qat_helper import create_qat_model
+        logger.info(f"🎯 Wrapping student {model_name} for QAT...")
+        model = create_qat_model(model)
+
     # Load weights if provided
     if load_path and os.path.exists(load_path):
         logger.info(f"Loading weights from {load_path}")
@@ -369,6 +383,19 @@ def retrain_with_teacher(
         ),
     ]
     
+    # Add CSV text logger and Monitor for plots (parity with train.py)
+    log_csv_path = os.path.join(checkpoint_dir, "training_log.csv")
+    callbacks.append(tf.keras.callbacks.CSVLogger(log_csv_path))
+    
+    monitor = TrainingMonitor(checkpoint_dir)
+    
+    class TrainingMonitorCallbackWrapper(tf.keras.callbacks.Callback):
+        def on_epoch_end(self, epoch, logs=None):
+            monitor.model = self.model
+            monitor.on_epoch_end(epoch, logs)
+            
+    callbacks.append(TrainingMonitorCallbackWrapper())
+    
     # Train
     history = distiller.fit(
         x_train, y_train,
@@ -378,6 +405,8 @@ def retrain_with_teacher(
         callbacks=callbacks,
         verbose=2,
     )
+    
+    monitor.save_training_plots()
     
     best_val_acc = max(history.history.get("val_accuracy", [0.0]))
     logger.info(f"Best validation accuracy: {best_val_acc:.4f}")
@@ -535,11 +564,14 @@ def main():
     if args.quantize:
         # Path where Keras/TFLite models will be saved (flat like train.py)
         export_path = os.path.join(export_dir, args.model)
+        
+        # Increase calibration data for PTQ (ignored if QAT was already active)
+        n_calib = min(1000, len(x_test))
         tflite_path = export_student_for_edge(
             retrained_model,
             export_path,
             quantize=True,
-            representative_dataset=x_test[:100],
+            representative_dataset=x_test[:n_calib],
             target_hardware="esp32"
         )
         logger.info(f"Exported to: {tflite_path}")
@@ -569,6 +601,53 @@ def main():
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     
+    # Save alias for parity with train.py
+    with open(os.path.join(export_dir, "training_config.json"), "w") as f:
+        json.dump(results, f, indent=2)
+    
+    # ── 7. Generate Training Resume (parity with train.py) ───────────────
+    from utils.train_helpers import save_model_summary_to_file
+    from utils.train_analyse import analyze_confusion_matrix, analyze_training_history, verify_tflite_full_qat
+    
+    # Save standard best_model.keras in the root
+    retrained_model.save(os.path.join(export_dir, "best_model.keras"))
+    
+    # Save model summary
+    save_model_summary_to_file(retrained_model, export_dir)
+    
+    # Generate Confusion Matrix
+    try:
+        analysis_dir = os.path.join(export_dir, "analysis")
+        os.makedirs(analysis_dir, exist_ok=True)
+        analyze_confusion_matrix(retrained_model, x_test, y_test, save_path=analysis_dir)
+    except Exception as e:
+        logger.warning(f"⚠️ Could not generate confusion matrix: {e}")
+
+    # Generate Detailed Training plot from CSV if possible
+    try:
+        csv_log = os.path.join(export_dir, "training_log.csv")
+        if os.path.exists(csv_log):
+            analyze_training_history(csv_log, save_path=analysis_dir)
+    except Exception as e:
+        logger.warning(f"⚠️ Could not generate training history plot: {e}")
+
+    # ── 8. Full QAT Verification ──
+    try:
+        if args.quantize and tflite_path and os.path.exists(tflite_path):
+            qat_report = verify_tflite_full_qat(tflite_path, debug=False)
+            if qat_report:
+                results['qat_verification'] = qat_report
+                if qat_report['is_full_qat']:
+                    logger.info("✅ TFLite QAT Verification: Model is FULL QAT (integer only)")
+                else:
+                    logger.warning("⚠️ TFLite QAT Verification: Model may NOT be full QAT (float ops detected)")
+                    logger.warning(f"   I/O: {qat_report['input_dtype']} / {qat_report['output_dtype']}")
+                    logger.warning(f"   Quantized Tensors: {qat_report['quantization_ratio']:.1%}")
+            else:
+                logger.warning("⚠️ Could not perform QAT verification")
+    except Exception as e:
+        logger.warning(f"⚠️ QAT status verification failed: {e}")
+
     logger.info(f"\n✅ Results saved to {results_path}")
     
     return retrained_model, results

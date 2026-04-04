@@ -77,6 +77,10 @@ class DynamicSparseFocalLoss(tf.keras.losses.Loss):
     """
     def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None,
                  label_smoothing=None, name='dynamic_sparse_focal_loss', **kwargs):
+        # Keras 3 compatibility: 'auto' is not a valid reduction anymore
+        if kwargs.get('reduction') == 'auto':
+            kwargs['reduction'] = 'sum_over_batch_size'
+            
         super().__init__(name=name, **kwargs)
         self.gamma = tf.Variable(gamma, dtype=tf.float32, trainable=False, name=f"{name}_gamma")
         
@@ -127,6 +131,10 @@ class DynamicFocalLoss(tf.keras.losses.Loss):
     """Same as DynamicSparseFocalLoss but for one-hot labels."""
     def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None,
                  label_smoothing=None, name='dynamic_focal_loss', **kwargs):
+        # Keras 3 compatibility: 'auto' is not a valid reduction anymore
+        if kwargs.get('reduction') == 'auto':
+            kwargs['reduction'] = 'sum_over_batch_size'
+            
         super().__init__(name=name, **kwargs)
         self.gamma = tf.Variable(gamma, dtype=tf.float32, trainable=False, name=f"{name}_gamma")
         

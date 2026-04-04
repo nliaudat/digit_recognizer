@@ -41,7 +41,7 @@ import pandas as pd
 from PIL import Image
 import shutil
 
-from utils.model_distiller_utils import create_tflite_interpreter
+
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
         self.model_path = model_path
@@ -54,6 +54,7 @@ class TFLiteDigitPredictor:
         """Load TFLite model"""
         print(f"Loading TFLite model: {self.model_path}")
         
+        from utils.model_distiller_utils import create_tflite_interpreter
         self.interpreter = create_tflite_interpreter(self.model_path)
         
         self.input_details = self.interpreter.get_input_details()
@@ -246,6 +247,7 @@ def find_model_path(model_name=None, input_dir=None):
 def get_model_parameters_count(model_path):
     """Get the number of parameters in a TFLite model"""
     try:
+        from utils.model_distiller_utils import create_tflite_interpreter
         interpreter = create_tflite_interpreter(model_path)
         
         total_params = 0
@@ -270,6 +272,7 @@ def is_quantized_model(model_path):
         if 'qat' in path_lower or 'quant' in path_lower:
             return True
             
+        from utils.model_distiller_utils import create_tflite_interpreter
         interpreter = create_tflite_interpreter(model_path)
         input_details = interpreter.get_input_details()
         input_dtype = input_details[0]['dtype']
@@ -385,6 +388,7 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
 def is_valid_tflite_model(model_path):
     """Check if a TFLite model file is valid and can be loaded"""
     try:
+        from utils.model_distiller_utils import create_tflite_interpreter
         interpreter = create_tflite_interpreter(model_path)
         return True
     except Exception as e:
@@ -410,6 +414,39 @@ def _decode_bench_image(image_path, label, fname, target_h, target_w, grayscale)
 
 _cached_test_data = None
 _cached_test_data_params = None
+
+def list_available_models(quantized_only=False, subfolder=None, input_dir=None, exclude_model=None, model_list=None):
+    """List all available models in a table format and exit."""
+    models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, 
+                            input_dir=input_dir, exclude_model=exclude_model, 
+                            model_list=model_list)
+    
+    if not models:
+        print("No models found.")
+        return
+
+    headers = ['Directory', 'Model', 'Type', 'Params', 'Size (KB)']
+    table_data = []
+    
+    for m in models:
+        params_count = m['parameters']
+        if params_count >= 1_000_000:
+            params_str = f"{params_count/1_000_000:.1f}M"
+        elif params_count >= 1_000:
+            params_str = f"{params_count/1_000:.1f}K"
+        else:
+            params_str = str(params_count)
+            
+        table_data.append([
+            m['directory'],
+            m['name'],
+            m['type'],
+            params_str,
+            f"{m['size_kb']:.1f}"
+        ])
+    
+    print("\nAvailable models found:")
+    print(tabulate(table_data, headers=headers, tablefmt='simple_grid', stralign='right'))
 
 def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     """
