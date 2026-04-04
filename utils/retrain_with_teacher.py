@@ -212,18 +212,29 @@ def find_best_checkpoint(
         if not base_dir.exists():
             continue
             
-        # Search subdirectories
+        model_lower = model_name.lower()
+        short_lower = short_name.lower()
+
+        # 1. First check for EXACT directory match (this allows passing a full folder name as model_name)
+        exact_dir = base_dir / model_name
+        if exact_dir.is_dir():
+            candidate_paths = [
+                exact_dir / "best_model.keras",
+                exact_dir / "model" / "best_model.keras",
+                exact_dir / "model.keras",
+                exact_dir / "model" / "model.keras"
+            ]
+            for candidate in candidate_paths:
+                if candidate.exists():
+                    logger.info(f"Found exact folder match: {candidate}")
+                    return str(candidate)
+
+        # 2. Search subdirectories
         for sub_dir in base_dir.iterdir():
             if not sub_dir.is_dir():
                 continue
             
-            # Looser matching but safely exclude distillation artifacts
             dir_name_lower = sub_dir.name.lower()
-            if dir_name_lower.startswith("distilled_"):
-                continue
-                
-            model_lower = model_name.lower()
-            short_lower = short_name.lower()
             
             # Strict matching for model name to avoid v3 matching v31
             pattern_a = f"digit_recognizer_{short_lower}_"
@@ -242,10 +253,10 @@ def find_best_checkpoint(
                 ]
                 for candidate in candidate_paths:
                     if candidate.exists():
-                        logger.info(f"Found checkpoint: {candidate}")
+                        logger.info(f"Found fuzzy folder match: {candidate}")
                         return str(candidate)
         
-        # Search direct files (.keras files directly in search_dirs)
+        # 3. Search direct files (.keras files directly in search_dirs)
         for f in base_dir.glob("*.keras"):
             fname_lower = f.name.lower()
             if (fname_lower.startswith(f"{model_lower}_") or 
@@ -521,7 +532,7 @@ def main():
             }
             # Auto-inject any custom layers from the teacher's script
             clean_name = t_name.replace('digit_recognizer_', '').replace('_teacher', '')
-            for prefix in ["models.", "models.digit_recognizer_"]:
+            for prefix in ["models.", "models.digit_recognizer_", "models._tested_but_rejected.", "models._tested_but_rejected.digit_recognizer_"]:
                 try:
                     mod = importlib.import_module(f"{prefix}{clean_name}")
                     for name, obj in inspect.getmembers(mod, inspect.isclass):
