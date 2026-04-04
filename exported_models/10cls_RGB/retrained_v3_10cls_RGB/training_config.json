@@ -1,0 +1,17 @@
+{
+  "model": "v3",
+  "teacher": "v16",
+  "classes": 10,
+  "color_mode": "rgb",
+  "distillation": {
+    "mode": "soft",
+    "temperature": 6.0,
+    "alpha": 0.5,
+    "progressive": true
+  },
+  "baseline_accuracy": 0.9640077821011673,
+  "retrained_accuracy": 0.9713035019455253,
+  "improvement": 0.007295719844357951,
+  "checkpoint": "exported_models/10cls_RGB/retrained_v3_10cls_RGB_0404_0937/best_model.keras",
+  "timestamp": "2026-04-04T09:40:12.901965"
+}
