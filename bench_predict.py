@@ -288,8 +288,7 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
     Args:
         quantized_only: If True, only return quantized models
         subfolder: If specified, only look in this specific subfolder
-        input_dir: Base directory to search for models. If None, defaults to params.OUTPUT_DIR.
-        exclude_model: Model name to exclude from testing
+        exclude_model: List of model names or strings to exclude from testing
         debug: Enable debug output
         model_list: Optional list of specific models to include (names or directories)
     """
@@ -328,11 +327,14 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
         tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
         
         for model_file in tflite_files:
-            # Skip excluded model if specified
-            if exclude_model and (exclude_model in model_file or exclude_model in training_dir):
-                if debug:
-                    print(f"Skipping excluded model: {training_dir}/{model_file}")
-                continue
+            # Skip excluded models if specified
+            if exclude_model:
+                # Handle both single string and list of strings for flexibility
+                exclude_list = [exclude_model] if isinstance(exclude_model, str) else exclude_model
+                if any(excl in model_file or excl in training_dir for excl in exclude_list):
+                    if debug:
+                        print(f"Skipping excluded model: {training_dir}/{model_file}")
+                    continue
                 
             # Filter by model_list if provided
             if model_list:
@@ -1207,7 +1209,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
         print(f"DATASETS: {num_test_images} sampled images")
     print(f"MODELS: {'Quantized only' if quantized_only else 'All models'}")
     if exclude_model:
-        print(f"EXCLUDED MODEL: '{exclude_model}'")
+        excl_str = ", ".join(exclude_model) if not isinstance(exclude_model, str) else exclude_model
+        print(f"EXCLUDED MODELS: {excl_str}")
     if list_failed or save_failed:
         print(f"FAILED PREDICTIONS: {len(all_failed_predictions)} total across all models")
     print(f"{'='*80}")
@@ -1891,8 +1894,10 @@ def main():
                         help='Base directory to search for models (default: exported_models)')
     parser.add_argument('--subfolder', type=str, 
                         help='Restrict search to a specific subfolder within the input directory.')
-    parser.add_argument('--exclude_model', type=str, default=None,
-                        help='Exclude models containing this string from the benchmark.')
+    parser.add_argument('--exclude_model', '--exclude_models',
+                        dest='exclude_model',
+                        type=str, nargs='+', default=None,
+                        help='Exclude models containing these strings from the benchmark.')
     parser.add_argument('--quantized', action='store_true', default=True, 
                         help='Only include quantized models (True by default).')
     parser.add_argument('--no-quantized', action='store_false', dest='quantized', 

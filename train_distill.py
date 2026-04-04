@@ -341,7 +341,11 @@ def main() -> None:
         redirect_args = [
             sys.argv[0],
             "--model", args.existing_model,
-            "--teacher", args.teachers[0],
+            "--teachers"
+        ]
+        redirect_args.extend(args.teachers)
+        
+        redirect_args.extend([
             "--classes", str(args.classes),
             "--color", args.color,
             "--temperature", str(args.temperature),
@@ -350,14 +354,18 @@ def main() -> None:
             "--epochs", str(args.epochs),
             "--lr", str(args.lr),
             "--batch-size", str(args.batch),
-        ]
+        ])
         
         if args.progressive:
             redirect_args.append("--progressive")
         if args.load_model_checkpoint:
             redirect_args.extend(["--load-checkpoint", args.load_model_checkpoint])
         if args.load_teachers:
-            redirect_args.extend(["--teacher-checkpoint", args.load_teachers[0]])
+            redirect_args.append("--teacher-checkpoints")
+            redirect_args.extend(args.load_teachers)
+        if args.teacher_weights:
+            redirect_args.append("--teacher-weights")
+            redirect_args.extend([str(w) for w in args.teacher_weights])
         if args.teacher_color:
             redirect_args.extend(["--teacher-color", args.teacher_color])
         if not args.no_quantize:
