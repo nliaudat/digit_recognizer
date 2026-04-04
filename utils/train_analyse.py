@@ -10,6 +10,9 @@ from tqdm.auto import tqdm
 import time
 import tempfile
 import shutil
+import logging
+
+logger = logging.getLogger(__name__)
 
 import parameters as params
 
@@ -630,8 +633,12 @@ def verify_tflite_full_qat(tflite_path, debug=False):
         import numpy as np
         import tensorflow as tf
         
-        # Load TFLite model
-        interpreter = tf.lite.Interpreter(model_path=tflite_path)
+        # Load TFLite model - explicitly disable delegates for parity with TFLM/ESP32
+        # and to avoid XNNPACK-specific allocation failures on large models
+        interpreter = tf.lite.Interpreter(
+            model_path=tflite_path,
+            experimental_op_resolver_type=tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+        )
         interpreter.allocate_tensors()
         
         input_details = interpreter.get_input_details()
@@ -690,6 +697,8 @@ def verify_tflite_full_qat(tflite_path, debug=False):
         }
         
     except Exception as e:
+        logger.error(f"❌ QAT Verification Error: {e}")
         if debug:
-            print(f"❌ Verification failed: {e}")
+            import traceback
+            traceback.print_exc()
         return None
