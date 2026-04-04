@@ -1,0 +1,38 @@
+{
+  "teacher": {
+    "type": "v16+v4+v23+v17",
+    "accuracy": 0.9959143968871595,
+    "size_kb": 214.6279296875
+  },
+  "student": {
+    "type": "v23",
+    "accuracy": 0.9760700389105058,
+    "size_kb": 49.673828125,
+    "tflite_path": "exported_models/10cls_RGB/distilled_v16+v4+v23+v17_to_v23_10cls_RGB_0404_1515/v23.tflite"
+  },
+  "distillation": {
+    "mode": "soft",
+    "temperature": 6.0,
+    "alpha": 0.5,
+    "use_progressive": true
+  },
+  "comparison": {
+    "accuracy_drop": 0.019844357976653737,
+    "size_ratio": 4.320744701765423,
+    "compression_ratio": 4.320744701765423,
+    "accuracy_retention": 0.9800742332486814
+  },
+  "training": {
+    "num_classes": 10,
+    "color_mode": "rgb",
+    "batch_size": 32,
+    "teacher_lr": 0.001,
+    "student_lr": 0.001,
+    "input_shape": [
+      32,
+      20,
+      3
+    ]
+  },
+  "timestamp": "2026-04-04T15:23:57.154290"
+}
