@@ -1072,7 +1072,8 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
 def test_all_models(num_test_images=0, quantized_only=False, debug=False, 
                     use_all_datasets=True, list_failed=False, save_failed=False,
                     subfolder=None, input_dir=None, exclude_model=None,
-                    override_classes=None, override_color=None, model_list=None, tolerance=0.1):
+                    override_classes=None, override_color=None, 
+                    model_list=None, tolerance=0.1, update_csv=False):
     """Test all valid models with optional subfolder filtering and model exclusion
     
     Args:
@@ -1258,7 +1259,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
         quantized_only=quantized_only,
         use_all_images=use_all_datasets,
         test_images_count=num_test_images,
-        output_dir=input_dir
+        output_dir=input_dir,
+        update_csv=update_csv # Use specified update_csv flag
     )
     
     # Generate markdown report
@@ -1281,8 +1283,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
     
     return results, all_failed_predictions
 
-def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_images_count=0, output_dir=None):
-    """Save FULL results to CSV file with all information"""
+def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_images_count=0, output_dir=None, update_csv=False):
+    """Save FULL results to CSV file with all information - optionally update instead of overwrite."""
     if output_dir is None:
         output_dir = params.OUTPUT_DIR
         
@@ -1316,6 +1318,28 @@ def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_
             'Inferences_per_second': float(result['Inf/s']),
             'Tested_Images': result['Tested']
         })
+    
+    # Update logic - Load existing CSV and merge
+    if update_csv and os.path.exists(csv_path):
+        try:
+            existing_data = []
+            with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                existing_data = list(reader)
+            
+            # Merge logic: if (Directory + Model) exists, update it. Else append it.
+            # Convert existing_data to a dict for easier lookup
+            data_map = {(row['Directory'], row['Model']): row for row in existing_data}
+            
+            for new_row in csv_data:
+                key = (new_row['Directory'], new_row['Model'])
+                data_map[key] = {k: str(v) for k, v in new_row.items()}
+            
+            csv_data = list(data_map.values())
+            print(f"🔄 Appended/Updated {len(results)} models into existing CSV (total: {len(csv_data)})")
+            
+        except Exception as e:
+            print(f"⚠️  Could not update existing CSV: {e}. Falling back to overwrite.")
     
     # Write to CSV
     with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
@@ -1920,6 +1944,8 @@ def main():
                         help='Enable verbose output for debugging model predictions and data loading.')
     parser.add_argument('--tolerance', type=float, default=0.1, 
                         help='Acceptable error tolerance in decimal scale (default: 0.1). E.g. +-0.1 allows +-1 class for 100 classes.')
+    parser.add_argument('--new', type=str, 
+                        help='Test a new model and update the existing CSV results (e.g. distilled_many_to_v16_10cls_RGB).')
     
     args, unknown = parser.parse_known_args()
     
@@ -1949,6 +1975,27 @@ def main():
         list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, 
                               input_dir=args.input_dir, exclude_model=args.exclude_model,
                               model_list=args.model_list)
+        return
+    
+    # Handle --new model (highest priority after list)
+    if args.new:
+        print(f"🚀 Benchmarking new model and updating CSV: {args.new}")
+        test_all_models(
+            num_test_images=args.test_images, 
+            quantized_only=args.quantized, 
+            debug=args.debug,
+            use_all_datasets=args.all_datasets,
+            list_failed=args.list_failed,
+            save_failed=args.save_failed,
+            subfolder=args.subfolder,
+            input_dir=args.input_dir,
+            exclude_model=args.exclude_model,
+            override_classes=args.classes,
+            override_color=args.color,
+            model_list=[args.new],
+            tolerance=args.tolerance,
+            update_csv=True # Flag to signal updating instead of overwriting
+        )
         return
     
     # Handle single model prediction (highest priority)
