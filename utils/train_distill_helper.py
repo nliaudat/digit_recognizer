@@ -46,27 +46,6 @@ from utils.model_distiller_utils import (
     freeze_teacher_model,
 )
 
-from models.digit_recognizer_v30_teacher import create_v30_teacher
-from models.digit_recognizer_v31_teacher import create_v31_teacher
-from models.digit_recognizer_v30_student import (
-    create_v30_student_micro,
-    create_v30_student_small,
-    create_v30_student_medium,
-    create_v30_student_large,
-)
-from models.digit_recognizer_v31_student import (
-    create_v31_student_micro,
-    create_v31_student_small,
-    create_v31_student_medium,
-    create_v31_student_large,
-)
-from models.digit_recognizer_v32_teacher import (
-    create_v32_teacher_small,
-    create_v32_teacher_medium,
-    create_v32_teacher_large,
-    create_v32_teacher_xl,
-)
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -74,25 +53,9 @@ logger = logging.getLogger(__name__)
 # Registry maps
 # ---------------------------------------------------------------------------
 
-TEACHERS: Dict[str, Any] = {
-    "v30": create_v30_teacher,   # EfficientNetB0
-    "v31": create_v31_teacher,   # ResNet50
-}
+TEACHERS: Dict[str, Any] = {}
 
-STUDENTS: Dict[str, Any] = {
-    "v30_micro":  create_v30_student_micro,
-    "v30_small":  create_v30_student_small,
-    "v30_medium": create_v30_student_medium,
-    "v30_large":  create_v30_student_large,
-    "v31_micro":  create_v31_student_micro,
-    "v31_small":  create_v31_student_small,
-    "v31_medium": create_v31_student_medium,
-    "v31_large":  create_v31_student_large,
-    "v32_small":  create_v32_teacher_small,
-    "v32_medium": create_v32_teacher_medium,
-    "v32_large":  create_v32_teacher_large,
-    "v32_xl":     create_v32_teacher_xl,
-}
+STUDENTS: Dict[str, Any] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -566,7 +529,7 @@ def run_distillation_pipeline(
             }
             # Auto-inject any custom layers from the teacher's script
             clean_name = t_type.replace('digit_recognizer_', '').replace('_teacher', '')
-            for prefix in ["models.", "models.digit_recognizer_"]:
+            for prefix in ["models.", "models.digit_recognizer_", "models._tested_but_rejected.", "models._tested_but_rejected.digit_recognizer_"]:
                 try:
                     mod = importlib.import_module(f"{prefix}{clean_name}")
                     for name, obj in inspect.getmembers(mod, inspect.isclass):
@@ -787,7 +750,7 @@ def run_distillation_pipeline(
             from utils.train_analyse import verify_tflite_full_qat
             tflite_path = results['student'].get('tflite_path')
             if tflite_path and os.path.exists(tflite_path):
-                qat_report = verify_tflite_full_qat(tflite_path, debug=False)
+                qat_report = verify_tflite_full_qat(tflite_path, debug=True)
                 if qat_report:
                     results['student']['qat_verification'] = qat_report
                     if qat_report['is_full_qat']:
@@ -797,7 +760,7 @@ def run_distillation_pipeline(
                         logger.warning(f"   I/O: {qat_report['input_dtype']} / {qat_report['output_dtype']}")
                         logger.warning(f"   Quantized tensors: {qat_report['quantization_ratio']:.1%} of total")
                 else:
-                    logger.warning("⚠️ Could not perform QAT verification (interpreter failed)")
+                    logger.warning("⚠️ Could not perform QAT verification")
             else:
                  logger.warning(f"⚠️ TFLite path (to verify) not found: {tflite_path}")
 
