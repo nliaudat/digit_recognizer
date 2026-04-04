@@ -40,15 +40,22 @@ def create_model():
 
 def _import_model_creator(model_name):
     """Dynamically import a model creator function"""
+    # 1. Try primary models directory
     try:
-        # For all models, try dynamic import
         module_name = f"models.{model_name}"
         module = importlib.import_module(module_name)
         creator_func_name = f"create_{model_name}"
         return getattr(module, creator_func_name)
-    except (ImportError, AttributeError) as e:
-        print(f"❌ Failed to import {model_name}: {e}")
-        return None
+    except (ImportError, AttributeError):
+        # 2. Try rejected models directory if not found in primary
+        try:
+            module_name = f"models._tested_but_rejected.{model_name}"
+            module = importlib.import_module(module_name)
+            creator_func_name = f"create_{model_name}"
+            return getattr(module, creator_func_name)
+        except (ImportError, AttributeError) as e:
+            print(f"❌ Failed to import {model_name} from primary or rejected: {e}")
+            return None
 
 def model_summary(model):
     """Print model summary"""
@@ -66,24 +73,44 @@ def get_available_models():
 
 def resolve_model_name(name):
     """Map short names (v16) to full available model names (digit_recognizer_v16)."""
+    # 1. Try exact match in parameters
     if name in params.AVAILABLE_MODELS:
         return name
     
-    # Try digit_recognizer_ prefix
-    full_name = f"digit_recognizer_{name}"
-    if full_name in params.AVAILABLE_MODELS:
-        return full_name
+    # 2. Try common prefixes/suffixes
+    lookups = [
+        name,
+        f"digit_recognizer_{name}",
+        f"digit_recognizer_{name}_teacher",
+        f"digit_recognizer_{name}_student"
+    ]
     
-    # Try digit_recognizer_ with _teacher suffix
-    teacher_name = f"digit_recognizer_{name}_teacher"
-    if teacher_name in params.AVAILABLE_MODELS:
-        return teacher_name
+    for l in lookups:
+        if l in params.AVAILABLE_MODELS:
+            return l
+
+    # 3. Search the filesystem if not in AVAILABLE_MODELS
+    # This avoids having to hardcode every single experimental model
+    project_root = Path(__file__).resolve().parent.parent
+    model_dirs = [
+        project_root / "models",
+        project_root / "models" / "_tested_but_rejected"
+    ]
     
-    # Still not found? Check if any available model matches the short name
-    for m in params.AVAILABLE_MODELS:
-        if m.replace("digit_recognizer_", "").replace("_teacher", "") == name:
-            return m
+    for model_dir in model_dirs:
+        if not model_dir.exists():
+            continue
+        for f in model_dir.glob("*.py"):
+            fname = f.stem
+            if fname == "__init__": continue
             
+            # Check if this file matches our requested name
+            # e.g. "v16" matches "digit_recognizer_v16"
+            clean_fname = fname.replace("digit_recognizer_", "").replace("_teacher", "").replace("_student", "")
+            if clean_fname == name or fname == name or f"digit_recognizer_{name}" == fname:
+                return fname
+
+    # Fallback to name
     return name
 
 def create_model_by_name(model_name, num_classes=None, input_shape=None, **kwargs):
