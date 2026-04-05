@@ -16,6 +16,34 @@ if "DIGIT_INPUT_CHANNELS" not in os.environ:
 
 def main():
     parser = argparse.ArgumentParser(description="Launch training for all active models in parameters.py across all 4 combinations (10/100 classes, Grayscale/RGB) sequentially or concurrently.")
+    
+    # Mode
+    parser.add_argument("--concurrent", action="store_true", help="Launch each training in a separate command window (Concurrent)")
+    
+    # Combinations filters
+    parser.add_argument("--classes", type=str, default=None, help="Classes: '10', '100', or 'all'")
+    parser.add_argument("--color", type=str, default=None, choices=["gray", "rgb", "all"], help="Color mode: 'gray', 'rgb' or 'all'")
+    
+    # Hyperparameter overrides (passed to train.py)
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--batch", type=int, default=None)
+    parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument("--warmup-epochs", type=int, default=None)
+    parser.add_argument("--weight-decay", type=float, default=None)
+    parser.add_argument("--label-smoothing", type=float, default=None)
+    parser.add_argument("--focal-gamma", type=float, default=None)
+    parser.add_argument("--rotation-range", type=int, default=None)
+    parser.add_argument("--optimizer", type=str, default=None)
+    parser.add_argument("--lr-scheduler", type=str, default=None)
+    
+    # Flags (passed to train.py)
+    parser.add_argument("--cutmix", action="store_true", default=False)
+    parser.add_argument("--no-mixup", action="store_true", default=False)
+    parser.add_argument("--no-random-erasing", action="store_true", default=False)
+    parser.add_argument("--no-dynamic-weights", action="store_true", default=False)
+    parser.add_argument("--no-mixed-precision", action="store_true", default=False)
+
+    args = parser.parse_args()
         
     # Import params to get the list of active models
     import parameters as params
@@ -26,6 +54,27 @@ def main():
         print("Error: No models found in params.AVAILABLE_MODELS. Please uncomment models in parameters.py.")
         sys.exit(1)
         
+    # ── Interactive Prompts (fallback if not provided on CLI) ─────────────────
+    if args.classes is None:
+        if sys.stdin.isatty():
+            while True:
+                _ui = input("Enter number of classes [10, 100, or all]: ").strip().lower()
+                if _ui in ["10", "100", "all"]:
+                    args.classes = _ui
+                    break
+        else:
+            args.classes = "all"
+            
+    if args.color is None:
+        if sys.stdin.isatty():
+            while True:
+                _ui = input("Enter color mode [gray, rgb, or all]: ").strip().lower()
+                if _ui in ["gray", "rgb", "all"]:
+                    args.color = _ui
+                    break
+        else:
+            args.color = "all"
+
     # Build combinations based on user arguments
     combinations = []
     
