@@ -18,3 +18,4 @@ exported_models/benchmark.py
 exported_models/summary_model_comparison_*.csv
 dropbox_ignore.ps
 .env
+/digit-recognizer-paper
