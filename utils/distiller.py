@@ -165,14 +165,16 @@ class Distiller(tf.keras.Model):
                 att_loss = self._compute_attention_loss(x)
                 loss += 0.1 * att_loss
 
-        # Apply gradients
+        # 8. Apply gradients
         trainable_vars = self.student.trainable_variables
         grads = tape.gradient(loss, trainable_vars)
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
 
+        # 9. Update metrics
+        self.compiled_metrics.update_state(y, student_probs)
+        
         # Return results including our custom losses
-        # self.compute_metrics returns a dict of results
-        results = self.compute_metrics(x, y, student_probs)
+        results = {m.name: m.result() for m in self.metrics}
         results.update({
             "loss": loss,
             "student_loss": student_loss,
@@ -183,13 +185,32 @@ class Distiller(tf.keras.Model):
     def test_step(self, data: Tuple[tf.Tensor, tf.Tensor]) -> Dict[str, tf.Tensor]:
         """Single test/validation step."""
         x, y = data
+        
+        # Get teacher predictions for distillation loss calculation in validation
+        teacher_probs = self.teacher(x, training=False)
         student_probs = self.student(x, training=False)
 
-        loss = self.student_loss_fn(y, student_probs)
+        # Temperature
+        temp = self.temperature
+        if self.temperature_schedule:
+            temp = self.temperature_schedule(self.current_epoch)
+
+        # Losses
+        student_loss = self.student_loss_fn(y, student_probs)
+        distill_loss = self._compute_distillation_loss(teacher_probs, student_probs, temp)
         
-        # self.compute_metrics returns a dict of results
-        results = self.compute_metrics(x, y, student_probs)
-        results["loss"] = loss
+        # Combined loss (matches train_step logic for consistency)
+        loss = self.alpha * student_loss + (1 - self.alpha) * distill_loss
+
+        # Update metrics
+        self.compiled_metrics.update_state(y, student_probs)
+        
+        results = {m.name: m.result() for m in self.metrics}
+        results.update({
+            "loss": loss,
+            "student_loss": student_loss,
+            "distill_loss": distill_loss,
+        })
         return results
 
     def call(self, inputs: tf.Tensor, training: bool = False) -> tf.Tensor:
@@ -460,12 +481,10 @@ class EnsembleDistiller(Distiller):
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
         
         # Update metrics
-        results = self.compute_metrics(x, y, student_logits)
-        
-        # NOTE: current_epoch should NOT be incremented here (batch-level).
-        # It is managed by DistillationProgressCallback on_epoch_begin.
+        self.compiled_metrics.update_state(y, student_logits)
         
         # Return results including our custom losses
+        results = {m.name: m.result() for m in self.metrics}
         results.update({
             'loss': loss,
             'student_loss': student_loss,
@@ -538,9 +557,10 @@ class MixedInputDistiller(Distiller):
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
 
         # 9. Update metrics
-        results = self.compute_metrics(x_student, y, student_probs)
+        self.compiled_metrics.update_state(y, student_probs)
 
         # Return results including our custom losses
+        results = {m.name: m.result() for m in self.metrics}
         results.update({
             "loss": loss,
             "student_loss": student_loss,
@@ -549,15 +569,34 @@ class MixedInputDistiller(Distiller):
         return results
 
     def test_step(self, data: Tuple[tf.Tensor, tf.Tensor]) -> Dict[str, tf.Tensor]:
-        """Standard test step using student's native input."""
+        """Test step with input conversion and full loss calculation."""
         x_student, y = data
+        
+        if self.teacher_input_fn:
+            x_teacher = self.teacher_input_fn(x_student)
+        else:
+            x_teacher = x_student
+            
+        teacher_probs = self.teacher(x_teacher, training=False)
         student_probs = self.student(x_student, training=False)
 
-        loss = self.student_loss_fn(y, student_probs)
+        temp = self.temperature
+        if self.temperature_schedule:
+            temp = self.temperature_schedule(self.current_epoch)
+
+        student_loss = self.student_loss_fn(y, student_probs)
+        distill_loss = self._compute_distillation_loss(teacher_probs, student_probs, temp)
         
-        # self.compute_metrics returns a dict of results
-        results = self.compute_metrics(x_student, y, student_probs)
-        results["loss"] = loss
+        loss = self.alpha * student_loss + (1 - self.alpha) * distill_loss
+
+        self.compiled_metrics.update_state(y, student_probs)
+        
+        results = {m.name: m.result() for m in self.metrics}
+        results.update({
+            "loss": loss,
+            "student_loss": student_loss,
+            "distill_loss": distill_loss,
+        })
         return results
 
     def get_config(self) -> Dict[str, Any]:
