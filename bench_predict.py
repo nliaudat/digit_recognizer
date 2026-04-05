@@ -1,45 +1,65 @@
+import argparse
+import os
+import sys
+import glob
+import csv
+import time
+import json
+import hashlib
+import shutil
+import logging
+from datetime import datetime
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import tensorflow as tf
 import numpy as np
 import cv2
-import os
-import argparse
+import matplotlib.pyplot as plt
+import pandas as pd
+from PIL import Image
+from tqdm import tqdm
 
-# Deferred imports to prioritize CLI arguments
-params = None
-preprocess_for_inference = None
+# ── Environment Setup ──────────────────────────────────────────────────────
+# Pre-parse classes and color mode to set env-vars BEFORE parameters.py
+# (This avoids the interactive prompt in parameters.py when run from CLI)
+_pre_parser = argparse.ArgumentParser(add_help=False)
+_pre_parser.add_argument('--classes', type=int)
+_pre_parser.add_argument('--color', type=str)
+_pre_args, _ = _pre_parser.parse_known_args()
 
+if _pre_args.classes:
+    os.environ['DIGIT_NB_CLASSES'] = str(_pre_args.classes)
+if _pre_args.color:
+    if _pre_args.color.lower() == 'gray':
+        os.environ['DIGIT_INPUT_CHANNELS'] = '1'
+    elif _pre_args.color.lower() == 'rgb':
+        os.environ['DIGIT_INPUT_CHANNELS'] = '3'
+
+# ── Project Imports ───────────────────────────────────────────────────────
+import parameters as params
+from utils.preprocess import preprocess_for_inference
+from utils.model_distiller_utils import create_tflite_interpreter
+from utils.multi_source_loader import clear_cache
+
+# ── Utility Imports ───────────────────────────────────────────────────────
 try:
     from tabulate import tabulate
 except ImportError:
     # Simple fallback for tabulate when it's not installed.
     def tabulate(table_data, headers=None, tablefmt=None, stralign=None):
-        """Simple fallback for tabulate when it's not installed."""
         if not table_data: return ""
         if not headers: headers = [f"Col{i}" for i in range(len(table_data[0]))]
-        # Basic alignment and spacing
         cols = list(zip(*([headers] + table_data)))
         col_widths = [max(len(str(x)) for x in col) for col in cols]
-        
         lines = []
-        # Header
         header_line = " | ".join(f"{str(h):{w}}" for h, w in zip(headers, col_widths))
         lines.append(header_line)
         lines.append("-" * len(header_line))
-        # Data
         for row in table_data:
             lines.append(" | ".join(f"{str(val):{w}}" for val, w in zip(row, col_widths)))
         return "\n".join(lines)
 
-import glob
-from tqdm import tqdm
-import csv
-from datetime import datetime
-import time
-import matplotlib.pyplot as plt
-from pathlib import Path
-import pandas as pd
-from PIL import Image
-import shutil
 
 
 class TFLiteDigitPredictor:
@@ -54,7 +74,6 @@ class TFLiteDigitPredictor:
         """Load TFLite model"""
         print(f"Loading TFLite model: {self.model_path}")
         
-        from utils.model_distiller_utils import create_tflite_interpreter
         self.interpreter = create_tflite_interpreter(self.model_path)
         
         self.input_details = self.interpreter.get_input_details()
@@ -247,7 +266,6 @@ def find_model_path(model_name=None, input_dir=None):
 def get_model_parameters_count(model_path):
     """Get the number of parameters in a TFLite model"""
     try:
-        from utils.model_distiller_utils import create_tflite_interpreter
         interpreter = create_tflite_interpreter(model_path)
         
         total_params = 0
@@ -272,7 +290,6 @@ def is_quantized_model(model_path):
         if 'qat' in path_lower or 'quant' in path_lower:
             return True
             
-        from utils.model_distiller_utils import create_tflite_interpreter
         interpreter = create_tflite_interpreter(model_path)
         input_details = interpreter.get_input_details()
         input_dtype = input_details[0]['dtype']
@@ -390,7 +407,6 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
 def is_valid_tflite_model(model_path):
     """Check if a TFLite model file is valid and can be loaded"""
     try:
-        from utils.model_distiller_utils import create_tflite_interpreter
         interpreter = create_tflite_interpreter(model_path)
         return True
     except Exception as e:
@@ -401,8 +417,6 @@ def is_valid_tflite_model(model_path):
         return False
 
 def _decode_bench_image(image_path, label, fname, target_h, target_w, grayscale):
-    import cv2
-    import numpy as np
     flag = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
     img = cv2.imread(image_path, flag)
     if img is None or img.size == 0:
@@ -456,10 +470,6 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     Returns: list of (image_array, true_label, filename_no_ext) tuples
     """
     global _cached_test_data, _cached_test_data_params
-    import json
-    import hashlib
-    import os
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     
     current_params = (use_all_datasets, params.NB_CLASSES, params.INPUT_CHANNELS, params.INPUT_WIDTH, params.INPUT_HEIGHT)
     
@@ -645,7 +655,6 @@ def configure_parameters_for_model(model_name_or_dir, override_classes=None, ove
                 source['labels'] = f'labels_{params.NB_CLASSES}_shuffle.txt'
         
         # Clear the dataset cache so it reloads with new parameters
-        from utils.multi_source_loader import clear_cache
         clear_cache()
         print(f"🔄 Reconfigured test environment for {params.NB_CLASSES} classes in {'Grayscale' if params.USE_GRAYSCALE else 'RGB'}")
 
@@ -1948,24 +1957,6 @@ def main():
                         help='Test a new model and update the existing CSV results (e.g. distilled_many_to_v16_10cls_RGB).')
     
     args, unknown = parser.parse_known_args()
-    
-    # We must explicitly define the environment before initializing `parameters.py`
-    # Otherwise `import parameters` will block awaiting standard IO.
-    if args.classes:
-        os.environ['DIGIT_NB_CLASSES'] = str(args.classes)
-    if args.color:
-        if args.color.lower() == 'gray':
-            os.environ['DIGIT_INPUT_CHANNELS'] = '1'
-        elif args.color.lower() == 'rgb':
-            os.environ['DIGIT_INPUT_CHANNELS'] = '3'
-            
-    # Now map the delayed imports globally
-    global params
-    global preprocess_for_inference
-    import parameters as p
-    from utils.preprocess import preprocess_for_inference as pfio
-    params = p
-    preprocess_for_inference = pfio
     
     # Use output dir from params if nothing was specified
     if args.input_dir == 'exported_models':
