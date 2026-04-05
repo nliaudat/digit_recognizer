@@ -111,7 +111,7 @@ def main():
     # 4. Compile with fine-tuning learning rate
     print(f"\n⚙️ Compiling model with Low LR: {args.lr}")
     optimizer = tf.keras.optimizers.RMSprop(learning_rate=args.lr) # Standard for this project
-    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
+    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=params.USE_LOGITS)
     
     model.compile(optimizer=optimizer, loss=loss_fn, metrics=['accuracy'])
     

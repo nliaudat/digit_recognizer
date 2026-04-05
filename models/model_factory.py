@@ -369,19 +369,27 @@ def compile_model(model, loss_type='sparse'):
     # Handle standard crossentropy with label smoothing
     elif params.LABEL_SMOOTHING > 0:
         if loss == "categorical_crossentropy":
+            # Only use logits if it's not the Haverland model (which is fixed to softmax)
+            from_logits = params.USE_LOGITS if params.MODEL_ARCHITECTURE != "original_haverland" else False
             loss = tf.keras.losses.CategoricalCrossentropy(
-                label_smoothing=params.LABEL_SMOOTHING
+                label_smoothing=params.LABEL_SMOOTHING,
+                from_logits=from_logits
             )
         elif loss == "sparse_categorical_crossentropy":
             loss = tf.keras.losses.SparseCategoricalCrossentropy(
-                label_smoothing=params.LABEL_SMOOTHING
+                label_smoothing=params.LABEL_SMOOTHING,
+                from_logits=params.USE_LOGITS
             )
         print(f"🔧 Applied label smoothing: {params.LABEL_SMOOTHING}")
     else:
         if loss == "categorical_crossentropy":
-            loss = tf.keras.losses.CategoricalCrossentropy()
+            # Only use logits if it's not the Haverland model (which is fixed to softmax)
+            from_logits = params.USE_LOGITS if params.MODEL_ARCHITECTURE != "original_haverland" else False
+            loss = tf.keras.losses.CategoricalCrossentropy(from_logits=from_logits)
         elif loss == "sparse_categorical_crossentropy":
-            loss = tf.keras.losses.SparseCategoricalCrossentropy()
+            loss = tf.keras.losses.SparseCategoricalCrossentropy(
+                from_logits=params.USE_LOGITS
+            )
     
     # ==========================================================================
     # METRICS CONFIGURATION

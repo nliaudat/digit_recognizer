@@ -203,11 +203,18 @@ def create_digit_recognizer_v23_grayscale():
     x = _build_v23_backbone(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
     
     return tf.keras.Model(inputs, outputs, name="digit_recognizer_v23_grayscale")
 
@@ -224,11 +231,18 @@ def create_digit_recognizer_v23_rgb():
     x = _build_v23_backbone(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
     
     model = tf.keras.Model(inputs, outputs, name="digit_recognizer_v23_rgb")
     
@@ -253,11 +267,18 @@ def create_digit_recognizer_v23_adaptive():
     x = _build_v23_backbone(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
     
     return tf.keras.Model(inputs, outputs, name="digit_recognizer_v23_adaptive")
 

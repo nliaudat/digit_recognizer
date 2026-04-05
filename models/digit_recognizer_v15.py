@@ -116,9 +116,18 @@ def _build_v15(entry_filters, res1_filters, res2_filters, dense_units, model_nam
     x = tf.keras.layers.GlobalAveragePooling2D(name='gap')(x)
     x = tf.keras.layers.Dense(dense_units, use_bias=True, name='fc')(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='fc_relu6')(x)
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, activation='softmax', name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name=model_name)
 
@@ -148,9 +157,18 @@ def _build_v15_rgb(entry_filters, res1_filters, res2_filters, dense_units, model
     x = tf.keras.layers.GlobalAveragePooling2D(name='gap')(x)
     x = tf.keras.layers.Dense(dense_units, use_bias=True, name='fc')(x)
     x = tf.keras.layers.ReLU(max_value=6.0, name='fc_relu6')(x)
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, activation='softmax', name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name=model_name)
 

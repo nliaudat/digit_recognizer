@@ -122,11 +122,18 @@ def create_digit_recognizer_v6_grayscale():
     x = tf.keras.layers.Dropout(dropout_rate, name='dropout')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name=f"digit_recognizer_v6_grayscale_{params.NB_CLASSES}classes")
 
@@ -190,11 +197,18 @@ def create_digit_recognizer_v6_rgb():
         x = tf.keras.layers.Dense(get_dense_units_v6(64, 96), activation='relu', name='dense2')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name=f"digit_recognizer_v6_rgb_{params.NB_CLASSES}classes")
 
@@ -254,11 +268,18 @@ def create_digit_recognizer_v6_compact():
     x = tf.keras.layers.Dense(dense_units, activation='relu', name='dense1')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name=f"digit_recognizer_v6_compact_{params.NB_CLASSES}classes")
 
@@ -316,11 +337,18 @@ def create_digit_recognizer_v6_high_accuracy():
     x = tf.keras.layers.Dense(get_dense_units_v6(64, 112), activation='relu', name='dense2')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name=f"digit_recognizer_v6_high_acc_{params.NB_CLASSES}classes")
 

@@ -223,9 +223,14 @@ def create_digit_recognizer_v29(use_batch_norm=False):
     # 4. Backbone expects 2 channels now
     x = _build_v29_backbone(x, filters, dense_units, use_batch_norm)
 
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, activation='softmax', name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, activation=None, name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, activation='softmax', name='output'
+        )(x)
 
     model = tf.keras.Model(inputs, outputs, name='digit_recognizer_v29')
 

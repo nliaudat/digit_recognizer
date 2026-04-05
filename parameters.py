@@ -60,6 +60,7 @@ AVAILABLE_MODELS = [
 ]
 
 MODEL_ARCHITECTURE = "digit_recognizer_v16" # one of the models in AVAILABLE_MODELS
+USE_LOGITS = True # else softmax
 
 
 # ==============================================================================

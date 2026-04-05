@@ -97,11 +97,18 @@ def create_digit_recognizer_v3_grayscale():
     x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name="digit_recognizer_v3_grayscale")
     
@@ -174,11 +181,18 @@ def create_digit_recognizer_v3_grayscale_improved():
     x = tf.keras.layers.Dense(32, activation='relu', name='feature_dense2')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name="digit_recognizer_v3_grayscale_improved")
 
@@ -241,11 +255,18 @@ def create_digit_recognizer_v3_rgb():
     x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name="digit_recognizer_v3_rgb")
 
@@ -309,11 +330,18 @@ def create_digit_recognizer_v3_adaptive():
     x = tf.keras.layers.Activation(tf.nn.relu6, name='relu6_dense')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name="digit_recognizer_v3_adaptive")
 

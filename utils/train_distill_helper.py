@@ -167,8 +167,8 @@ def train_teacher(
 
     teacher.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-        # from_logits=False because teacher output is softmax (like v4/v16)
-        loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
+        # Softmax if params.USE_LOGITS is False, otherwise logits
+        loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=params.USE_LOGITS),
         metrics=["accuracy"],
     )
 

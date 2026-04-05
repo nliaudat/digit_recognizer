@@ -104,11 +104,18 @@ def create_digit_recognizer_v7_grayscale():
     x = tf.keras.layers.Dropout(0.2, name='dropout')(x)
     
     # Output layer
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name=f"digit_recognizer_v7_grayscale_{params.NB_CLASSES}classes")
 
@@ -152,11 +159,18 @@ def create_digit_recognizer_v7_compact():
     # Compact dense
     x = tf.keras.layers.Dense(56, activation='relu', name='dense1')(x)
     
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name=f"digit_recognizer_v7_compact_{params.NB_CLASSES}classes")
 
@@ -219,11 +233,18 @@ def create_digit_recognizer_v7_high_accuracy():
     x = tf.keras.layers.Dropout(0.3, name='dropout1')(x)
     x = tf.keras.layers.Dense(64, activation='relu', name='dense2')(x)
     
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, 
-        activation='softmax', 
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name=f"digit_recognizer_v7_high_acc_{params.NB_CLASSES}classes")
 

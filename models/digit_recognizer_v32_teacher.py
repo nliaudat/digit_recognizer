@@ -231,9 +231,14 @@ def create_digit_recognizer_v32_teacher(
     x = tf.keras.layers.Dropout(0.3, name="dropout_2")(x)
     
     # Output (softmax, compatible with existing pipeline)
-    outputs = tf.keras.layers.Dense(
-        num_classes, activation="softmax", name="output"
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            num_classes, activation=None, name="logits"
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            num_classes, activation="softmax", name="output"
+        )(x)
     
     model = tf.keras.Model(
         inputs=inputs, outputs=outputs, name=f"teacher_v32_w{width_multiplier}"

@@ -1,12 +1,9 @@
 """
 Knowledge distillation core implementation.
 
-Models output softmax probabilities (activation='softmax'), so:
-  - Loss     : SparseCategoricalCrossentropy(from_logits=False)
-  - Distill  : KL( teacher_T || student_T ) where
-                prob_T = softmax( log(prob) / T )  ← temperature scaling
-                This is equivalent to softmax(logits/T) when you don't
-                have access to the raw logits.
+Models can output either raw logits (activation=None) or softmax probabilities, based on:
+  - Loss     : SparseCategoricalCrossentropy(from_logits=params.USE_LOGITS)
+  - Distill  : KL( teacher_T || student_T ) where targets are temperature-scaled.
 
 Classes
 -------
@@ -19,6 +16,7 @@ import tensorflow as tf
 import numpy as np
 from typing import Optional, Callable, Dict, Any, Tuple, Union
 import logging
+import parameters as params
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -98,7 +96,12 @@ class Distiller(tf.keras.Model):
         self.teacher_attention_maps = None
         self.student_attention_maps = None
         
+        # Detect output format for teacher and student
+        self.teacher_is_logit = self._is_logit_output(self.teacher)
+        self.student_is_logit = self._is_logit_output(self.student)
+        
         logger.info(f"Distiller initialized: mode={mode}, temperature={temperature}, alpha={alpha}")
+        logger.info(f"Format detection: teacher_is_logit={self.teacher_is_logit}, student_is_logit={self.student_is_logit}")
     
     def compile(
         self,
@@ -116,16 +119,16 @@ class Distiller(tf.keras.Model):
             optimizer:            Optimizer for the student.
             metrics:              Metrics to track (e.g. ['accuracy']).
             student_loss_fn:      Loss against hard labels
-                                  (default: SparseCategoricalCrossentropy, from_logits=False
-                                   — matches softmax output models like v4/v16).
+                                  (default: SparseCategoricalCrossentropy, from_logits=params.USE_LOGITS
+                                   — matches current global configuration).
             distillation_loss_fn: Loss for distillation (default: KLDivergence).
             temperature_schedule: Callable(epoch) → float, for dynamic temperature.
         """
         super().compile(optimizer=optimizer, metrics=metrics or [], **kwargs)
 
-        # from_logits=False because models output softmax probabilities
+        # Configure loss based on global params.USE_LOGITS
         self.student_loss_fn = student_loss_fn or tf.keras.losses.SparseCategoricalCrossentropy(
-            from_logits=False, name="student_loss"
+            from_logits=params.USE_LOGITS, name="student_loss"
         )
         self.distillation_loss_fn = distillation_loss_fn or tf.keras.losses.KLDivergence(
             name="distill_loss"
@@ -244,13 +247,23 @@ class Distiller(tf.keras.Model):
         EPS = 1e-7
 
         if self.mode == "soft":
-            # Recover pseudo-logits via log, apply temperature, re-normalise
-            teacher_T = tf.nn.softmax(
-                tf.math.log(tf.clip_by_value(teacher_probs, EPS, 1.0)) / temperature
-            )
-            student_T = tf.nn.softmax(
-                tf.math.log(tf.clip_by_value(student_probs, EPS, 1.0)) / temperature
-            )
+            # 1. Handle Teacher
+            if self.teacher_is_logit:
+                t_logits = teacher_probs
+            else:
+                # Recover pseudo-logits from probabilities
+                t_logits = tf.math.log(tf.clip_by_value(teacher_probs, EPS, 1.0))
+            
+            # 2. Handle Student
+            if self.student_is_logit:
+                s_logits = student_probs
+            else:
+                # Recover pseudo-logits from probabilities
+                s_logits = tf.math.log(tf.clip_by_value(student_probs, EPS, 1.0))
+
+            teacher_T = tf.nn.softmax(t_logits / temperature)
+            student_T = tf.nn.softmax(s_logits / temperature)
+            
             return self.distillation_loss_fn(teacher_T, student_T)
 
         elif self.mode == "hard":
@@ -259,12 +272,19 @@ class Distiller(tf.keras.Model):
             return self.student_loss_fn(teacher_preds, student_probs)
 
         else:  # hybrid
-            teacher_T = tf.nn.softmax(
-                tf.math.log(tf.clip_by_value(teacher_probs, EPS, 1.0)) / temperature
-            )
-            student_T = tf.nn.softmax(
-                tf.math.log(tf.clip_by_value(student_probs, EPS, 1.0)) / temperature
-            )
+            if self.teacher_is_logit:
+                t_logits = teacher_probs
+            else:
+                t_logits = tf.math.log(tf.clip_by_value(teacher_probs, EPS, 1.0))
+            
+            if self.student_is_logit:
+                s_logits = student_probs
+            else:
+                s_logits = tf.math.log(tf.clip_by_value(student_probs, EPS, 1.0))
+
+            teacher_T = tf.nn.softmax(t_logits / temperature)
+            student_T = tf.nn.softmax(s_logits / temperature)
+            
             soft_loss = self.distillation_loss_fn(teacher_T, student_T)
 
             teacher_preds = tf.argmax(teacher_probs, axis=1)
@@ -287,6 +307,31 @@ class Distiller(tf.keras.Model):
         # For now, returns zero loss
         return tf.constant(0.0, dtype=tf.float32)
     
+    def _is_logit_output(self, model: tf.keras.Model) -> bool:
+        """Heuristic check if a model outputs raw logits or softmax probabilities."""
+        try:
+            # 1. Check if it's an EnsembleTeacher (which current implementation always outputs softmax)
+            # Use name check to avoid circular imports
+            if "EnsembleTeacher" in str(type(model)):
+                return False 
+            
+            # 2. Check last layer activation for Functional/Sequential models
+            if hasattr(model, 'layers') and len(model.layers) > 0:
+                last_layer = model.layers[-1]
+                if hasattr(last_layer, 'activation'):
+                    act = last_layer.activation
+                    if act is None: return True
+                    if hasattr(act, '__name__'):
+                        name = act.__name__.lower()
+                        if name == 'linear': return True
+                        if name == 'softmax': return False
+                    # Check for linear activation objects
+                    if act == tf.keras.activations.linear: return True
+        except:
+            pass
+        # Default to whatever the current global configuration suggests if we can't be sure
+        return params.USE_LOGITS
+
     def get_student(self) -> tf.keras.Model:
         """Return the trained student model."""
         return self.student
