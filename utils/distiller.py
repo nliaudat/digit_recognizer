@@ -456,10 +456,10 @@ class EnsembleDistiller(Distiller):
             temp = self.temperature_schedule(self.current_epoch)
         
         with tf.GradientTape() as tape:
-            student_logits = self.student(x, training=True)
+            student_probs = self.student(x, training=True)
             
             # Hard label loss
-            student_loss = self.student_loss_fn(y, student_logits)
+            student_loss = self.student_loss_fn(y, student_probs)
             
             # Distillation loss
             EPS = 1e-7
@@ -468,7 +468,7 @@ class EnsembleDistiller(Distiller):
                 tf.math.log(tf.clip_by_value(weighted_logits, EPS, 1.0)) / temp
             )
             student_T = tf.nn.softmax(
-                tf.math.log(tf.clip_by_value(student_logits, EPS, 1.0)) / temp
+                tf.math.log(tf.clip_by_value(student_probs, EPS, 1.0)) / temp
             )
             distill_loss = self.distillation_loss_fn(teacher_T, student_T)
             
@@ -481,7 +481,7 @@ class EnsembleDistiller(Distiller):
         self.optimizer.apply_gradients(zip(grads, trainable_vars))
         
         # Update metrics
-        self.compiled_metrics.update_state(y, student_logits)
+        self.compiled_metrics.update_state(y, student_probs)
         
         # Return results including our custom losses
         results = {m.name: m.result() for m in self.metrics}

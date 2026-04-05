@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--concurrent", action="store_true", help="Launch each training in a separate command window (Concurrent)")
     
     # Combinations filters
-    parser.add_argument("--classes", type=str, default=None, help="Classes: '10', '100', or 'all'")
+    parser.add_argument("--classes", type=str, default=None, choices=["10", "100", "all"], help="Classes: '10', '100', or 'all'")
     parser.add_argument("--color", type=str, default=None, choices=["gray", "rgb", "all"], help="Color mode: 'gray', 'rgb' or 'all'")
     
     # Hyperparameter overrides (passed to train.py)
