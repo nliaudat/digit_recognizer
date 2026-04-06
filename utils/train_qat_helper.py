@@ -627,7 +627,7 @@ def check_qat_gradient_flow(model, x_sample, y_sample):
                 y_labels = tf.one_hot(y_sample[:2], params.NB_CLASSES)
             else:
                 y_labels = y_sample[:2]
-            loss = tf.keras.losses.categorical_crossentropy(y_labels, predictions)
+            loss = tf.keras.losses.categorical_crossentropy(y_labels, predictions, from_logits=params.USE_LOGITS)
         else:
             # Other models use sparse_categorical_crossentropy with integer labels
             if len(y_sample.shape) > 1 and y_sample.shape[1] > 1:
@@ -692,7 +692,7 @@ def diagnose_qat_output_behavior(model, x_train, y_train):
                 y_labels = tf.one_hot(sample_labels, params.NB_CLASSES)
             else:
                 y_labels = sample_labels
-            loss = tf.keras.losses.categorical_crossentropy(y_labels, predictions)
+            loss = tf.keras.losses.categorical_crossentropy(y_labels, predictions, from_logits=params.USE_LOGITS)
         else:
             # Other models use sparse_categorical_crossentropy with integer labels
             if len(sample_labels.shape) > 1 and sample_labels.shape[1] > 1:
@@ -716,9 +716,17 @@ def diagnose_qat_output_behavior(model, x_train, y_train):
     print(f"   Loss value: {loss_value.numpy():.6f}")
     
     # Check if predictions are collapsing to uniform distribution
-    pred_entropy = -np.sum(predictions.numpy() * np.log(predictions.numpy() + 1e-8), axis=1)
-    uniform_entropy = -np.sum(np.ones(predictions.shape[1]) / predictions.shape[1] * 
-                             np.log(np.ones(predictions.shape[1]) / predictions.shape[1]))
+    # Always compute entropy on probabilities (apply softmax if they are logits)
+    prob_preds = predictions.numpy()
+    # Check if it looks like logits (not summing to 1)
+    if not np.allclose(np.sum(prob_preds, axis=1), 1.0, atol=1e-3):
+        # Apply stable softmax
+        exp_preds = np.exp(prob_preds - np.max(prob_preds, axis=1, keepdims=True))
+        prob_preds = exp_preds / np.sum(exp_preds, axis=1, keepdims=True)
+
+    pred_entropy = -np.sum(prob_preds * np.log(prob_preds + 1e-8), axis=1)
+    uniform_entropy = -np.sum(np.ones(prob_preds.shape[1]) / prob_preds.shape[1] * 
+                             np.log(np.ones(prob_preds.shape[1]) / prob_preds.shape[1]))
     
     print(f"   Prediction entropy: {pred_entropy.mean():.6f} (uniform: {uniform_entropy:.6f})")
     

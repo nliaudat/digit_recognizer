@@ -2,8 +2,9 @@
 import tensorflow as tf
 from tensorflow.keras import backend as K
 import numpy as np
+import parameters as params
 
-def sparse_focal_loss(gamma=2.0, alpha=0.25):
+def sparse_focal_loss(gamma=2.0, alpha=0.25, from_logits=params.USE_LOGITS):
     """
     Focal Loss for sparse categorical labels.
     gamma=2.0 (standard), alpha=0.25 (balances hard/easy examples)
@@ -12,6 +13,9 @@ def sparse_focal_loss(gamma=2.0, alpha=0.25):
     internally for the focal weight calculation.
     """
     def loss(y_true, y_pred):
+        if from_logits:
+            y_pred = tf.nn.softmax(y_pred, axis=-1)
+            
         # Convert sparse labels to one-hot
         y_true_int = tf.cast(y_true, tf.int32)
         if len(y_true_int.shape) > 1 and y_true_int.shape[-1] == 1:
@@ -40,12 +44,15 @@ def sparse_focal_loss(gamma=2.0, alpha=0.25):
     
     return loss
 
-def focal_loss(gamma=2.0, alpha=0.25):
+def focal_loss(gamma=2.0, alpha=0.25, from_logits=params.USE_LOGITS):
     """
     Focal Loss for one-hot encoded labels.
     Used for models like 'original_haverland' that use categorical_crossentropy.
     """
     def loss(y_true, y_pred):
+        if from_logits:
+            y_pred = tf.nn.softmax(y_pred, axis=-1)
+            
         # Already one-hot labels
         y_true_one_hot = tf.cast(y_true, y_pred.dtype)
         
@@ -76,22 +83,21 @@ class DynamicSparseFocalLoss(tf.keras.losses.Loss):
     during training without model recompilation.
     """
     def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None,
-                 label_smoothing=None, name='dynamic_sparse_focal_loss', **kwargs):
+                 label_smoothing=None, from_logits=params.USE_LOGITS, name='dynamic_sparse_focal_loss', **kwargs):
         # Keras 3 compatibility: 'auto' is not a valid reduction anymore
         if kwargs.get('reduction') == 'auto':
             kwargs['reduction'] = 'sum_over_batch_size'
             
         super().__init__(name=name, **kwargs)
         self.gamma = tf.Variable(gamma, dtype=tf.float32, trainable=False, name=f"{name}_gamma")
+        self.from_logits = from_logits
         
         # We always use a vector for alpha internally to support per-class weighting smoothly
         if nb_classes is None:
-            import parameters as params
             nb_classes = params.NB_CLASSES
 
         # Label smoothing: read from params when not supplied explicitly
         if label_smoothing is None:
-            import parameters as params
             label_smoothing = getattr(params, 'LABEL_SMOOTHING', 0.0)
         self.label_smoothing = float(label_smoothing)
             
@@ -103,6 +109,9 @@ class DynamicSparseFocalLoss(tf.keras.losses.Loss):
         self.alpha = tf.Variable(init_alpha, dtype=tf.float32, trainable=False, name=f"{name}_alpha")
 
     def call(self, y_true, y_pred):
+        if self.from_logits:
+            y_pred = tf.nn.softmax(y_pred, axis=-1)
+            
         y_true_int = tf.cast(y_true, tf.int32)
         if len(y_true_int.shape) > 1 and y_true_int.shape[-1] == 1:
             y_true_int = tf.squeeze(y_true_int, axis=-1)
@@ -130,20 +139,19 @@ class DynamicSparseFocalLoss(tf.keras.losses.Loss):
 class DynamicFocalLoss(tf.keras.losses.Loss):
     """Same as DynamicSparseFocalLoss but for one-hot labels."""
     def __init__(self, gamma=2.0, alpha=0.25, nb_classes=None,
-                 label_smoothing=None, name='dynamic_focal_loss', **kwargs):
+                 label_smoothing=None, from_logits=params.USE_LOGITS, name='dynamic_focal_loss', **kwargs):
         # Keras 3 compatibility: 'auto' is not a valid reduction anymore
         if kwargs.get('reduction') == 'auto':
             kwargs['reduction'] = 'sum_over_batch_size'
             
         super().__init__(name=name, **kwargs)
         self.gamma = tf.Variable(gamma, dtype=tf.float32, trainable=False, name=f"{name}_gamma")
+        self.from_logits = from_logits
         
         if nb_classes is None:
-            import parameters as params
             nb_classes = params.NB_CLASSES
 
         if label_smoothing is None:
-            import parameters as params
             label_smoothing = getattr(params, 'LABEL_SMOOTHING', 0.0)
         self.label_smoothing = float(label_smoothing)
             
@@ -155,6 +163,9 @@ class DynamicFocalLoss(tf.keras.losses.Loss):
         self.alpha = tf.Variable(init_alpha, dtype=tf.float32, trainable=False, name=f"{name}_alpha")
 
     def call(self, y_true, y_pred):
+        if self.from_logits:
+            y_pred = tf.nn.softmax(y_pred, axis=-1)
+            
         num_classes = tf.shape(y_pred)[-1]
         y_true_one_hot = tf.cast(y_true, y_pred.dtype)
 
