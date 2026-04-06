@@ -311,6 +311,52 @@ def is_quantized_model(model_path):
     except:
         return False
 
+def get_model_output_type(model_path):
+    """
+    Detect if a TFLite model outputs 'softmax' probabilities or raw 'logits'.
+    Uses a zero-input heuristic.
+    """
+    try:
+        interpreter = create_tflite_interpreter(model_path)
+        interpreter.allocate_tensors()
+        
+        input_details = interpreter.get_input_details()
+        output_details = interpreter.get_output_details()
+        
+        # Prepare zero input
+        input_shape = input_details[0]['shape']
+        input_dtype = input_details[0]['dtype']
+        input_data = np.zeros(input_shape, dtype=input_dtype)
+        
+        interpreter.set_tensor(input_details[0]['index'], input_data)
+        interpreter.invoke()
+        
+        output_data = interpreter.get_tensor(output_details[0]['index'])
+        
+        # Handle output quantization if present
+        if output_details[0]['dtype'] in [np.uint8, np.int8]:
+            output_scale, output_zero_point = output_details[0]['quantization']
+            output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
+            
+        output_vector = output_data[0]
+        output_sum = np.sum(output_vector)
+        
+        # Heuristic: Softmax sums to 1.0 and elements are within [0, 1]
+        # Using a looser tolerance (0.1) to account for quantization rounding 
+        # (e.g., quantized softmax often sums to ~0.98-1.02)
+        is_softmax = np.isclose(output_sum, 1.0, atol=0.1) and np.all(output_vector >= -0.05) and np.all(output_vector <= 1.05)
+        
+        # Determine the suffix (quant vs float)
+        q_suffix = ""
+        if is_quantized_model(model_path):
+            q_suffix = " (quant)"
+        else:
+            q_suffix = " (float)"
+            
+        return ("softmax" if is_softmax else "logits") + q_suffix
+    except Exception as e:
+        return "unknown"
+
 def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude_model=None, debug=False, model_list=None):
     """Get all available models with parameters count - with error handling
     
@@ -391,7 +437,7 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
                 
             try:
                 model_size = os.path.getsize(model_path) / 1024
-                model_type = "quantized" if is_quantized_model(model_path) else "float"
+                model_type = get_model_output_type(model_path)
                 parameters_count = get_model_parameters_count(model_path)
                 
                 all_models.append({
