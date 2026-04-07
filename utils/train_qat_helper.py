@@ -627,7 +627,7 @@ def check_qat_gradient_flow(model, x_sample, y_sample):
                 y_labels = tf.one_hot(y_sample[:2], params.NB_CLASSES)
             else:
                 y_labels = y_sample[:2]
-            loss = tf.keras.losses.categorical_crossentropy(y_labels, predictions)
+            loss = tf.keras.losses.categorical_crossentropy(y_labels, predictions, from_logits=params.USE_LOGITS)
         else:
             # Other models use sparse_categorical_crossentropy with integer labels
             if len(y_sample.shape) > 1 and y_sample.shape[1] > 1:
@@ -635,7 +635,7 @@ def check_qat_gradient_flow(model, x_sample, y_sample):
                 y_labels = tf.argmax(y_sample[:2], axis=1)
             else:
                 y_labels = y_sample[:2]
-            loss = tf.keras.losses.SparseCategoricalCrossentropy()(y_labels, predictions)
+            loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=params.USE_LOGITS)(y_labels, predictions)
         
         loss = tf.reduce_mean(loss)
     
@@ -692,14 +692,14 @@ def diagnose_qat_output_behavior(model, x_train, y_train):
                 y_labels = tf.one_hot(sample_labels, params.NB_CLASSES)
             else:
                 y_labels = sample_labels
-            loss = tf.keras.losses.categorical_crossentropy(y_labels, predictions)
+            loss = tf.keras.losses.categorical_crossentropy(y_labels, predictions, from_logits=params.USE_LOGITS)
         else:
             # Other models use sparse_categorical_crossentropy with integer labels
             if len(sample_labels.shape) > 1 and sample_labels.shape[1] > 1:
                 y_labels = tf.argmax(sample_labels, axis=1)
             else:
                 y_labels = sample_labels
-            loss = tf.keras.losses.SparseCategoricalCrossentropy()(y_labels, predictions)
+            loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=params.USE_LOGITS)(y_labels, predictions)
             
         loss_value = tf.reduce_mean(loss)
     
@@ -716,9 +716,17 @@ def diagnose_qat_output_behavior(model, x_train, y_train):
     print(f"   Loss value: {loss_value.numpy():.6f}")
     
     # Check if predictions are collapsing to uniform distribution
-    pred_entropy = -np.sum(predictions.numpy() * np.log(predictions.numpy() + 1e-8), axis=1)
-    uniform_entropy = -np.sum(np.ones(predictions.shape[1]) / predictions.shape[1] * 
-                             np.log(np.ones(predictions.shape[1]) / predictions.shape[1]))
+    # Always compute entropy on probabilities (apply softmax if they are logits)
+    prob_preds = predictions.numpy()
+    # Check if it looks like logits (not summing to 1)
+    if not np.allclose(np.sum(prob_preds, axis=1), 1.0, atol=1e-3):
+        # Apply stable softmax
+        exp_preds = np.exp(prob_preds - np.max(prob_preds, axis=1, keepdims=True))
+        prob_preds = exp_preds / np.sum(exp_preds, axis=1, keepdims=True)
+
+    pred_entropy = -np.sum(prob_preds * np.log(prob_preds + 1e-8), axis=1)
+    uniform_entropy = -np.sum(np.ones(prob_preds.shape[1]) / prob_preds.shape[1] * 
+                             np.log(np.ones(prob_preds.shape[1]) / prob_preds.shape[1]))
     
     print(f"   Prediction entropy: {pred_entropy.mean():.6f} (uniform: {uniform_entropy:.6f})")
     
@@ -799,7 +807,7 @@ def two_phase_qat_training(x_train, y_train, x_val, y_val):
         
         # Compile with slightly higher learning rate for fine-tuning
         qat_optimizer = tf.keras.optimizers.Adam(learning_rate=params.LEARNING_RATE * 2.0)
-        loss = tf.keras.losses.SparseCategoricalCrossentropy() if params.MODEL_ARCHITECTURE != "original_haverland" else tf.keras.losses.CategoricalCrossentropy()
+        loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=params.USE_LOGITS) if params.MODEL_ARCHITECTURE != "original_haverland" else tf.keras.losses.CategoricalCrossentropy()
         qat_model.compile(optimizer=qat_optimizer, loss=loss, metrics=['accuracy'])
         
         # Fine-tune for a few epochs

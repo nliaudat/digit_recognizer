@@ -353,35 +353,39 @@ def compile_model(model, loss_type='sparse'):
         if loss == "IntelligentFocalLossController":
              # We start with gamma=0.0 (equivalent to CrossEntropy)
              # and let the controller update gamma/alpha dynamically
-             print("🔧 IntelligentFocalLossController active: Using Dynamic Focal Loss (starting with γ=0.0)")
+             print(f"🔧 IntelligentFocalLossController active: Using Dynamic Focal Loss (starting with γ=0.0, from_logits={params.USE_LOGITS})")
              if params.MODEL_ARCHITECTURE == "original_haverland":
-                 loss = DynamicFocalLoss(gamma=0.0, alpha=params.FOCAL_ALPHA)
+                 loss = DynamicFocalLoss(gamma=0.0, alpha=params.FOCAL_ALPHA, from_logits=params.USE_LOGITS)
              else:
-                 loss = DynamicSparseFocalLoss(gamma=0.0, alpha=params.FOCAL_ALPHA)
+                 loss = DynamicSparseFocalLoss(gamma=0.0, alpha=params.FOCAL_ALPHA, from_logits=params.USE_LOGITS)
         else:
             if params.MODEL_ARCHITECTURE == "original_haverland":
-                loss = focal_loss(gamma=params.FOCAL_GAMMA, alpha=params.FOCAL_ALPHA)
-                print(f"🔧 Using focal_loss (one-hot) with gamma={params.FOCAL_GAMMA}")
+                loss = focal_loss(gamma=params.FOCAL_GAMMA, alpha=params.FOCAL_ALPHA, from_logits=params.USE_LOGITS)
+                print(f"🔧 Using focal_loss (one-hot) with gamma={params.FOCAL_GAMMA}, from_logits={params.USE_LOGITS}")
             else:
-                loss = sparse_focal_loss(gamma=params.FOCAL_GAMMA, alpha=params.FOCAL_ALPHA)
-                print(f"🔧 Using sparse_focal_loss with gamma={params.FOCAL_GAMMA}")
+                loss = sparse_focal_loss(gamma=params.FOCAL_GAMMA, alpha=params.FOCAL_ALPHA, from_logits=params.USE_LOGITS)
+                print(f"🔧 Using sparse_focal_loss with gamma={params.FOCAL_GAMMA}, from_logits={params.USE_LOGITS}")
     
     # Handle standard crossentropy with label smoothing
     elif params.LABEL_SMOOTHING > 0:
         if loss == "categorical_crossentropy":
             loss = tf.keras.losses.CategoricalCrossentropy(
-                label_smoothing=params.LABEL_SMOOTHING
+                label_smoothing=params.LABEL_SMOOTHING,
+                from_logits=params.USE_LOGITS
             )
         elif loss == "sparse_categorical_crossentropy":
             loss = tf.keras.losses.SparseCategoricalCrossentropy(
-                label_smoothing=params.LABEL_SMOOTHING
+                label_smoothing=params.LABEL_SMOOTHING,
+                from_logits=params.USE_LOGITS
             )
         print(f"🔧 Applied label smoothing: {params.LABEL_SMOOTHING}")
     else:
         if loss == "categorical_crossentropy":
-            loss = tf.keras.losses.CategoricalCrossentropy()
+            loss = tf.keras.losses.CategoricalCrossentropy(from_logits=params.USE_LOGITS)
         elif loss == "sparse_categorical_crossentropy":
-            loss = tf.keras.losses.SparseCategoricalCrossentropy()
+            loss = tf.keras.losses.SparseCategoricalCrossentropy(
+                from_logits=params.USE_LOGITS
+            )
     
     # ==========================================================================
     # METRICS CONFIGURATION

@@ -139,11 +139,23 @@ class TFLiteDigitPredictor:
                 output_scale, output_zero_point = self.output_details[0]['quantization']
                 output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
             
-            # Get prediction and confidence
-            prediction = np.argmax(output_data[0])
-            confidence = np.max(output_data[0])
+            # Autodetect if output is logits or softmax
+            # Softmax outputs sum to 1.0 and are all within [0, 1]
+            output_vector = output_data[0]
+            output_sum = np.sum(output_vector)
+            is_softmax = np.isclose(output_sum, 1.0, atol=1e-4) and np.all(output_vector >= -1e-4) and np.all(output_vector <= 1.0001)
             
-            return prediction, confidence, output_data[0]
+            if not is_softmax:
+                # Use a numerically stable softmax implementation
+                exp_data = np.exp(output_vector - np.max(output_vector))
+                output_vector = exp_data / np.sum(exp_data)
+                output_data = [output_vector]
+            
+            # Get prediction and confidence
+            prediction = np.argmax(output_vector)
+            confidence = np.max(output_vector)
+            
+            return prediction, confidence, output_vector
         
         except Exception as e:
             print(f"Error during inference: {e}")

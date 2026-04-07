@@ -240,11 +240,21 @@ def create_super_high_accuracy_validator(
         x = tf.keras.layers.ReLU(name=f'fc{i+1}_relu')(x)
         x = tf.keras.layers.Dropout(drop, name=f'fc{i+1}_drop')(x)
 
-    # Output — cast to float32 so mixed-precision loss is stable
-    logits = tf.keras.layers.Dense(
-        nb_classes, kernel_initializer='glorot_uniform', name='logits')(x)
-    outputs = tf.keras.layers.Activation(
-        'softmax', dtype='float32', name='output')(logits)
+    # Output
+    import parameters as params
+    if params.USE_LOGITS:
+        # Cast to float32 even for logits for mixed-precision stability
+        outputs = tf.keras.layers.Dense(
+            nb_classes, 
+            kernel_initializer='glorot_uniform', 
+            name='logits',
+            dtype='float32'
+        )(x)
+    else:
+        logits = tf.keras.layers.Dense(
+            nb_classes, kernel_initializer='glorot_uniform', name='logits')(x)
+        outputs = tf.keras.layers.Activation(
+            'softmax', dtype='float32', name='output')(logits)
 
     model = tf.keras.Model(inputs, outputs, name='super_high_accuracy_validator')
     return model

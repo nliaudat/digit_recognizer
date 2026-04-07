@@ -24,17 +24,29 @@ def create_template_model():
     Template for creating new models.
     Copy this file and modify the architecture.
     """
-    model = tf.keras.Sequential([
-        tf.keras.layers.Input(shape=params.INPUT_SHAPE),
+    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+    
+    # Add your layers here
+    x = tf.keras.layers.Conv2D(32, (3, 3), activation='relu')(inputs)
+    x = tf.keras.layers.MaxPooling2D((2, 2))(x)
+    
+    # Classification head
+    x = tf.keras.layers.GlobalAveragePooling2D()(x)
+    
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
         
-        # Add your layers here
-        tf.keras.layers.Conv2D(32, (3, 3), activation='relu'),
-        tf.keras.layers.MaxPooling2D((2, 2)),
-        
-        # Classification head
-        tf.keras.layers.GlobalAveragePooling2D(),
-        tf.keras.layers.Dense(params.NB_CLASSES, activation='softmax')
-    ])
+    model = tf.keras.Model(inputs, outputs, name='template_model')
     
     return model
 

@@ -119,9 +119,18 @@ def create_digit_recognizer_v16():
     x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='gap')(x)
     x = tf.keras.layers.Flatten(name='flatten')(x)
 
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES, activation='softmax', name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation=None, 
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, 
+            activation='softmax', 
+            name='output'
+        )(x)
 
     return tf.keras.Model(inputs, outputs, name='digit_recognizer_v16')
 

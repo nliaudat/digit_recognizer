@@ -429,11 +429,18 @@ def create_digit_recognizer_v24(method='adaptive', use_batch_norm=False):
     x = _build_v24_backbone(x, use_batch_norm=use_batch_norm)
     
     # Step 4: Output
-    outputs = tf.keras.layers.Dense(
-        params.NB_CLASSES,
-        activation='softmax',
-        name='output'
-    )(x)
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES,
+            activation=None,
+            name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES,
+            activation='softmax',
+            name='output'
+        )(x)
     
     model = tf.keras.Model(inputs, outputs, name=f"digit_recognizer_v24_{method}")
     
