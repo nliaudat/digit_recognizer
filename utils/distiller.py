@@ -315,18 +315,30 @@ class Distiller(tf.keras.Model):
             if "EnsembleTeacher" in str(type(model)):
                 return False 
             
-            # 2. Check last layer activation for Functional/Sequential models
-            if hasattr(model, 'layers') and len(model.layers) > 0:
+            # 2. Check output layer activation
+            last_layer = None
+            if hasattr(model, 'outputs') and len(model.outputs) > 0:
+                output_tensor = model.outputs[0]
+                # Keras 3 robust way
+                if hasattr(output_tensor, 'node') and hasattr(output_tensor.node, 'layer'):
+                    last_layer = output_tensor.node.layer
+                # Keras 2 robust way
+                elif hasattr(output_tensor, '_keras_history'):
+                    last_layer = output_tensor._keras_history[0]
+            
+            # Fallback for Sequential or other models where outputs might not have history
+            if last_layer is None and hasattr(model, 'layers') and len(model.layers) > 0:
                 last_layer = model.layers[-1]
-                if hasattr(last_layer, 'activation'):
-                    act = last_layer.activation
-                    if act is None: return True
-                    if hasattr(act, '__name__'):
-                        name = act.__name__.lower()
-                        if name == 'linear': return True
-                        if name == 'softmax': return False
-                    # Check for linear activation objects
-                    if act == tf.keras.activations.linear: return True
+
+            if last_layer is not None and hasattr(last_layer, 'activation'):
+                act = last_layer.activation
+                if act is None: return True
+                if hasattr(act, '__name__'):
+                    name = act.__name__.lower()
+                    if name == 'linear': return True
+                    if name == 'softmax': return False
+                # Check for linear activation objects
+                if act == tf.keras.activations.linear: return True
         except:
             pass
         # Default to whatever the current global configuration suggests if we can't be sure
