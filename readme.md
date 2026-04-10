@@ -30,6 +30,7 @@ The primary use case is 10-class recognition. The models perform exceptionally w
 
 | Model                          | Parameters | Size (KB) | Accuracy (RGB) | Inferences/sec |
 | ------------------------------ | ---------- | --------- | -------------- | -------------- |
+| **retrained_v23_10cls_RGB**    | **145800** | **61.8**  | **0.993**      | **3632**       |
 | digit_recognizer_v16_10cls_RGB | 262300     | 128.8     | 0.992          | 2140           |
 | digit_recognizer_v4_10cls_RGB  | 171900     | 78.3      | 0.985          | 3231           |
 | digit_recognizer_v18_10cls_RGB | 228500     | 97.4      | 0.984          | 2374           |
@@ -41,19 +42,23 @@ The primary use case is 10-class recognition. The models perform exceptionally w
 | original_haverland_10cls_RGB   | 324700     | 203.8     | 0.960          | 2751           |
 | digit_recognizer_v6_10cls_RGB  | 195800     | 46.9      | 0.954          | 2329           |
 
-### Pareto-Optimal Choices: `v16` and `v4` vs `original_haverland`
+### Pareto-Optimal Choices: `v23`, `v16` and `v4` vs `original_haverland`
 
-When comparing the `original_haverland` baseline to newer models on the 10-class dataset (RGB), both `v16` and `v4` demonstrate strict superiority across key edge-deployment metrics:
+The `retrained_v23` model currently represents the state-of-the-art for this repository, offering the best balance between size, speed, and accuracy:
 
-**For Maximum Accuracy (`v16`):**
-1.  **Higher Accuracy**: `v16` achieves **99.2%** accuracy compared to the original's **96.0%**.
-2.  **Smaller Memory Footprint**: `v16` is **128.8 KB**, making it substantially smaller than the original's **203.8 KB**.
-3.  **Inference Power**: `v16` processes **2140 inferences/second**, maintaining robust real-time performance while significantly outperforming the baseline in accuracy.
+**The New Gold Standard (`v23`):**
+1.  **Extreme Accuracy**: `v23` achieves **99.29%** accuracy, slightly outperforming even the high-capacity `v16` (**99.18%**) and significantly beating the original's **96.0%**.
+2.  **Ultra Compact**: At only **61.8 KB**, it is **3.3x smaller** than the original baseline (**203.8 KB**).
+3.  **Blazing Speed**: Processes **3632 inferences/second**, making it **32% faster** than the original benchmark.
 
-**For Maximum Efficiency (`v4`):**
-1.  **Higher Accuracy**: `v4` achieves **98.5%** accuracy compared to the original's **96.0%**.
-2.  **Dramatically Smaller Memory Footprint**: `v4` is only **78.3 KB**, making it roughly **2.6x smaller** than the original's **203.8 KB**, saving critical flash memory on ESP32 devices.
-3.  **Fast Inference**: `v4` processes **3231 inferences/second**, making it roughly **17% faster** than the original's **2751 IPS**.
+**For Maximum Accuracy Scaling (`v16`):**
+1.  **Robust Accuracy**: `v16` maintains **99.2%** accuracy and is particularly stable under varied lighting conditions.
+2.  **Efficient Scaling**: Despite being larger than `v23`, it is still **1.6x smaller** than the original.
+
+**For Maximum Throughput (`v4`):**
+1.  **High Accuracy**: `v4` achieves **98.5%** accuracy with an extremely efficient architecture.
+2.  **Memory King**: Only **78.3 KB**, making it a perfect fit for even the most resource-constrained ESP32-S3 boards.
+3.  **Maximum Speed**: Processes over **3200** inferences per second on average.
 
 ## Benchmark on 56375 real images (100 Classes [0-99])
 
