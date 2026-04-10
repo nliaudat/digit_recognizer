@@ -146,7 +146,7 @@ class TFLiteDigitPredictor:
             # Using a looser tolerance (0.1) for quantized models
             output_vector = output_data[0]
             output_sum = np.sum(output_vector)
-            is_softmax = np.isclose(output_sum, 1.0, atol=0.1) and np.all(output_vector >= -0.05) and np.all(output_vector <= 1.05)
+            is_softmax = np.isclose(output_sum, 1.0, atol=0.02) and np.all(output_vector >= -0.05) and np.all(output_vector <= 1.05)
             
             if not is_softmax:
                 # Use a numerically stable softmax implementation
@@ -284,20 +284,9 @@ def get_model_metadata(model_path):
     """
     try:
         interpreter = create_tflite_interpreter(model_path)
-        
-        # 1. Count parameters
-        total_params = 0
-        tensor_details = interpreter.get_tensor_details()
-        for tensor in tensor_details:
-            # Count only non-constant tensors (weights and biases)
-            if 'buffer' not in tensor or tensor['buffer'] == 0:
-                shape = tensor['shape']
-                if shape is not None and len(shape) > 0:
-                    params_in_tensor = np.prod(shape)
-                    total_params += params_in_tensor
-        
-        # 2. Detect output type (requires allocation)
         interpreter.allocate_tensors()
+        
+        # 1. Detect output type
         input_details = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
         
@@ -320,11 +309,33 @@ def get_model_metadata(model_path):
         output_sum = np.sum(output_vector)
         
         # Heuristic: Softmax sums to 1.0 and elements are within [0, 1]
-        # Using a looser tolerance (0.1) to account for quantization rounding 
-        is_softmax = np.isclose(output_sum, 1.0, atol=0.1) and np.all(output_vector >= -0.05) and np.all(output_vector <= 1.05)
+        # Using a tighter tolerance (0.02) for robust autodetection 
+        is_softmax = np.isclose(output_sum, 1.0, atol=0.02) and np.all(output_vector >= -0.05) and np.all(output_vector <= 1.05)
+        
+        # 2. Count parameters (moved after allocation for better heuristic)
+        total_params = 0
+        tensor_details = interpreter.get_tensor_details()
+        for tensor in tensor_details:
+            # Standard TFLite approach: count tensors with a valid buffer index > 0
+            # Some TF versions don't expose 'buffer' in get_tensor_details
+            has_buffer = 'buffer' in tensor and tensor['buffer'] > 0
+            
+            # Fallback heuristic: Tensors with non-zero data after allocation but before 
+            # real inference are almost always constant weights/biases.
+            if not has_buffer:
+                try:
+                    t_data = interpreter.get_tensor(tensor['index'])
+                    if t_data is not None and np.any(t_data != 0):
+                        has_buffer = True
+                except:
+                    pass # Inaccessible or unallocated
+                    
+            if has_buffer:
+                shape = tensor['shape']
+                if shape is not None and len(shape) > 0:
+                    total_params += int(np.prod(shape))
         
         # Determine the suffix (quant vs float)
-        # Optimization: use gathered input_dtype and path check directly 
         is_quant = input_dtype in [np.int8, np.uint8]
         if not is_quant:
             path_lower = model_path.lower()

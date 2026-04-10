@@ -330,15 +330,23 @@ class Distiller(tf.keras.Model):
             if last_layer is None and hasattr(model, 'layers') and len(model.layers) > 0:
                 last_layer = model.layers[-1]
 
-            if last_layer is not None and hasattr(last_layer, 'activation'):
-                act = last_layer.activation
-                if act is None: return True
-                if hasattr(act, '__name__'):
-                    name = act.__name__.lower()
+            if last_layer is not None:
+                # Explicit check for Softmax layer (no activation attribute)
+                if "Softmax" in last_layer.__class__.__name__:
+                    return False
+                
+                # Check for activation attribute (Common for Dense/Conv layers)
+                if hasattr(last_layer, 'activation'):
+                    act = last_layer.activation
+                    if act is None: return True
+                    
+                    # Handle string-based activations (e.g., 'softmax', 'linear')
+                    name = act if isinstance(act, str) else getattr(act, '__name__', '').lower()
                     if name == 'linear': return True
                     if name == 'softmax': return False
-                # Check for linear activation objects
-                if act == tf.keras.activations.linear: return True
+                    
+                    # Check for linear activation objects
+                    if act == tf.keras.activations.linear: return True
         except:
             pass
         # Default to whatever the current global configuration suggests if we can't be sure
