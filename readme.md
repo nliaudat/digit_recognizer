@@ -30,30 +30,35 @@ The primary use case is 10-class recognition. The models perform exceptionally w
 
 | Model                          | Parameters | Size (KB) | Accuracy (RGB) | Inferences/sec |
 | ------------------------------ | ---------- | --------- | -------------- | -------------- |
-| digit_recognizer_v16_10cls_RGB | 246800     | 128.8     | 0.992          | 4960           |
-| digit_recognizer_v18_10cls_RGB | 213000     | 97.4      | 0.990          | 4131           |
-| digit_recognizer_v15_10cls_RGB | 140000     | 100.0     | 0.989          | 5506           |
-| digit_recognizer_v19_10cls_RGB | 287200     | 132.2     | 0.988          | 3286           |
-| digit_recognizer_v4_10cls_RGB  | 104700     | 78.3      | 0.988          | 6121           |
-| digit_recognizer_v17_10cls_RGB | 175700     | 71.0      | 0.987          | 6256           |
-| digit_recognizer_v3_10cls_RGB  | 71200      | 38.4      | 0.973          | 4695           |
-| digit_recognizer_v7_10cls_RGB  | 78600      | 47.2      | 0.970          | 6423           |
-| original_haverland_10cls_RGB   | 240200     | 203.8     | 0.966          | 4286           |
-| digit_recognizer_v6_10cls_RGB  | 79500      | 46.9      | 0.963          | 4047           |
+| **retrained_v23_10cls_RGB**    | **145800** | **61.8**  | **0.993**      | **3632**       |
+| digit_recognizer_v16_10cls_RGB | 262300     | 128.8     | 0.992          | 2140           |
+| digit_recognizer_v4_10cls_RGB  | 171900     | 78.3      | 0.985          | 3231           |
+| digit_recognizer_v18_10cls_RGB | 228500     | 97.4      | 0.984          | 2374           |
+| digit_recognizer_v15_10cls_RGB | 254800     | 100.0     | 0.984          | 2429           |
+| digit_recognizer_v19_10cls_RGB | 302700     | 132.2     | 0.983          | 1779           |
+| digit_recognizer_v17_10cls_RGB | 191200     | 71.0      | 0.980          | 2656           |
+| digit_recognizer_v3_10cls_RGB  | 112600     | 38.4      | 0.966          | 3456           |
+| digit_recognizer_v7_10cls_RGB  | 111300     | 47.2      | 0.966          | 4139           |
+| original_haverland_10cls_RGB   | 324700     | 203.8     | 0.960          | 2751           |
+| digit_recognizer_v6_10cls_RGB  | 195800     | 46.9      | 0.954          | 2329           |
 
-### Pareto-Optimal Choices: `v16` and `v4` vs `original_haverland`
+### Pareto-Optimal Choices: `v23`, `v16` and `v4` vs `original_haverland`
 
-When comparing the `original_haverland` baseline to newer models on the 10-class dataset (RGB), both `v16` and `v4` demonstrate strict superiority across key edge-deployment metrics:
+The `retrained_v23` model currently represents the state-of-the-art for this repository, offering the best balance between size, speed, and accuracy:
 
-**For Maximum Accuracy (`v16`):**
-1.  **Higher Accuracy**: `v16` achieves **99.2%** accuracy compared to the original's **96.6%**.
-2.  **Smaller Memory Footprint**: `v16` is **128.8 KB**, making it substantially smaller than the original's **203.8 KB**.
-3.  **Faster Inference**: `v16` processes **4960 inferences/second**, outperforming the original's **4286 inferences/second**.
+**The New Gold Standard (`v23`):**
+1.  **Extreme Accuracy**: `v23` achieves **99.29%** accuracy, slightly outperforming even the high-capacity `v16` (**99.18%**) and significantly beating the original's **96.0%**.
+2.  **Ultra Compact**: At only **61.8 KB**, it is **3.3x smaller** than the original baseline (**203.8 KB**).
+3.  **Blazing Speed**: Processes **3632 inferences/second**, making it **32% faster** than the original benchmark.
 
-**For Maximum Efficiency (`v4`):**
-1.  **Higher Accuracy**: `v4` achieves **98.8%** accuracy compared to the original's **96.6%**.
-2.  **Dramatically Smaller Memory Footprint**: `v4` is only **78.3 KB**, making it roughly **2.6x smaller** than the original's **203.8 KB**, saving critical flash memory on ESP32 devices.
-3.  **Extremely Fast Inference**: `v4` processes **6121 inferences/second**, making it roughly **42% faster** than the original.
+**For Maximum Accuracy Scaling (`v16`):**
+1.  **Robust Accuracy**: `v16` maintains **99.2%** accuracy and is particularly stable under varied lighting conditions.
+2.  **Efficient Scaling**: Despite being larger than `v23`, it is still **1.6x smaller** than the original.
+
+**For Maximum Throughput (`v4`):**
+1.  **High Accuracy**: `v4` achieves **98.5%** accuracy with an extremely efficient architecture.
+2.  **Memory King**: Only **78.3 KB**, making it a perfect fit for even the most resource-constrained ESP32-S3 boards.
+3.  **Maximum Speed**: Processes over **3200** inferences per second on average.
 
 ## Benchmark on 56375 real images (100 Classes [0-99])
 
@@ -61,29 +66,29 @@ To ensure a fair and comprehensive comparison between architectures under stress
 
 | Model                          | Parameters | Size (KB) | Accuracy (RGB) | Inferences/sec |
 | ------------------------------ | ---------- | --------- | -------------- | -------------- |
-| digit_recognizer_v16_100cls_RGB| 255800     | 139.7     | 0.942          | 3456           |
-| digit_recognizer_v19_100cls_RGB| 299100     | 146.0     | 0.924          | 3328           |
-| digit_recognizer_v15_100cls_RGB| 145400     | 107.4     | 0.914          | 4140           |
-| digit_recognizer_v6_100cls_RGB | 209300     | 160.8     | 0.906          | 1965           |
-| digit_recognizer_v4_100cls_RGB | 111500     | 87.1      | 0.905          | 5766           |
-| digit_recognizer_v18_100cls_RGB| 223400     | 109.7     | 0.904          | 4200           |
-| digit_recognizer_v17_100cls_RGB| 183300     | 80.5      | 0.885          | 4626           |
-| original_haverland_100cls_RGB  | 263600     | 228.8     | 0.847          | 4190           |
-| digit_recognizer_v3_100cls_RGB | 75900      | 45.1      | 0.835          | 4541           |
-| digit_recognizer_v7_100cls_RGB | 85500      | 56.0      | 0.806          | 6162           |
+| digit_recognizer_v16_100cls_RGB| 271300     | 139.7     | 0.934          | 2026           |
+| digit_recognizer_v19_100cls_RGB| 314600     | 146.0     | 0.914          | 1753           |
+| digit_recognizer_v4_100cls_RGB | 178800     | 87.1      | 0.907          | 3247           |
+| digit_recognizer_v15_100cls_RGB| 260200     | 107.4     | 0.905          | 2343           |
+| digit_recognizer_v6_100cls_RGB | 460900     | 160.8     | 0.895          | 1076           |
+| digit_recognizer_v18_100cls_RGB| 238900     | 109.7     | 0.894          | 2278           |
+| digit_recognizer_v17_100cls_RGB| 198700     | 80.5      | 0.875          | 2487           |
+| original_haverland_100cls_RGB  | 348100     | 228.8     | 0.838          | 2714           |
+| digit_recognizer_v3_100cls_RGB | 117300     | 45.1      | 0.825          | 3330           |
+| digit_recognizer_v7_100cls_RGB | 118200     | 56.0      | 0.797          | 4151           |
 
 ### Performance under Stress: `v16` and `v4` vs `original_haverland` (100-Class)
 
 Even on the harder dataset (RGB), both `v16` and `v4` maintain their strong edge over `original_haverland`:
 
 **`v16` under stress:**
-1.  **Higher Accuracy**: `v16` achieves **94.2%** accuracy compared to the original's **84.7%**.
+1.  **Higher Accuracy**: `v16` achieves **93.4%** accuracy compared to the original's **83.8%**.
 2.  **Smaller Memory Footprint**: `v16` drops to **139.7 KB** while the original is **228.8 KB**.
 
 **`v4` under stress:**
-1.  **Higher Accuracy**: `v4` achieves **90.5%** accuracy compared to the original's **84.7%**.
+1.  **Higher Accuracy**: `v4` achieves **90.7%** accuracy compared to the original's **83.8%**.
 2.  **Dramatically Smaller Memory Footprint**: `v4` drops to **87.1 KB** while the original is **228.8 KB**.
-3.  **Faster Inference**: `v4` processes **5766 inferences/second**, beating the original's **4190 inferences/second**.
+3.  **Faster Inference**: `v4` processes **3247 inferences/second**, beating the original's **2714 inferences/second**.
 
 ## Usage
 
@@ -117,6 +122,13 @@ If no configuration is provided and the terminal is detected as non-interactive 
 - **Intelligent Focal Loss**: Replaces standard Cross-Entropy once the model masters the basics (default: >0.80 accuracy). Controlled via `LOSS_TYPE = "IntelligentFocalLossController"`.
 - **Dynamic Alpha Scaling**: Scaling factor $\alpha$ for Focal Loss is automatically calculated based on class count to maintain class balance.
 - **Adaptive Per-Class Weighting**: Dynamically adjusts importance of specific difficult digits during training.
+
+## Knowledge Distillation
+The project includes a robust distillation framework in `utils/distiller.py`.
+
+- **Accuracy Boost**: Distilled models often exceed their teacher's performance. For example, `distilled_many_to_v16` achieved **99.34%** accuracy, surpassing the standard `v16` (**99.18%**).
+- **Logit/Softmax Autodetection**: Automatically handles diverse model output types.
+- **Mixed Input Support**: Distill from RGB teachers into efficient Grayscale students.
 
 ## Benchmarking
 
@@ -163,16 +175,16 @@ The table below summarizes the trade-offs between accuracy and model size across
 
 | Model Name | 10 cls Gray | 10 cls RGB | 100 cls Gray | 100 cls RGB | Application / Comment |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **v6** | 96.5% / 36.5KB | 96.3% / 46.9KB | 84.0% / 132.5KB | 90.5% / 160.8KB | Best balanced IoT model for 10cls Gray, extremely small memory footprint. |
-| **v3** | 98.0% / 69.4KB | 97.3% / 38.4KB | 76.5% / 74.6KB | 83.5% / 45.1KB | Fast overall inference speed and best balanced for 100cls RGB. |
-| **v7** | 96.6% / 46.7KB | 97.0% / 47.2KB | 75.4% / 55.5KB | 80.6% / 56.0KB | Fastest inference speed under 100KB, optimal for speed-critical IoT. |
-| **v4** | 98.5% / 61.4KB | 98.8% / 78.3KB | 82.9% / 69.5KB | 90.5% / 87.1KB | Excellent accuracy while remaining under 100KB, great all-rounder. |
-| **v15** | 99.1% / 79.3KB | 98.9% / 100.0KB | 85.4% / 86.0KB | 91.4% / 107.4KB | Best accuracy for models under 100KB in 10-class scenarios. |
-| **v17** | 99.0% / 70.7KB | 98.7% / 71.0KB | 82.6% / 80.2KB | 88.5% / 80.5KB | Ultra-efficient GhostNet-inspired alternative with solid accuracy. |
-| **v16** | 99.2% / 128.6KB | 99.2% / 128.8KB | 88.4% / 139.5KB | 94.2% / 139.7KB | High accuracy MobileNetV2-based model, excellent under stress. |
-| **v18** | 98.9% / 97.1KB | 99.0% / 97.4KB | 90.2% / 109.4KB | 90.4% / 109.7KB | New variant with very strong performance hovering around 100KB. |
-| **v19** | 98.9% / 131.9KB | 98.8% / 132.2KB | 91.6% / 145.6KB | 92.4% / 146.0KB | New high-capacity variant built for challenging 100-class scenarios. |
-| **original_haverland** | 98.2% / 203.3KB | 96.6% / 203.8KB | 81.7% / 228.2KB | 84.7% / 228.8KB | Legacy baseline, superseded by v16 and newer variants. |
+| **v6** | 96.5% / 36.5KB | 95.4% / 46.9KB | 84.0% / 132.5KB | 89.5% / 160.8KB | Best balanced IoT model for 10cls Gray, extremely small memory footprint. |
+| **v3** | 98.0% / 69.4KB | 96.6% / 38.4KB | 76.5% / 74.6KB | 82.5% / 45.1KB | Fast overall inference speed and best balanced for 100cls RGB. |
+| **v7** | 96.6% / 46.7KB | 96.6% / 47.2KB | 75.4% / 55.5KB | 79.7% / 56.0KB | Fastest inference speed under 100KB, optimal for speed-critical IoT. |
+| **v4** | 98.5% / 61.4KB | 98.5% / 78.3KB | 82.9% / 69.5KB | 90.7% / 87.1KB | Excellent accuracy while remaining under 100KB, great all-rounder. |
+| **v15** | 99.1% / 79.3KB | 98.4% / 100.0KB | 85.4% / 86.0KB | 90.5% / 107.4KB | Best accuracy for models under 100KB in 10-class scenarios. |
+| **v17** | 99.0% / 70.7KB | 98.0% / 71.0KB | 82.6% / 80.2KB | 87.5% / 80.5KB | Ultra-efficient GhostNet-inspired alternative with solid accuracy. |
+| **v16** | 99.2% / 128.6KB | 99.2% / 128.8KB | 88.4% / 139.5KB | 93.4% / 139.7KB | High accuracy MobileNetV2-based model, excellent under stress. |
+| **v18** | 98.9% / 97.1KB | 98.4% / 97.4KB | 90.2% / 109.4KB | 89.4% / 109.7KB | New variant with very strong performance hovering around 100KB. |
+| **v19** | 98.9% / 131.9KB | 98.3% / 132.2KB | 91.6% / 145.6KB | 91.4% / 146.0KB | New high-capacity variant built for challenging 100-class scenarios. |
+| **original_haverland** | 98.2% / 203.3KB | 96.0% / 203.8KB | 81.7% / 228.2KB | 83.8% / 228.8KB | Legacy baseline, superseded by v16 and newer variants. |
 
 ## Related Projects
 

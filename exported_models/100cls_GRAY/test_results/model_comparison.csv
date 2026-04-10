@@ -1,11 +1,16 @@
 Model,Directory,Type,Parameters,Size_KB,Accuracy,Inference_Time_ms,Inferences_per_second,Tested_Images
-digit_recognizer_v16.tflite,digit_recognizer_v16_100cls_GRAY,quantized,253000,139.5,0.926,0.23,4261.0,59782
-digit_recognizer_v19.tflite,digit_recognizer_v19_100cls_GRAY,quantized,296200,145.6,0.9163,0.29,3446.0,59782
-digit_recognizer_v6.tflite,digit_recognizer_v6_100cls_GRAY,quantized,171800,132.5,0.9091,0.4,2494.0,59782
-digit_recognizer_v18.tflite,digit_recognizer_v18_100cls_GRAY,quantized,220600,109.4,0.9022,0.22,4538.0,59782
-digit_recognizer_v15.tflite,digit_recognizer_v15_100cls_GRAY,quantized,113700,86.0,0.9018,0.15,6618.0,59782
-digit_recognizer_v4.tflite,digit_recognizer_v4_100cls_GRAY,quantized,85800,69.5,0.896,0.17,5725.0,59782
-digit_recognizer_v17.tflite,digit_recognizer_v17_100cls_GRAY,quantized,180400,80.2,0.8904,0.21,4777.0,59782
-original_haverland.tflite,original_haverland_100cls_GRAY,quantized,257899,228.2,0.8451,0.24,4234.0,59782
-digit_recognizer_v3.tflite,digit_recognizer_v3_100cls_GRAY,quantized,121600,74.6,0.8252,0.16,6083.0,59782
-digit_recognizer_v7.tflite,digit_recognizer_v7_100cls_GRAY,quantized,82400,55.5,0.8024,0.16,6227.0,59782
+digit_recognizer_v24.tflite,digit_recognizer_v24_100cls_GRAY,logits (quant),665100,430.6,0.9446,1.14,881.0,60614
+digit_recognizer_v29.tflite,digit_recognizer_v29_100cls_GRAY,logits (quant),682900,435.0,0.9357,1.19,839.0,60614
+digit_recognizer_v28.tflite,digit_recognizer_v28_100cls_GRAY,logits (quant),667000,429.9,0.9248,1.15,870.0,60614
+digit_recognizer_v27.tflite,digit_recognizer_v27_100cls_GRAY,logits (quant),667000,430.5,0.9239,1.13,884.0,60614
+digit_recognizer_v16.tflite,digit_recognizer_v16_100cls_GRAY,softmax (quant),258300,140.5,0.9081,0.49,2051.0,60614
+digit_recognizer_v23.tflite,digit_recognizer_v23_100cls_GRAY,logits (quant),661200,426.8,0.901,1.08,924.0,60614
+digit_recognizer_v19.tflite,digit_recognizer_v19_100cls_GRAY,logits (quant),301300,145.3,0.8983,0.62,1605.0,60614
+digit_recognizer_v15.tflite,digit_recognizer_v15_100cls_GRAY,logits (quant),219700,86.0,0.8828,0.35,2869.0,60614
+digit_recognizer_v18.tflite,digit_recognizer_v18_100cls_GRAY,logits (quant),225700,109.2,0.8763,0.46,2181.0,60614
+digit_recognizer_v17.tflite,digit_recognizer_v17_100cls_GRAY,softmax (quant),185600,80.2,0.8661,0.41,2436.0,60614
+digit_recognizer_v4.tflite,digit_recognizer_v4_100cls_GRAY,softmax (quant),150100,70.5,0.8534,0.27,3694.0,60614
+digit_recognizer_v6.tflite,digit_recognizer_v6_100cls_GRAY,logits (quant),384400,132.5,0.8467,0.77,1304.0,60614
+original_haverland.tflite,original_haverland_100cls_GRAY,logits (quant),332100,228.2,0.8363,0.35,2888.0,60614
+digit_recognizer_v3.tflite,digit_recognizer_v3_100cls_GRAY,logits (quant),178600,74.6,0.8078,0.32,3161.0,60614
+digit_recognizer_v7.tflite,digit_recognizer_v7_100cls_GRAY,logits (quant),104900,55.5,0.8063,0.25,4037.0,60614
