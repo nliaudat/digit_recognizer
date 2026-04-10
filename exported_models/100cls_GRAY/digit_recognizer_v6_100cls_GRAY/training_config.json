@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-03-11 10:50:16",
-  "training_duration": "9:01:58.703625",
+  "timestamp": "2026-04-05 01:37:49",
+  "training_duration": "2:44:59.029834",
   "model_architecture": "digit_recognizer_v6",
   "input_shape": [
     32,
@@ -26,9 +26,9 @@
   "use_batch_norm": true,
   "lr_scheduler": "reduce_on_plateau",
   "dynamic_weighting": true,
-  "best_validation_accuracy": 0.7909938097000122,
-  "test_accuracy_keras": 0.7966813445091248,
-  "test_accuracy_tflite": 0.0,
+  "best_validation_accuracy": 0.7297297120094299,
+  "test_accuracy_keras": 0.7234081625938416,
+  "test_accuracy_tflite": 0.7230432402846196,
   "model_size_keras_kb": 1411.640625,
   "model_size_tflite_kb": 132.5234375,
   "total_parameters": 114876,

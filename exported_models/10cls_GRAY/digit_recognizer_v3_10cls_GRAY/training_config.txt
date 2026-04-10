@@ -2,8 +2,8 @@ TRAINING CONFIGURATION AND RESULTS
 ==================================================
 
 📅 Training Information:
-   Timestamp: 2026-03-10 00:11:52
-   Duration: 6:00:32.418341
+   Timestamp: 2026-04-04 19:35:47
+   Duration: 2:56:49.725752
 
 🔧 Model Configuration:
    Architecture: digit_recognizer_v3
@@ -37,9 +37,9 @@ TRAINING CONFIGURATION AND RESULTS
    ESP-DL enabled: False
 
 📊 Results:
-   Best validation accuracy: 0.9675
-   Test accuracy (Keras): 0.9681
-   Test accuracy (TFLite): 0.9689
+   Best validation accuracy: 0.9646
+   Test accuracy (Keras): 0.9614
+   Test accuracy (TFLite): 0.9602
    Keras model size: 734.4 KB
    TFLite model size: 69.4 KB
    Size reduction: 90.6%

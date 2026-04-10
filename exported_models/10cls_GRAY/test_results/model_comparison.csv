@@ -1,11 +1,15 @@
 Model,Directory,Type,Parameters,Size_KB,Accuracy,Inference_Time_ms,Inferences_per_second,Tested_Images
-digit_recognizer_v15.tflite,digit_recognizer_v15_10cls_GRAY,quantized,109100,79.3,0.9908,0.17,6026.0,56375
-digit_recognizer_v16.tflite,digit_recognizer_v16_10cls_GRAY,quantized,244000,128.6,0.9904,0.27,3700.0,56375
-digit_recognizer_v19.tflite,digit_recognizer_v19_10cls_GRAY,quantized,284300,131.9,0.9892,0.29,3447.0,56375
-digit_recognizer_v18.tflite,digit_recognizer_v18_10cls_GRAY,quantized,210200,97.1,0.9886,0.23,4435.0,56375
-digit_recognizer_v4.tflite,digit_recognizer_v4_10cls_GRAY,quantized,79700,61.4,0.9864,0.16,6231.0,56375
-digit_recognizer_v17.tflite,digit_recognizer_v17_10cls_GRAY,quantized,172900,70.7,0.9852,0.19,5200.0,56375
-digit_recognizer_v3.tflite,digit_recognizer_v3_10cls_GRAY,quantized,118400,69.4,0.9746,0.16,6295.0,56375
-digit_recognizer_v7.tflite,digit_recognizer_v7_10cls_GRAY,quantized,75600,46.7,0.9731,0.16,6383.0,56375
-original_haverland.tflite,original_haverland_10cls_GRAY,quantized,234500,203.3,0.9659,0.22,4485.0,56375
-digit_recognizer_v6.tflite,digit_recognizer_v6_10cls_GRAY,quantized,61500,36.5,0.9385,0.18,5556.0,56375
+digit_recognizer_v16.tflite,digit_recognizer_v16_10cls_GRAY,softmax (quant),249300,129.6,0.9848,0.46,2176.0,57207
+digit_recognizer_v19.tflite,digit_recognizer_v19_10cls_GRAY,softmax (quant),289600,131.9,0.9818,0.58,1731.0,57207
+digit_recognizer_v18.tflite,digit_recognizer_v18_10cls_GRAY,softmax (quant),215400,97.1,0.9804,0.45,2234.0,57207
+digit_recognizer_v15.tflite,digit_recognizer_v15_10cls_GRAY,softmax (quant),215000,79.3,0.9779,0.33,3012.0,57207
+digit_recognizer_v29.tflite,digit_recognizer_v29_10cls_GRAY,softmax (quant),165200,69.3,0.9776,0.39,2572.0,57207
+digit_recognizer_v24.tflite,digit_recognizer_v24_10cls_GRAY,softmax (quant),147800,65.3,0.9768,0.33,3043.0,57207
+digit_recognizer_v17.tflite,digit_recognizer_v17_10cls_GRAY,softmax (quant),178100,70.7,0.9748,0.39,2540.0,57207
+digit_recognizer_v23.tflite,digit_recognizer_v23_10cls_GRAY,softmax (quant),143900,61.5,0.9727,0.27,3694.0,57207
+digit_recognizer_v4.tflite,digit_recognizer_v4_10cls_GRAY,softmax (quant),143900,62.5,0.9727,0.26,3868.0,57207
+digit_recognizer_v28.tflite,digit_recognizer_v28_10cls_GRAY,softmax (quant),149700,64.6,0.9715,0.32,3169.0,57207
+digit_recognizer_v27.tflite,digit_recognizer_v27_10cls_GRAY,softmax (quant),149700,65.2,0.9697,0.33,2998.0,57207
+digit_recognizer_v3.tflite,digit_recognizer_v3_10cls_GRAY,softmax (quant),175400,69.4,0.9662,0.3,3327.0,57207
+digit_recognizer_v7.tflite,digit_recognizer_v7_10cls_GRAY,softmax (quant),98000,46.7,0.9499,0.25,3958.0,57207
+digit_recognizer_v6.tflite,digit_recognizer_v6_10cls_GRAY,softmax (quant),153100,36.5,0.9395,0.36,2785.0,57207
