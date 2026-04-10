@@ -20,3 +20,5 @@ dropbox_ignore.ps
 .env
 /digit-recognizer-paper
 runned_command.log
+/exported_models
+/exported_models
