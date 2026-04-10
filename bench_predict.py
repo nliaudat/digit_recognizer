@@ -143,9 +143,10 @@ class TFLiteDigitPredictor:
             
             # Autodetect if output is logits or softmax
             # Softmax outputs sum to 1.0 and are all within [0, 1]
+            # Using a looser tolerance (0.1) for quantized models
             output_vector = output_data[0]
             output_sum = np.sum(output_vector)
-            is_softmax = np.isclose(output_sum, 1.0, atol=1e-4) and np.all(output_vector >= -1e-4) and np.all(output_vector <= 1.0001)
+            is_softmax = np.isclose(output_sum, 1.0, atol=0.1) and np.all(output_vector >= -0.05) and np.all(output_vector <= 1.05)
             
             if not is_softmax:
                 # Use a numerically stable softmax implementation
@@ -275,13 +276,19 @@ def find_model_path(model_name=None, input_dir=None):
         print(f"No TFLite model found in: {latest_dir_path}")
         return None
 
-def get_model_parameters_count(model_path):
-    """Get the number of parameters in a TFLite model"""
+def get_model_metadata(model_path):
+    """
+    Extract multiple metadata items from a TFLite model in a single pass 
+    to avoid redundant interpreter allocations.
+    Returns: (output_type, parameters_count)
+    """
     try:
         interpreter = create_tflite_interpreter(model_path)
         
+        # 1. Count parameters
         total_params = 0
-        for tensor in interpreter.get_tensor_details():
+        tensor_details = interpreter.get_tensor_details()
+        for tensor in tensor_details:
             # Count only non-constant tensors (weights and biases)
             if 'buffer' not in tensor or tensor['buffer'] == 0:
                 shape = tensor['shape']
@@ -289,37 +296,8 @@ def get_model_parameters_count(model_path):
                     params_in_tensor = np.prod(shape)
                     total_params += params_in_tensor
         
-        return total_params
-    except Exception as e:
-        return 0
-
-def is_quantized_model(model_path):
-    """Check if a model is quantized by examining its input type or path"""
-    try:
-        # Trust directory/file naming conventions first (crucial for dynamic range QAT models 
-        # which have int8 weights but float32 I/O to maintain XNNPACK compatibility)
-        path_lower = model_path.lower()
-        if 'qat' in path_lower or 'quant' in path_lower:
-            return True
-            
-        interpreter = create_tflite_interpreter(model_path)
-        input_details = interpreter.get_input_details()
-        input_dtype = input_details[0]['dtype']
-        
-        # Pure integer quantized models use int8 or uint8
-        return input_dtype in [np.int8, np.uint8]
-    except:
-        return False
-
-def get_model_output_type(model_path):
-    """
-    Detect if a TFLite model outputs 'softmax' probabilities or raw 'logits'.
-    Uses a zero-input heuristic.
-    """
-    try:
-        interpreter = create_tflite_interpreter(model_path)
+        # 2. Detect output type (requires allocation)
         interpreter.allocate_tensors()
-        
         input_details = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
         
@@ -343,19 +321,32 @@ def get_model_output_type(model_path):
         
         # Heuristic: Softmax sums to 1.0 and elements are within [0, 1]
         # Using a looser tolerance (0.1) to account for quantization rounding 
-        # (e.g., quantized softmax often sums to ~0.98-1.02)
         is_softmax = np.isclose(output_sum, 1.0, atol=0.1) and np.all(output_vector >= -0.05) and np.all(output_vector <= 1.05)
         
         # Determine the suffix (quant vs float)
-        q_suffix = ""
-        if is_quantized_model(model_path):
-            q_suffix = " (quant)"
-        else:
-            q_suffix = " (float)"
-            
-        return ("softmax" if is_softmax else "logits") + q_suffix
+        # Optimization: use gathered input_dtype and path check directly 
+        is_quant = input_dtype in [np.int8, np.uint8]
+        if not is_quant:
+            path_lower = model_path.lower()
+            if 'qat' in path_lower or 'quant' in path_lower:
+                is_quant = True
+                
+        q_suffix = " (quant)" if is_quant else " (float)"
+        output_type = ("softmax" if is_softmax else "logits") + q_suffix
+        
+        return output_type, total_params
     except Exception as e:
-        return "unknown"
+        return "unknown", 0
+
+def get_model_parameters_count(model_path):
+    """Legacy helper - use get_model_metadata for efficiency"""
+    _, count = get_model_metadata(model_path)
+    return count
+
+def get_model_output_type(model_path):
+    """Legacy helper - use get_model_metadata for efficiency"""
+    mtype, _ = get_model_metadata(model_path)
+    return mtype
 
 def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude_model=None, debug=False, model_list=None):
     """Get all available models with parameters count - with error handling
@@ -432,13 +423,14 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
             if not is_valid_tflite_model(model_path):
                 continue
                 
-            if quantized_only and not is_quantized_model(model_path):
-                continue
-                
             try:
                 model_size = os.path.getsize(model_path) / 1024
-                model_type = get_model_output_type(model_path)
-                parameters_count = get_model_parameters_count(model_path)
+                # Consolidated metadata extraction to avoid redundant interpreter allocation
+                model_type, parameters_count = get_model_metadata(model_path)
+                
+                # Filter by quantization if requested
+                if quantized_only and "(quant)" not in model_type:
+                    continue
                 
                 all_models.append({
                     'path': model_path,

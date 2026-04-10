@@ -141,9 +141,10 @@ class TFLiteDigitPredictor:
             
             # Autodetect if output is logits or softmax
             # Softmax outputs sum to 1.0 and are all within [0, 1]
+            # Using a looser tolerance (0.1) for quantized models
             output_vector = output_data[0]
             output_sum = np.sum(output_vector)
-            is_softmax = np.isclose(output_sum, 1.0, atol=1e-4) and np.all(output_vector >= -1e-4) and np.all(output_vector <= 1.0001)
+            is_softmax = np.isclose(output_sum, 1.0, atol=0.1) and np.all(output_vector >= -0.05) and np.all(output_vector <= 1.05)
             
             if not is_softmax:
                 # Use a numerically stable softmax implementation

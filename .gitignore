@@ -19,3 +19,4 @@ exported_models/summary_model_comparison_*.csv
 dropbox_ignore.ps
 .env
 /digit-recognizer-paper
+runned_command.log
