@@ -256,7 +256,7 @@ def parse_args() -> argparse.Namespace:
         help="Use ProgressiveDistiller (dynamic temperature & alpha)"
     )
 
-    # ── Shared / infrastructure ────────────────────────────────────────────
+    # ── shared / infrastructure ────────────────────────────────────────────
     parser.add_argument(
         "--batch",
         type=int,
@@ -282,6 +282,17 @@ def parse_args() -> argparse.Namespace:
         "--no-quantize",
         action="store_true",
         help="Skip TFLite quantization export"
+    )
+    parser.add_argument(
+        "--tqt",
+        action="store_true",
+        default=None,
+        help="Enable TQT/ESP-DL quantization pipeline for the student"
+    )
+    parser.add_argument(
+        "--no-tqt",
+        action="store_true",
+        help="Disable TQT/ESP-DL quantization pipeline for the student"
     )
     parser.add_argument(
         "--target-hardware",
@@ -382,6 +393,12 @@ def main() -> None:
     num_classes   = args.classes
     export_quant  = not args.no_quantize
 
+    # Quantization overrides
+    if args.tqt:
+        params.USE_TQT_PIPELINE = True
+    if args.no_tqt:
+        params.USE_TQT_PIPELINE = False
+
     logger.info("=" * 60)
     logger.info("🚀  Distillation Configuration")
     logger.info("=" * 60)
@@ -395,6 +412,7 @@ def main() -> None:
     logger.info(f"  Alpha:           {args.alpha}")
     logger.info(f"  Mode:            {args.mode}")
     logger.info(f"  Progressive:     {args.progressive}")
+    logger.info(f"  TQT Pipeline:    {params.USE_TQT_PIPELINE}")
     logger.info("=" * 60)
 
     if args.phase == "teacher":
@@ -459,6 +477,7 @@ def main() -> None:
             checkpoint_dir=args.checkpoint_dir,
             output_dir=args.output_dir,
             export_quantized=export_quant,
+            use_tqt=params.USE_TQT_PIPELINE,
             target_hardware=args.target_hardware,
         )
 
@@ -485,6 +504,7 @@ def main() -> None:
             checkpoint_dir=args.checkpoint_dir,
             output_dir=args.output_dir,
             export_quantized=export_quant,
+            use_tqt=params.USE_TQT_PIPELINE,
             target_hardware=args.target_hardware,
         )
 

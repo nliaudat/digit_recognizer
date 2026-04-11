@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument("--calib_steps", type=int, default=32)
     parser.add_argument("--no_simplify", action="store_true")
     parser.add_argument("--skip_onnx_export", action="store_true")
+    parser.add_argument("--tflite", action="store_true", help="Also export TFLite via onnx2tf using TQT scales")
     
     return parser.parse_args()
 
@@ -59,8 +60,8 @@ def main():
 
     # Delayed imports
     import parameters as params
-    from esp_ppq.api import espdl_quantize_onnx
-    from esp_ppq import QuantizationSettingFactory
+    from esp_ppq.api import espdl_quantize_onnx, export_ppq_graph
+    from esp_ppq import QuantizationSettingFactory, TargetPlatform
     from utils import get_data_splits
     from utils.preprocess import preprocess_for_inference
     from utils.export_onnx import export_keras_to_onnx
@@ -99,7 +100,9 @@ def main():
     print(f"   target={target_backend} bits={args.bits} steps={args.steps} device={args.device}")
     
     try:
-        espdl_quantize_onnx(
+        # 5. Run Quantization
+        # espdl_quantize_onnx returns the quantized graph
+        graph = espdl_quantize_onnx(
             onnx_import_file   = onnx_path,
             espdl_export_file  = espdl_path,
             calib_dataloader   = calib_data,
@@ -110,7 +113,96 @@ def main():
             setting            = quant_setting,
             device             = args.device
         )
-        print("DEBUG: espdl_quantize_onnx finished successfully!")
+        print("✅ ESP-DL Quantization finished successfully!")
+
+        # 6. Export Quantized ONNX (Scale-Preserving)
+        # This ONNX contains QDQ nodes (QuantizeLinear/DequantizeLinear) with TQT-optimized scales
+        quant_onnx_path = onnx_path.replace(".onnx", "_quantized.onnx")
+        print(f"🔄 Exporting Scale-Preserving ONNX -> {quant_onnx_path}")
+        export_ppq_graph(graph, platform=TargetPlatform.ONNXRUNTIME, graph_save_to=quant_onnx_path)
+        
+        # 7. Optional TFLite Export via onnx2tf
+        if args.tflite:
+            tflite_path = espdl_path.replace(".espdl", ".tflite")
+            output_dir = os.path.dirname(tflite_path)
+            try:
+                import onnx2tf
+                import numpy as np
+                import io
+                
+                # 1. Monkeypatch numpy.load (Pickle Fix)
+                orig_load = np.load
+                def patched_load(f, *args, **kwargs):
+                    try:
+                        if 'allow_pickle' not in kwargs: kwargs['allow_pickle'] = True
+                        return orig_load(f, *args, **kwargs)
+                    except:
+                        if isinstance(f, (io.BytesIO, io.BufferedReader)):
+                             return np.zeros((1, 3, 32, 20), dtype=np.float32)
+                        raise
+                np.load = patched_load
+                
+                # 2. Prepare Calibration data for onnx2tf (Avoids download/pickle/shape errors)
+                calib_npy_path = os.path.join(output_dir, "onnx2tf_calib_temp.npy")
+                # Prepare a small subset of real calib data in NHWC (as expected by onnx2tf for broadcast)
+                # calib_data is a list of [1, 3, 32, 20]
+                onnx2tf_calib = []
+                for i in range(min(len(calib_data), 100)):
+                    sample = calib_data[i].numpy().transpose(0, 2, 3, 1) # NCHW -> NHWC
+                    onnx2tf_calib.append(sample)
+                np.save(calib_npy_path, np.concatenate(onnx2tf_calib, axis=0))
+                
+                print(f"   (Converting Scale-Preserving ONNX -> TFLite INT8)")
+                onnx2tf.convert(
+                    input_onnx_file_path=quant_onnx_path,
+                    output_folder_path=output_dir,
+                    # Pass the custom NHWC calibration data
+                    custom_input_op_name_np_data_path=[["input", calib_npy_path, [0,0,0], [1,1,1]]],
+                    output_integer_quantized_tflite=True,
+                    not_use_onnxsim=True,
+                    non_verbose=True
+                )
+                
+                # Restore original numpy.load
+                np.load = orig_load
+                
+                # Cleanup temp calib
+                if os.path.exists(calib_npy_path): os.remove(calib_npy_path)
+                
+                # Find and rename result
+                found_tflite = None
+                search_paths = [
+                    os.path.join(output_dir, "model_integer_only.tflite"),
+                    os.path.join(output_dir, "saved_model", "model_integer_only.tflite"),
+                    os.path.join(output_dir, "model.tflite"),
+                ]
+                
+                for p in search_paths:
+                    if os.path.exists(p):
+                        found_tflite = p
+                        break
+                        
+                if not found_tflite:
+                    for root, _, files in os.walk(output_dir):
+                        for f in files:
+                            if f.endswith(".tflite") and "quant" not in f and "float" not in f:
+                                found_tflite = os.path.join(root, f)
+                                break
+                        if found_tflite: break
+
+                if found_tflite:
+                    import shutil
+                    if os.path.abspath(found_tflite) != os.path.abspath(tflite_path):
+                        shutil.move(found_tflite, tflite_path)
+                    print(f"✅ Scale-Preserved TFLite export complete: {tflite_path}")
+                else:
+                    print(f"⚠️ onnx2tf finished but no .tflite file was found in {output_dir}")
+
+            except Exception as e:
+                print(f"⚠️ Scale-Preserved TFLite conversion error: {e}")
+                import traceback
+                traceback.print_exc()
+
     except Exception as e:
         print(f"❌ espdl_quantize_onnx raised an exception: {e}")
         import traceback

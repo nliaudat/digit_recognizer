@@ -52,7 +52,11 @@ class QuantizationAnalyzer:
         perf_analysis = self._analyze_performance(keras_model, tflite_model_path, x_test)
         results.update(perf_analysis)
         
-        # 6. QAT effectiveness (if applicable)
+        # 6. Structural Validation (Verifying scales/zero-points)
+        structural_results = validate_tflite_structural_quantization(tflite_model_path, verbose=self.debug)
+        results['structural_quantization'] = structural_results
+        
+        # 7. QAT effectiveness (if applicable)
         if params.USE_QAT:
             qat_effectiveness = self._analyze_qat_effectiveness(accuracy_drop)
             results.update(qat_effectiveness)
@@ -232,6 +236,13 @@ class QuantizationAnalyzer:
         print(f"   TFLite Inference: {results.get('tflite_inference_ms', 0):.2f} ms")
         print(f"   Speedup:         {results.get('inference_speedup', 0):.1f}x")
         
+        structural = results.get('structural_quantization', {})
+        if structural:
+            print(f"\n🧩 Structural Validation:")
+            print(f"   Level:           {structural.get('quantization_level', 'Unknown')}")
+            print(f"   Tensors Scanned: {structural.get('tensors_scanned', 0)}")
+            print(f"   Validated:       {'✅ YES' if structural.get('is_valid', False) else '❌ NO'}")
+
         if params.USE_QAT:
             print(f"\n🎯 QAT Effectiveness:")
             print(f"   Rating:          {results.get('qat_effectiveness', 'N/A')}")
@@ -258,7 +269,7 @@ class QuantizationAnalyzer:
         
         report_path = os.path.join(output_dir, "quantization_analysis_report.txt")
         
-        with open(report_path, 'w') as f:
+        with open(report_path, 'w', encoding='utf-8') as f:
             f.write("Quantization Analysis Report\n")
             f.write("=" * 50 + "\n\n")
             
@@ -278,6 +289,12 @@ class QuantizationAnalyzer:
             f.write(f"  TFLite Model Size: {self.analysis_results.get('tflite_size_kb', 0):.1f} KB\n")
             f.write(f"  Size Reduction: {self.analysis_results.get('size_reduction_percent', 0):.1f}%\n\n")
             
+            f.write("STRUCTURAL VALIDATION:\n")
+            structural = self.analysis_results.get('structural_quantization', {})
+            f.write(f"  Quantization Level: {structural.get('quantization_level', 'N/A')}\n")
+            f.write(f"  Is Valid Quantized Model: {structural.get('is_valid', False)}\n")
+            f.write(f"  Tensors with Scales: {structural.get('tensors_with_scales', 0)}\n\n")
+
             f.write("PERFORMANCE ANALYSIS:\n")
             f.write(f"  Keras Inference Time: {self.analysis_results.get('keras_inference_ms', 0):.2f} ms\n")
             f.write(f"  TFLite Inference Time: {self.analysis_results.get('tflite_inference_ms', 0):.2f} ms\n")
@@ -298,6 +315,69 @@ class QuantizationAnalyzer:
                 f.write("   Quantization successful - good balance of size and accuracy\n")
         
         print(f" Quantization analysis report saved: {report_path}")
+
+
+# ---------------------------------------------------------------------------
+# TFLite Structural Validation: Verify Scales and Zero-Points
+# ---------------------------------------------------------------------------
+
+def validate_tflite_structural_quantization(tflite_path: str, verbose: bool = False) -> Dict:
+    """
+    Scans internal TFLite tensors to verify if quantization parameters (scales/zero points) 
+    are present and meaningful.
+    """
+    results = {
+        'is_valid': False,
+        'tensors_scanned': 0,
+        'tensors_with_scales': 0,
+        'quantization_level': 'Float'
+    }
+    
+    try:
+        if not os.path.exists(tflite_path):
+            return results
+
+        interpreter = tf.lite.Interpreter(model_path=tflite_path)
+        interpreter.allocate_tensors()
+        
+        details = interpreter.get_tensor_details()
+        results['tensors_scanned'] = len(details)
+        
+        scaled_tensors = 0
+        int8_tensors = 0
+        
+        if verbose:
+            print(f"\n--- TFLite Structural Scan: {os.path.basename(tflite_path)} ---")
+            
+        for detail in details:
+            q_params = detail.get('quantization_parameters')
+            if q_params and len(q_params.get('scales', [])) > 0:
+                scales = q_params['scales']
+                # Check for non-trivial scales
+                if any(s != 0.0 and s != 1.0 for s in scales):
+                    scaled_tensors += 1
+                    if detail['dtype'] in [np.int8, np.uint8, np.int32]:
+                        int8_tensors += 1
+                    
+                    if verbose and scaled_tensors < 10: # Print first few
+                        print(f"  Valid Tensor found: {detail['name']}")
+                        print(f"    - Scale[0]: {scales[0]:.6f}")
+                        print(f"    - Dtype: {detail['dtype']}")
+
+        results['tensors_with_scales'] = scaled_tensors
+        
+        if scaled_tensors > 5: # Threshold for a "quantized model"
+            results['is_valid'] = True
+            if int8_tensors > (scaled_tensors * 0.5):
+                results['quantization_level'] = 'INT8/Fully Quantized'
+            else:
+                results['quantization_level'] = 'Hybrid/Partial'
+        
+        return results
+
+    except Exception as e:
+        if verbose: print(f"Structural validation error: {e}")
+        return results
 
 
 # ---------------------------------------------------------------------------
@@ -385,4 +465,4 @@ def analyze_quantization_impact(keras_model, tflite_model_path: str,
                               debug: bool = False) -> Dict:
     """Convenience function for quick quantization analysis"""
     analyzer = QuantizationAnalyzer(debug=debug)
-    return analyzer.analyze_quantization_impact(keras_model, tflite_model_path, x_test, y_test)
+    return analyzer.analyze_quantization_impact(keras_model, tflite_model_path, x_test, y_test)

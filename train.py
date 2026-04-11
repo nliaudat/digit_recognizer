@@ -1163,6 +1163,10 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                     "--no_simplify",
                     "--skip_onnx_export"
                 ]
+                
+                if getattr(params, 'USE_TQT_FOR_TFLITE', True):
+                    cmd.append("--tflite")
+                    
                 print(f"   Executing TQT command: {' '.join(cmd)}")
                 try:
                     # Run quantization directly (streaming output to console)

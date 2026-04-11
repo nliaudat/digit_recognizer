@@ -448,6 +448,7 @@ def run_distillation_pipeline(
     checkpoint_dir: str = "checkpoints",
     output_dir: Optional[str] = None,
     export_quantized: bool = True,
+    use_tqt: bool = False,
     target_hardware: str = "esp32",
 ) -> Dict[str, Any]:
     """
@@ -662,6 +663,43 @@ def run_distillation_pipeline(
             target_hardware=target_hardware,
         )
         logger.info(f"Student TFLite → {tflite_path}")
+
+        # ── TQT / ESP-DL Quantitative Pipeline ──
+        if use_tqt:
+            logger.info("🚀 TRIGGERING ESP-DL TQT PIPELINE FOR STUDENT...")
+            from utils.export_onnx import export_keras_to_onnx
+            onnx_path = os.path.join(output_dir, f"{student_variant}.onnx")
+            
+            if export_keras_to_onnx(student, onnx_path):
+                import subprocess
+                cmd = [
+                    sys.executable, "quantize_espdl.py",
+                    "--model", student_variant,
+                    "--onnx", onnx_path,
+                    "--output", output_dir,
+                    "--bits", str(params.TQT_NUM_BITS),
+                    "--target", params.TQT_TARGET,
+                    "--classes", str(params.NB_CLASSES),
+                    "--color", color_mode.lower(),
+                    "--steps", str(params.TQT_STEPS),
+                    "--lr", str(params.TQT_LR),
+                    "--device", params.TQT_COLLECTING_DEVICE,
+                    "--no_simplify",
+                    "--skip_onnx_export",
+                    "--tflite" # Student models ALWAYS want the TFLite scale-preserved version
+                ]
+                
+                logger.info(f"   Executing TQT command: {' '.join(cmd)}")
+                try:
+                    subprocess.run(cmd, check=True)
+                    logger.info("✅ TQT Pipeline finished successfully for student")
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"❌ TQT Pipeline failed with exit code {e.returncode}")
+                except Exception as e:
+                    logger.error(f"❌ TQT Pipeline error: {e}")
+            else:
+                logger.error("❌ TQT Pipeline aborted: Student ONNX export failed")
+
     else:
         student.save(f"{export_path}.keras")
         tflite_path = None

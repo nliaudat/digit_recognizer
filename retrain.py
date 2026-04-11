@@ -36,11 +36,15 @@ def main():
     parser.add_argument("--epochs", type=int, default=30, help="Number of fine-tuning epochs")
     parser.add_argument("--lr", type=float, default=0.0001, help="Very low learning rate to prevent catastrophic forgetting")
     parser.add_argument("--weight", type=float, default=20.0, help="Weight multiplier for the bad images dataset")
+    parser.add_argument("--tqt", action="store_true", help="Enable TQT/ESP-DL quantization pipeline after fine-tuning")
     args = parser.parse_args()
 
     print("\n" + "="*50)
     print("🚀 STARTING FINE-TUNING PROCESS")
     print("="*50)
+    
+    if args.tqt:
+        params.USE_TQT_PIPELINE = True
     
     if not os.path.exists(args.model_path):
         print(f"❌ Error: Model not found at {args.model_path}")
@@ -49,16 +53,23 @@ def main():
     print(f"📦 Loading pre-trained model: {args.model_path}")
     
     # Needs QAT scope if model was trained with QAT
-    custom_objects = {}
+    from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss, sparse_focal_loss, focal_loss
+    custom_objects = {
+        "DynamicSparseFocalLoss": DynamicSparseFocalLoss,
+        "DynamicFocalLoss": DynamicFocalLoss,
+        "sparse_focal_loss": sparse_focal_loss,
+        "focal_loss": focal_loss
+    }
+    
     if QAT_AVAILABLE:
-        custom_objects = {"quantize_scope": tfmot.quantization.keras.quantize_scope}
+        custom_objects["quantize_scope"] = tfmot.quantization.keras.quantize_scope
     
     try:
         if QAT_AVAILABLE:
             with tfmot.quantization.keras.quantize_scope():
-                model = tf.keras.models.load_model(args.model_path)
+                model = tf.keras.models.load_model(args.model_path, custom_objects=custom_objects, safe_mode=False)
         else:
-            model = tf.keras.models.load_model(args.model_path)
+            model = tf.keras.models.load_model(args.model_path, custom_objects=custom_objects, safe_mode=False)
         print("✅ Model loaded successfully!")
     except Exception as e:
         print(f"❌ Failed to load model: {e}")
@@ -86,9 +97,9 @@ def main():
 
     # 2. Load the weighted dataset
     print("\n📊 Loading datasets (Original Data + Heavy Weighted Bad Predictions)...")
-    loader = MultiSourceDataLoader()
-    x_data, y_data = loader.load_all_sources()
-    x_data, y_data = shuffle_dataset(x_data, y_data)
+    from utils.multi_source_loader import load_combined_dataset
+    x_data, y_data = load_combined_dataset()
+    # x_data, y_data already shuffled by load_combined_dataset
     
     # Split directly 80/20 train/val for fine-tuning
     split_idx = int(len(x_data) * 0.8)
@@ -111,20 +122,45 @@ def main():
     # 4. Compile with fine-tuning learning rate
     print(f"\n⚙️ Compiling model with Low LR: {args.lr}")
     optimizer = tf.keras.optimizers.RMSprop(learning_rate=args.lr) # Standard for this project
-    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=params.USE_LOGITS)
+    
+    # Use Dynamic loss if IntelligentFocalLossController is active to prevent mid-train recompile crashes
+    if params.LOSS_TYPE in ["IntelligentFocalLossController", "focal_loss"]:
+        from utils.losses import DynamicSparseFocalLoss
+        loss_fn = DynamicSparseFocalLoss(from_logits=params.USE_LOGITS)
+        print(f"🎯 Using DynamicSparseFocalLoss (Alpha: {params.FOCAL_ALPHA}, Gamma: {params.FOCAL_GAMMA})")
+    else:
+        loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=params.USE_LOGITS)
+        print(f"🎯 Using Standard SparseCategoricalCrossentropy")
     
     model.compile(optimizer=optimizer, loss=loss_fn, metrics=['accuracy'])
     
     # 5. Fine-Tune
     print("\n🔥 Starting Fine-Tuning Training loop...")
     
-    # Set up export directory
-    model_name = Path(args.model_path).stem
-    timestamp = tf.timestamp().numpy()
-    export_dir = f"exported_models/{model_name}_finetuned_{int(timestamp)}"
+    # Set up export directory following project standard
+    color_suffix = "GRAY" if params.INPUT_CHANNELS == 1 else "RGB"
+    base_dir = f"exported_models/{params.NB_CLASSES}cls_{color_suffix}"
+    export_dir = os.path.join(base_dir, f"retrained_{params.MODEL_ARCHITECTURE}")
     os.makedirs(export_dir, exist_ok=True)
     
-    callbacks = create_callbacks(export_dir, args.epochs, batch_size, False)
+    # ── Project Infrastructure for Callbacks ──
+    from utils.train_modelmanager import TFLiteModelManager
+    from utils.train_trainingmonitor import TrainingMonitor
+    
+    tflite_manager = TFLiteModelManager(export_dir)
+    monitor = TrainingMonitor(export_dir)
+    rep_x_processed = preprocess_for_training(x_train_raw[:100])
+    
+    callbacks = create_callbacks(
+        output_dir=export_dir,
+        tflite_manager=tflite_manager,
+        representative_data=rep_x_processed,
+        total_epochs=args.epochs,
+        monitor=monitor,
+        debug=True,
+        validation_data=val_dataset,
+        x_train_raw=x_train_raw[:100]
+    )
     
     history = model.fit(
         train_dataset,
@@ -135,8 +171,8 @@ def main():
     
     print("\n✅ Fine-tuning complete!")
     
-    # 6. Export Keras Model and TFLite
-    final_keras_path = os.path.join(export_dir, f"{model_name}_finetuned.keras")
+    final_keras_name = f"retrained_{params.MODEL_ARCHITECTURE}.keras"
+    final_keras_path = os.path.join(export_dir, final_keras_name)
     model.save(final_keras_path)
     print(f"📦 Saved fine-tuned Keras model to: {final_keras_path}")
     
@@ -164,13 +200,52 @@ def main():
     
     try:
         tflite_model = converter.convert()
-        tflite_path = os.path.join(export_dir, f"{model_name}_finetuned.tflite")
+        tflite_path = os.path.join(export_dir, f"retrained_{params.MODEL_ARCHITECTURE}_ptq.tflite")
         with open(tflite_path, "wb") as f:
             f.write(tflite_model)
-        print(f"✅ Quantized TFLite model saved to: {tflite_path}")
+        print(f"✅ PTQ TFLite model saved to: {tflite_path}")
     except Exception as e:
         print(f"❌ TFLite Conversion failed: {e}")
         
+    # ── TQT / ESP-DL Quantitative Pipeline ──
+    if args.tqt:
+        print("\n🚀 TRIGGERING ESP-DL TQT PIPELINE FOR FINETUNED MODEL...")
+        from utils.export_onnx import export_keras_to_onnx
+        # We use the name from params
+        student_variant = params.MODEL_ARCHITECTURE
+        onnx_path = os.path.join(export_dir, f"retrained_{student_variant}.onnx")
+        
+        if export_keras_to_onnx(model, onnx_path):
+            import subprocess
+            color_mode = "gray" if params.INPUT_CHANNELS == 1 else "rgb"
+            cmd = [
+                sys.executable, "quantize_espdl.py",
+                "--model", f"retrained_{student_variant}",
+                "--onnx", onnx_path,
+                "--output", export_dir,
+                "--bits", str(params.TQT_NUM_BITS),
+                "--target", params.TQT_TARGET,
+                "--classes", str(params.NB_CLASSES),
+                "--color", color_mode,
+                "--steps", str(params.TQT_STEPS),
+                "--lr", str(params.TQT_LR),
+                "--device", params.TQT_COLLECTING_DEVICE,
+                "--no_simplify",
+                "--skip_onnx_export",
+                "--tflite" 
+            ]
+            
+            print(f"   Executing TQT command: {' '.join(cmd)}")
+            try:
+                subprocess.run(cmd, check=True)
+                print("✅ TQT Pipeline finished successfully for finetuned model")
+            except subprocess.CalledProcessError as e:
+                print(f"❌ TQT Pipeline failed with exit code {e.returncode}")
+            except Exception as e:
+                print(f"❌ TQT Pipeline error: {e}")
+        else:
+            print("❌ TQT Pipeline aborted: Finetuned ONNX export failed")
+
     print("\n🎉 FINE-TUNING WORKFLOW CONCLUDED SUCCESSFULLY!")
     print(f"Results located in: {export_dir}")
 
