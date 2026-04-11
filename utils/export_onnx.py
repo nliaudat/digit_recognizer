@@ -98,8 +98,16 @@ def export_keras_to_onnx(
         cmd += ["--inputs-as-nchw", actual_input_name]
 
     print(f"   Running: {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)
-    print(f"✅ ONNX export done: {onnx_path}")
+    try:
+        subprocess.run(cmd, check=True)
+        print(f"✅ ONNX export done: {onnx_path}")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ tf2onnx conversion failed with exit code {e.returncode}")
+        print(f"   Ensure 'tf2onnx' is installed in the current environment.")
+        return None
+    except Exception as e:
+        print(f"❌ ONNX export error: {e}")
+        return None
 
     # ── Optional simplification ───────────────────────────────────────────────
     if simplify:
