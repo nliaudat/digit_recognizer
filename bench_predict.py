@@ -2014,10 +2014,18 @@ def main():
                         help='Enable verbose output for debugging model predictions and data loading.')
     parser.add_argument('--tolerance', type=float, default=0.1, 
                         help='Acceptable error tolerance in decimal scale (default: 0.1). E.g. +-0.1 allows +-1 class for 100 classes.')
+    parser.add_argument('--espdl', type=str, default=None,
+                        help='Path to a .espdl file to inspect (size, header, quantization metadata).')
     parser.add_argument('--new', type=str, 
                         help='Test a new model and update the existing CSV results (e.g. distilled_many_to_v16_10cls_RGB).')
     
     args, unknown = parser.parse_known_args()
+
+    # Handle --espdl inspection mode (standalone, no dataset needed)
+    if args.espdl:
+        inspect_espdl(args.espdl)
+        return
+
     
     # Use output dir from params if nothing was specified
     if args.input_dir == 'exported_models':
@@ -2128,3 +2136,37 @@ if __name__ == "__main__":
 
 # py bench_predict.py --model digit_recognizer_v4.tflite --list-failed --save-failed
 # py bench_predict.py --test_all --input_dir exported_models\100cls_RGB
+
+# ---------------------------------------------------------------------------
+# ESPDL metadata inspection (Phase 5c of TQT plan)
+# ---------------------------------------------------------------------------
+
+def inspect_espdl(espdl_path: str) -> dict:
+    import os
+    if not os.path.exists(espdl_path):
+        print(f"espdl file not found: {espdl_path}")
+        return {}
+
+    size_bytes = os.path.getsize(espdl_path)
+    size_kb    = size_bytes / 1024
+
+    print("\n" + "=" * 60)
+    print("  ESPDL MODEL METADATA")
+    print("=" * 60)
+    print(f"  File  : {espdl_path}")
+    print(f"  Size  : {size_kb:.1f} KB  ({size_bytes:,} bytes)")
+    print()
+    print("  Quantization: TQT-optimized Power-of-2 INT8 (Per-Tensor, Symmetric)")
+    print("  NOTE: This .espdl uses TQT-learned scales -- NOT standard PTQ.")
+    print("        Do not compare accuracy with the onnx2tf .tflite directly.")
+    print()
+
+    try:
+        with open(espdl_path, "rb") as f:
+            header = f.read(16).hex()
+        print(f"  Header (hex): {header}")
+    except Exception:
+        pass
+
+    return {"path": espdl_path, "size_bytes": size_bytes, "size_kb": size_kb}
+

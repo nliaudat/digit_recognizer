@@ -239,15 +239,75 @@ update_derived_parameters()
    # QAT training, INT8 quantization (ESP-DL)
 
 # TFLite Conversion Parameters
-QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
+QUANTIZE_MODEL = False # Enable post-training quantization for the TFLite model
 # ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
 ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
                          
 # Quantization Aware Training
-USE_QAT = True  # Enable Quantization Aware Training
-QAT_QUANTIZE_ALL = True  # Quantize all layers
+USE_QAT = False  # Enable Quantization Aware Training
+QAT_QUANTIZE_ALL = False  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
+
+# TQT (ESP-DL) Training-then-Quantization Pipeline
+USE_TQT_PIPELINE = True  # Enable high-precision float-to-TQT export pipeline
+TQT_NUM_BITS = 8         # Quantization bit width (8 recommended for ESP32-S3)
+TQT_TARGET = 'esp32'     # Choices: 'esp32', 'esp32s2', 'esp32s3', 'esp32c3', 'esp32p4'
+
+# --- TQT Device Detection ---
+def _detect_tqt_device():
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+    except ImportError:
+        pass
+    return "cpu"
+
+TQT_DEVICE = _detect_tqt_device()
+
+_TQT_DEFAULTS = {
+    "esp32": {
+        "TQT_STEPS":              500,
+        "TQT_LR":                 5e-6,
+        "TQT_BLOCK_SIZE":         2,
+        "TQT_INT_LAMBDA":         0.50,
+        "TQT_IS_SCALE_TRAINABLE": True,
+        "TQT_COLLECTING_DEVICE":  TQT_DEVICE,
+        "TQT_CALIB_STEPS":        32,
+        "TQT_CALIB_BATCH_SIZE":   1,
+    },
+    "esp32s3": {
+        "TQT_STEPS":              500,
+        "TQT_LR":                 1e-5,
+        "TQT_BLOCK_SIZE":         4,
+        "TQT_INT_LAMBDA":         0.35,
+        "TQT_IS_SCALE_TRAINABLE": True,
+        "TQT_COLLECTING_DEVICE":  TQT_DEVICE,
+        "TQT_CALIB_STEPS":        32,
+        "TQT_CALIB_BATCH_SIZE":   1,
+    },
+    "esp32p4": {
+        "TQT_STEPS":              500,
+        "TQT_LR":                 1e-5,
+        "TQT_BLOCK_SIZE":         4,
+        "TQT_INT_LAMBDA":         0.25,
+        "TQT_IS_SCALE_TRAINABLE": True,
+        "TQT_COLLECTING_DEVICE":  TQT_DEVICE,
+        "TQT_CALIB_STEPS":        32,
+        "TQT_CALIB_BATCH_SIZE":   1,
+    },
+}
+
+_tqt_cfg = _TQT_DEFAULTS.get(TQT_TARGET, _TQT_DEFAULTS["esp32"])
+TQT_STEPS              = _tqt_cfg["TQT_STEPS"]
+TQT_LR                 = _tqt_cfg["TQT_LR"]
+TQT_BLOCK_SIZE         = _tqt_cfg["TQT_BLOCK_SIZE"]
+TQT_INT_LAMBDA         = _tqt_cfg["TQT_INT_LAMBDA"]
+TQT_IS_SCALE_TRAINABLE = _tqt_cfg["TQT_IS_SCALE_TRAINABLE"]
+TQT_COLLECTING_DEVICE  = _tqt_cfg["TQT_COLLECTING_DEVICE"]
+TQT_CALIB_STEPS        = _tqt_cfg["TQT_CALIB_STEPS"]
+TQT_CALIB_BATCH_SIZE   = _tqt_cfg["TQT_CALIB_BATCH_SIZE"]
 
 # Automatically disable quantization flags for PC-only validator models
 # PC_ONLY_MODELS = {"high_accuracy_validator", "super_high_accuracy_validator"}
@@ -282,6 +342,8 @@ SHUFFLE_SEED = 42
 
 # Post training analyse
 # ANALYSE_SAMPLES = 25000
+
+
 
 # ==============================================================================
 # MODEL-SPECIFIC PARAMETERS
@@ -832,7 +894,8 @@ def validate_quantization_parameters():
     original_params = {
         'QUANTIZE_MODEL': QUANTIZE_MODEL,
         'USE_QAT': USE_QAT, 
-        'ESP_DL_QUANTIZE': ESP_DL_QUANTIZE
+        'ESP_DL_QUANTIZE': ESP_DL_QUANTIZE,
+        'USE_TQT_PIPELINE': USE_TQT_PIPELINE
     }
     
     corrected_params = original_params.copy()
@@ -866,8 +929,10 @@ def validate_quantization_parameters():
         messages.append("💡 Using QAT + ESP-DL quantization (INT8)")
     
     # Determine the final mode
-    if not corrected_params['QUANTIZE_MODEL']:
+    if not corrected_params['QUANTIZE_MODEL'] and not corrected_params['USE_TQT_PIPELINE']:
         mode = "Float32 training & inference"
+    elif corrected_params['USE_TQT_PIPELINE']:
+        mode = "Float training with TQT (ESP-DL) export pipeline"
     else:
         if corrected_params['USE_QAT']:
             if corrected_params['ESP_DL_QUANTIZE']:
@@ -930,6 +995,7 @@ def get_hyperparameter_summary():
             'qat': USE_QAT,
             'post_training': QUANTIZE_MODEL,
             'esp_dl': ESP_DL_QUANTIZE,
+            'tqt': USE_TQT_PIPELINE,
         }
     }
     
@@ -1011,7 +1077,3 @@ try:
     validate_quantization_parameters()
 except Exception as e:
     print(f"❌ Parameter validation failed: {e}")
-
-# Print summary when module is imported
-if __name__ != "__main__":
-    print_hyperparameter_summary()
