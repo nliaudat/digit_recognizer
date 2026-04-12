@@ -5,8 +5,10 @@ import hashlib
 import json
 import time
 import numpy as np
+import tensorflow as tf
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.model_selection import train_test_split
+
 import parameters as params
 from utils.custom_logger import log_print
 
@@ -148,7 +150,6 @@ class MultiSourceDataLoader:
     def load_builtin_dataset(self, dataset_name):
         """Load built-in datasets"""
         if dataset_name.lower() == 'mnist':
-            import tensorflow as tf
             (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
             
             # Combine train and test

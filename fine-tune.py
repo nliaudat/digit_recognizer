@@ -1,28 +1,28 @@
-# fine-tune.py
-import tensorflow as tf
-import numpy as np
-import os
-import matplotlib.pyplot as plt
-from datetime import datetime
 import argparse
-import sys
-from tqdm.auto import tqdm
-import logging
-import shutil
-from pathlib import Path
 import cv2
 import glob
+import logging
+import os
 import re
+import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
 
-# Import your existing modules
-from train import (
-    set_all_seeds, setup_tensorflow_logging, 
-    suppress_all_output, TFLiteModelManager, TrainingMonitor,
-    create_callbacks, create_representative_dataset, setup_gpu,
-    print_training_summary
-)
-from utils import get_data_splits, preprocess_images
+import matplotlib.pyplot as plt
+import numpy as np
+import tensorflow as tf
+from tqdm.auto import tqdm
+
+# Project imports
 import parameters as params
+from models import create_model
+from train import (
+    create_callbacks, create_representative_dataset, print_training_summary,
+    set_all_seeds, setup_gpu, setup_tensorflow_logging,
+    suppress_all_output, TFLiteModelManager, TrainingMonitor
+)
+from utils import get_data_splits, preprocess_images, preprocess_for_training
 
 class FineTuneManager:
     """Manager for fine-tuning pre-trained models"""
@@ -55,7 +55,6 @@ class FineTuneManager:
             print("🔧 Reconstructing model architecture and loading weights...")
             
             # Create a new instance of the same model architecture
-            from models import create_model
             model = create_model()
             
             # Try to load weights if they exist
