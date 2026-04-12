@@ -37,6 +37,8 @@ def main():
     parser.add_argument("--lr", type=float, default=0.0001, help="Very low learning rate to prevent catastrophic forgetting")
     parser.add_argument("--weight", type=float, default=20.0, help="Weight multiplier for the bad images dataset")
     parser.add_argument("--tqt", action="store_true", help="Enable TQT/ESP-DL quantization pipeline after fine-tuning")
+    parser.add_argument("--device", type=str, default=params.TQT_COLLECTING_DEVICE, choices=["cpu", "cuda"], 
+                        help=f"Device for TQT (default: {params.TQT_COLLECTING_DEVICE})")
     args = parser.parse_args()
 
     print("\n" + "="*50)
@@ -45,6 +47,9 @@ def main():
     
     if args.tqt:
         params.USE_TQT_PIPELINE = True
+    
+    if args.device:
+        params.TQT_COLLECTING_DEVICE = args.device
     
     if not os.path.exists(args.model_path):
         print(f"❌ Error: Model not found at {args.model_path}")

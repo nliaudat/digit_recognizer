@@ -88,25 +88,50 @@ def export_keras_to_onnx(
         # Cleanup later
         atexit.register(lambda: shutil.rmtree(temp_sm_dir, ignore_errors=True))
 
-    cmd = [
-        sys.executable, "-m", "tf2onnx.convert",
-        "--saved-model", tf2onnx_input,
-        "--output", onnx_path,
-        "--opset", str(opset),
-    ]
-    if inputs_as_nchw:
-        cmd += ["--inputs-as-nchw", actual_input_name]
-
-    print(f"   Running: {' '.join(cmd)}")
+    # ── ONNX Export Execution ────────────────────────────────────────────────
+    print(f"   Converting to ONNX (opset {opset})...")
+    
     try:
-        subprocess.run(cmd, check=True)
-        print(f"✅ ONNX export done: {onnx_path}")
-    except subprocess.CalledProcessError as e:
-        print(f"❌ tf2onnx conversion failed with exit code {e.returncode}")
-        print(f"   Ensure 'tf2onnx' is installed in the current environment.")
+        import tf2onnx
+        
+        if model is not None:
+            # ── Case 1: Live Model Object (Direct via Python API) ─────
+            # Robust path for Keras 3, improved to handle potential name issues
+            input_spec = (tf.TensorSpec(model.inputs[0].shape, model.inputs[0].dtype, name=actual_input_name),)
+            
+            model_proto, external_tensor_storage = tf2onnx.convert.from_keras(
+                model=model,
+                input_signature=input_spec,
+                opset=opset,
+                output_path=onnx_path,
+                inputs_as_nchw=[actual_input_name] if inputs_as_nchw else None
+            )
+            print(f"✅ ONNX export done (Python API): {onnx_path}")
+            
+        else:
+            # ── Case 2: SavedModel Directory (via subprocess) ──────────
+            # Fallback for static paths
+            cmd = [
+                sys.executable, "-m", "tf2onnx.convert",
+                "--saved-model", tf2onnx_input,
+                "--output", onnx_path,
+                "--opset", str(opset),
+            ]
+            if inputs_as_nchw:
+                cmd += ["--inputs-as-nchw", actual_input_name]
+
+            print(f"   Running subprocess: {' '.join(cmd)}")
+            subprocess.run(cmd, check=True)
+            print(f"✅ ONNX export done (Subprocess): {onnx_path}")
+                
+    except ImportError:
+        print(f"❌ tf2onnx not found in the current environment ({sys.executable}).")
+        print(f"   Please run: pip install tf2onnx")
         return None
     except Exception as e:
-        print(f"❌ ONNX export error: {e}")
+        import traceback
+        print(f"❌ ONNX export failed: {e}")
+        # traceback.print_exc()
         return None
 
     # ── Optional simplification ───────────────────────────────────────────────

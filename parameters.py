@@ -257,12 +257,8 @@ TQT_TARGET = 'esp32'     # Choices: 'esp32', 'esp32s2', 'esp32s3', 'esp32c3', 'e
 
 # --- TQT Device Detection ---
 def _detect_tqt_device():
-    try:
-        import torch
-        if torch.cuda.is_available():
-            return "cuda"
-    except ImportError:
-        pass
+    # Use CPU by default for TQT stability. 
+    # esp-ppq often segfaults on CUDA (exit code -11) especially in mixed environments.
     return "cpu"
 
 TQT_DEVICE = _detect_tqt_device()

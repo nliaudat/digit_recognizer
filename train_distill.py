@@ -298,8 +298,15 @@ def parse_args() -> argparse.Namespace:
         "--target-hardware",
         type=str,
         default="esp32",
-        choices=["esp32", "raspberry_pi", "generic"],
-        help="Target hardware for TFLite quantization (default: esp32)"
+        choices=["esp32", "esp32s3", "esp32c3", "esp32p4"],
+        help="Target ESP32 SoC for quantization parameters"
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=params.TQT_COLLECTING_DEVICE,
+        choices=["cpu", "cuda"],
+        help=f"Device for TQT calibration/training (default: {params.TQT_COLLECTING_DEVICE})"
     )
 
     # ── Retrain existing model ────────────────────────────────────────────
@@ -396,6 +403,9 @@ def main() -> None:
     # Quantization overrides
     if args.tqt:
         params.USE_TQT_PIPELINE = True
+    
+    if args.device:
+        params.TQT_COLLECTING_DEVICE = args.device
     if args.no_tqt:
         params.USE_TQT_PIPELINE = False
 
