@@ -6,10 +6,18 @@ Handles: early stopping, model checkpointing, LR scheduling, CSV logging, etc.
 
 import os
 import tensorflow as tf
-from utils.train_checkpoint import TFLiteCheckpoint
-from utils.train_progressbar import TQDMProgressBar
 
 import parameters as params
+from utils.augmentation import create_augmentation_safety_monitor
+from utils.train_checkpoint import TFLiteCheckpoint
+from utils.train_helpers import (
+    DynamicLRProxy, 
+    LRWarmupCallback, 
+    IntelligentFocalLossController, 
+    DynamicSchedulerController, 
+    PerClassAccuracyCallback
+)
+from utils.train_progressbar import TQDMProgressBar
 
 def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False, validation_data=None, x_train_raw=None):
     """Create comprehensive training callbacks with robust error handling"""
@@ -33,7 +41,6 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     
     # Augmentation Safety Monitor
     if params.USE_DATA_AUGMENTATION and validation_data is not None:
-        from utils.augmentation import create_augmentation_safety_monitor
         safety_monitor = create_augmentation_safety_monitor(
             validation_data=validation_data,
             debug=debug
@@ -67,7 +74,6 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     if use_dynamic_scheduler:
         # Dynamic mode: a proxy object holds the current schedule function.
         # DynamicSchedulerController swaps it at runtime when thresholds are crossed.
-        from utils.train_helpers import DynamicLRProxy
         lr_proxy = DynamicLRProxy()
         # Phase-0 scheduler is activated in DynamicSchedulerController.on_train_begin;
         # register the proxy as a LearningRateScheduler now so Keras picks it up.
@@ -169,7 +175,6 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     # Must come AFTER ReduceLROnPlateau in the list so that on_epoch_begin
     # (warm-up) and on_epoch_end (plateau scheduler) don't interfere.
     if getattr(params, 'USE_LR_WARMUP', False):
-        from utils.train_helpers import LRWarmupCallback
         callbacks.append(
             LRWarmupCallback(
                 initial_lr=params.LEARNING_RATE,
@@ -213,7 +218,6 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     # Intelligent Focal Loss Controller
     is_focal = params.LOSS_TYPE in ["focal_loss", "IntelligentFocalLossController"]
     if is_focal and getattr(params, 'MODEL_ARCHITECTURE', '') != "original_haverland":
-        from utils.train_helpers import IntelligentFocalLossController
         callbacks.append(
             IntelligentFocalLossController(
                 accuracy_thresholds=params.FOCAL_ACCURACY_THRESHOLDS,
@@ -231,7 +235,6 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     # Dynamic Scheduler Controller — must come AFTER FocalLoss controller so
     # both can read val_accuracy from the same logs dict in on_epoch_end.
     if use_dynamic_scheduler:
-        from utils.train_helpers import DynamicSchedulerController
         callbacks.append(
             DynamicSchedulerController(lr_proxy=lr_proxy, debug=debug)
         )
@@ -240,7 +243,6 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
 
     # Per-Class Accuracy Callback
     if validation_data is not None:
-        from utils.train_helpers import PerClassAccuracyCallback
         callbacks.append(
             PerClassAccuracyCallback(
                 val_ds=validation_data,

@@ -11,6 +11,7 @@ import time
 import tempfile
 import shutil
 import logging
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -300,7 +301,6 @@ def analyze_quantization_impact(keras_model, x_test, y_test, tflite_path, debug=
     except Exception as e:
         print(f"❌ Quantization impact analysis failed: {e}")
         if debug:
-            import traceback
             traceback.print_exc()
         return None
 
@@ -630,9 +630,6 @@ def verify_tflite_full_qat(tflite_path, debug=False):
         print("=" * 50)
     
     try:
-        import numpy as np
-        import tensorflow as tf
-        
         # Load TFLite model - explicitly disable delegates for parity with TFLM/ESP32
         # and to avoid XNNPACK-specific allocation failures on large models
         interpreter = tf.lite.Interpreter(
@@ -699,6 +696,5 @@ def verify_tflite_full_qat(tflite_path, debug=False):
     except Exception as e:
         logger.error(f"❌ QAT Verification Error: {e}")
         if debug:
-            import traceback
             traceback.print_exc()
         return None

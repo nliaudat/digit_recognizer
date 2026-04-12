@@ -1,13 +1,50 @@
-#!/usr/bin/env python3
-import sys
 import os
+import sys
+
+# CRITICAL STABILITY: Set threading and GPU isolation AT THE TOP
+# This must happen before any heavy imports (numpy, torch, etc.)
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["CUDA_HOME"] = "" # Prevent JIT compilation attempts
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import argparse
-import numpy as np
-import torch
+import gc
+import io
+import shutil
+import traceback
 from pathlib import Path
 
-# Stability: Limit high-parallelism threading which can cause -11 segfaults in some environments
-# We MUST do this before any other torch operations
+import numpy as np
+import onnx
+import torch
+
+try:
+    import onnx2tf
+except ImportError:
+    onnx2tf = None
+
+try:
+    import ppq
+except ImportError:
+    ppq = None
+
+try:
+    from esp_ppq.api import espdl_quantize_onnx, export_ppq_graph
+    from esp_ppq import QuantizationSettingFactory, TargetPlatform
+except ImportError:
+    espdl_quantize_onnx, export_ppq_graph = None, None
+    QuantizationSettingFactory, TargetPlatform = None, None
+
+# ── Project imports ──
+import parameters as params
+from utils import get_data_splits
+from utils.export_onnx import export_keras_to_onnx
+from utils.preprocess import preprocess_for_inference, preprocess_for_training
+
+# Stability: Limit torch threading
 torch.set_num_threads(1)
 
 def parse_args():
@@ -22,11 +59,7 @@ def parse_args():
     parser.add_argument("--lr",       type=float, default=1e-6)
     parser.add_argument("--tune_weights", action="store_true", help="Fine-tune weights during TQT (default is scale-only)")
     def detect_device():
-        try:
-            import torch
-            return "cuda" if torch.cuda.is_available() else "cpu"
-        except ImportError:
-            return "cpu"
+        return "cuda" if torch.cuda.is_available() else "cpu"
 
     parser.add_argument("--device",   default=detect_device())
     parser.add_argument("--classes",  type=int,   default=10)
@@ -39,9 +72,6 @@ def parse_args():
     return parser.parse_args()
 
 def resolve_paths(args):
-    # Delayed import to avoid top-level conflict
-    import parameters as params
-    
     model_name = args.model or params.MODEL_ARCHITECTURE
     out_dir = os.path.join(params.OUTPUT_DIR, model_name)
     os.makedirs(out_dir, exist_ok=True)
@@ -63,15 +93,17 @@ def main():
     os.environ["DIGIT_NB_CLASSES"] = str(args.classes)
     os.environ["DIGIT_INPUT_CHANNELS"] = "1" if args.color == "gray" else "3"
 
-    # Delayed imports
-    import parameters as params
-    from esp_ppq.api import espdl_quantize_onnx, export_ppq_graph
-    from esp_ppq import QuantizationSettingFactory, TargetPlatform
-    from utils import get_data_splits
-    from utils.preprocess import preprocess_for_inference
-    from utils.export_onnx import export_keras_to_onnx
-
     keras_path, onnx_path, espdl_path = resolve_paths(args)
+
+    # Version diagnostics
+    print("📋 Environment Diagnostics:")
+    print(f"   Python: {sys.version.split()[0]}")
+    print(f"   PyTorch: {torch.__version__}")
+    print(f"   ONNX: {onnx.__version__}")
+    if ppq:
+        print(f"   PPQ: {ppq.__version__}")
+    else:
+        print("   PPQ version: unknown")
 
     # 1. Export ONNX if needed
     if not args.skip_onnx_export:
@@ -80,8 +112,7 @@ def main():
 
     # 2. Prepare data
     print(f"📦 Loading calibration data ({args.classes} classes, {args.color})...")
-    from utils.preprocess import preprocess_for_training
-    (x_train, _), _, _ = get_data_splits()
+    (x_train, _) , _, _ = get_data_splits()
     n = min(args.calib_steps, len(x_train))
     
     # CRITICAL: Use preprocess_for_training to ensure Float32 [0, 1] 
@@ -137,8 +168,6 @@ def main():
     try:
         # 5. Run Quantization
         # Defensive check: Can we load and check the ONNX graph?
-        import onnx
-        import gc
         gc.collect() # Free memory before heavy Torch lifting
         
         try:
@@ -152,11 +181,20 @@ def main():
         torch.manual_seed(42)
         if torch.cuda.is_available(): torch.cuda.empty_cache()
 
+        # Slice dataset to requested number of steps to save memory
+        calibration_dataset = calib_data
+        if len(calibration_dataset) > args.calib_steps:
+            print(f"✂️ Slicing calibration dataset to {args.calib_steps} samples (was {len(calibration_dataset)})")
+            calibration_dataset = calibration_dataset[:args.calib_steps]
+        else:
+            print(f"📊 Using full calibration dataset ({len(calibration_dataset)} samples)")
+
+        # ── Run TQT/ESP-DL Quantization ───────────────────────────────────────
         graph = espdl_quantize_onnx(
             onnx_import_file   = onnx_path,
             espdl_export_file  = espdl_path,
-            calib_dataloader   = calib_data,
-            calib_steps        = n,
+            calib_dataloader   = calibration_dataset,
+            calib_steps        = args.calib_steps,
             input_shape        = [1, (1 if args.color == "gray" else 3), 32, 20],
             target             = target_backend,
             num_of_bits        = args.bits,
@@ -177,9 +215,8 @@ def main():
             tflite_path = espdl_path.replace(".espdl", ".tflite")
             output_dir = os.path.dirname(tflite_path)
             try:
-                import onnx2tf
-                import numpy as np
-                import io
+                if onnx2tf is None:
+                    raise ImportError("onnx2tf not installed")
                 
                 # 1. Monkeypatch numpy.load (Pickle Fix)
                 orig_load = np.load
@@ -242,7 +279,6 @@ def main():
                         if found_tflite: break
 
                 if found_tflite:
-                    import shutil
                     if os.path.abspath(found_tflite) != os.path.abspath(tflite_path):
                         shutil.move(found_tflite, tflite_path)
                     print(f"✅ Scale-Preserved TFLite export complete: {tflite_path}")
@@ -251,12 +287,10 @@ def main():
 
             except Exception as e:
                 print(f"⚠️ Scale-Preserved TFLite conversion error: {e}")
-                import traceback
                 traceback.print_exc()
 
     except Exception as e:
         print(f"❌ espdl_quantize_onnx raised an exception: {e}")
-        import traceback
         traceback.print_exc()
         sys.exit(1)
     

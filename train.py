@@ -5,50 +5,43 @@
 train.py – Central training script with robust quantisation handling.
 """
 
-# --------------------------------------------------------------------------- #
-# Standard library imports
-# --------------------------------------------------------------------------- #
+import argparse
+import gc
+import json
+import logging
 import os
+import random
+import shutil
+import subprocess
 import sys
+import traceback
+import warnings
+from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
 
+# ── Environment Setup ──
 # Set default environment variables strictly before importing parameters.py
 if "DIGIT_NB_CLASSES" not in os.environ:
     os.environ["DIGIT_NB_CLASSES"] = "10"
 if "DIGIT_INPUT_CHANNELS" not in os.environ:
     os.environ["DIGIT_INPUT_CHANNELS"] = "1"
 
-import argparse
-import logging
-import warnings
-import random
-import json
-import shutil
-import gc
-import traceback
-from datetime import datetime
-from contextlib import contextmanager
-from pathlib import Path
-
-# --------------------------------------------------------------------------- #
-#  Third party imports
-# --------------------------------------------------------------------------- #
+import absl.logging
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from tqdm.auto import tqdm
-import matplotlib.pyplot as plt
 
-# Optional dependencies
+# ── Optional/Third party imports ──
 try:
     import mlflow
-    MLFLOW_AVAILABLE = True
 except ImportError:
-    MLFLOW_AVAILABLE = False
+    mlflow = None
 
 try:
     import tensorflow_model_optimization as tfmot
-    QAT_AVAILABLE = True
-except Exception:
-    QAT_AVAILABLE = False
+except (ImportError, Exception):
     tfmot = None
 
 try:
@@ -56,98 +49,68 @@ try:
 except ImportError:
     compute_class_weight = None
 
-# ml-flow diagnostics helper
-import absl.logging
-
-# --------------------------------------------------------------------------- #
-#  Project imports (Core)
-# --------------------------------------------------------------------------- #
+# ── Project imports ──
 import parameters as params
+from models import compile_model, create_model, model_summary
 from parameters import (
-    get_hyperparameter_summary_text,
-    validate_quantization_parameters,
+    get_hyperparameter_summary_text, print_hyperparameter_summary,
+    validate_quantization_parameters
 )
-from models import create_model, compile_model, model_summary
+from tuner import run_architecture_tuning
 from utils import (
-    get_data_splits, 
-    preprocess_for_training, 
-    preprocess_for_inference, 
-    get_calibration_data, 
-    suppress_all_output
+    get_calibration_data, get_data_splits, preprocess_for_inference,
+    preprocess_for_training, suppress_all_output
 )
-from utils.preprocess import (
-    validate_preprocessing_consistency,
-    get_qat_training_format,
-    get_preprocessing_info,
-)
-from utils.data_pipeline import create_tf_dataset_from_arrays
-from utils.custom_logger import log_print
-from utils.multi_source_loader import clear_cache
-
 from utils.augmentation import (
-    create_augmentation_pipeline,
-    apply_augmentation_to_dataset,
-    test_augmentation_pipeline,
-    print_augmentation_summary,
-    create_augmentation_safety_monitor,
-    setup_augmentation_for_training,
+    apply_augmentation_to_dataset, create_augmentation_pipeline,
+    create_augmentation_safety_monitor, print_augmentation_summary,
+    setup_augmentation_for_training, test_augmentation_pipeline
 )
-
-# --------------------------------------------------------------------------- #
-#  Refactored training helper classes
-# --------------------------------------------------------------------------- #
-from utils.train_modelmanager   import TFLiteModelManager
-from utils.train_trainingmonitor import TrainingMonitor
-from utils.train_checkpoint     import TFLiteCheckpoint
-from utils.train_progressbar    import TQDMProgressBar
-
-from utils.train_qat_helper     import (
-    create_qat_model,
-    create_qat_representative_dataset,
-    validate_qat_data_flow,
-    _is_qat_model,
-    check_qat_compatibility,
-    debug_preprocessing_flow,
-    diagnose_quantization_settings,
-    validate_quantization_combination,
-    validate_qat_data_consistency,
-    validate_complete_qat_setup,
-    verify_qat_model,
-    debug_qat_layers,
-    check_qat_gradient_flow,
-    diagnose_qat_output_behavior
-)
-
-from utils.train_callbacks import create_callbacks
-from utils.train_helpers import (
-    print_training_summary, 
-    save_model_summary_to_file,
-    save_training_config,
-    save_training_csv
-)
-from utils.train_cleaning import cleanup_training_directory, cleanup_multiple_training_runs
-
-# --------------------------------------------------------------------------- #
-#  Analysis & Optimization
-# --------------------------------------------------------------------------- #
-from utils.train_analyse import (
-    evaluate_keras_model,
-    evaluate_tflite_model,
-    get_keras_model_size,
-    get_tflite_model_size,
-    measure_keras_inference_time,
-    measure_tflite_inference_time,
-    analyze_quantization_impact,
-    training_diagnostics,
-    debug_model_architecture,
-    verify_model_predictions,
-    analyze_confusion_matrix,
-    analyze_training_history,
-    model_size_analysis,
-    verify_tflite_full_qat
+from utils.custom_logger import log_print
+from utils.data_pipeline import create_tf_dataset_from_arrays
+from utils.multi_source_loader import clear_cache
+from utils.preprocess import (
+    get_preprocessing_info, get_qat_training_format,
+    validate_preprocessing_consistency
 )
 from utils.quantization_analysis import QuantizationAnalyzer
-from tuner import run_architecture_tuning
+from utils.train_analyse import (
+    analyze_confusion_matrix, analyze_quantization_impact,
+    analyze_training_history, debug_model_architecture, evaluate_keras_model,
+    evaluate_tflite_model, get_keras_model_size, get_tflite_model_size,
+    measure_keras_inference_time, measure_tflite_inference_time,
+    model_size_analysis, training_diagnostics, verify_model_predictions,
+    verify_tflite_full_qat
+)
+from utils.train_callbacks import create_callbacks
+from utils.train_checkpoint import TFLiteCheckpoint
+from utils.train_cleaning import (
+    cleanup_multiple_training_runs, cleanup_training_directory
+)
+from utils.train_helpers import (
+    print_training_summary, save_model_summary_to_file, save_training_config,
+    save_training_csv
+)
+from utils.train_modelmanager import TFLiteModelManager
+from utils.train_progressbar import TQDMProgressBar
+from utils.train_qat_helper import (
+    _is_qat_model, check_qat_compatibility, check_qat_gradient_flow,
+    create_qat_model, create_qat_representative_dataset,
+    debug_preprocessing_flow, debug_qat_layers, diagnose_qat_output_behavior,
+    diagnose_quantization_settings, validate_complete_qat_setup,
+    validate_qat_data_consistency, validate_qat_data_flow,
+    validate_quantization_combination, verify_qat_model
+)
+from utils.train_trainingmonitor import TrainingMonitor
+
+# ── Conditional project imports ──
+try:
+    from utils.export_onnx import export_keras_to_onnx
+except ImportError:
+    export_keras_to_onnx = None
+
+MLFLOW_AVAILABLE = mlflow is not None
+QAT_AVAILABLE = tfmot is not None
 
 # --------------------------------------------------------------------------- #
 #  Suppress TF logs unless --debug is requested
@@ -642,7 +605,6 @@ def main():
     # -----------------------------------------------------------------
     #  PRINT FINAL CONFIGURATION SUMMARY
     # -----------------------------------------------------------------
-    from parameters import print_hyperparameter_summary
     print_hyperparameter_summary()
 
 
@@ -1142,18 +1104,17 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
 
         # ── TQT / ESP-DL Quantitative Pipeline ──
         if params.USE_TQT_PIPELINE:
-            import subprocess
             # Loop through all targets if requested
             targets = getattr(params, 'TQT_ALL_TARGETS', [params.TQT_TARGET]) if getattr(params, 'TQT_EXPORT_ALL_TARGETS', False) else [params.TQT_TARGET]
             
             print(f"\n🚀 STARTING TQT PIPELINE FOR TARGETS: {', '.join(targets)}")
             
-            from utils.export_onnx import export_keras_to_onnx
             onnx_path = os.path.join(training_dir, f"{params.MODEL_ARCHITECTURE}.onnx")
             
             # CRITICAL: Simplify MUST be True to avoid -11 crashes in esp-ppq
             # onnxsim removes complex/unsupported nodes before quantization
-            export_keras_to_onnx(model, onnx_path, simplify=True)
+            if export_keras_to_onnx is not None:
+                export_keras_to_onnx(model, onnx_path, simplify=True)
             
             for target_soc in targets:
                 print(f"\n⚙️ Quantizing for target: {target_soc}...")

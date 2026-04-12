@@ -10,17 +10,12 @@ Usage:
 
 import argparse
 import os
+import subprocess
 import sys
-import tensorflow as tf
 from pathlib import Path
 
-# Project imports
-import parameters as params
-from utils.multi_source_loader import MultiSourceDataLoader, shuffle_dataset
-from utils.preprocess import preprocess_for_training
-from utils.augmentation import setup_augmentation_for_training
-from utils.train_callbacks import create_callbacks
-from utils.train_qat_helper import validate_qat_data_flow, create_qat_representative_dataset
+import numpy as np
+import tensorflow as tf
 
 try:
     import tensorflow_model_optimization as tfmot
@@ -28,6 +23,24 @@ try:
 except ImportError:
     QAT_AVAILABLE = False
     tfmot = None
+
+# ── Project imports ──
+import parameters as params
+from utils.augmentation import setup_augmentation_for_training
+from utils.export_onnx import export_keras_to_onnx
+from utils.losses import (
+    DynamicFocalLoss, DynamicSparseFocalLoss, focal_loss, sparse_focal_loss
+)
+from utils.multi_source_loader import (
+    MultiSourceDataLoader, load_combined_dataset, shuffle_dataset
+)
+from utils.preprocess import preprocess_for_training
+from utils.train_callbacks import create_callbacks
+from utils.train_modelmanager import TFLiteModelManager
+from utils.train_qat_helper import (
+    create_qat_representative_dataset, validate_qat_data_flow
+)
+from utils.train_trainingmonitor import TrainingMonitor
 
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune an existing model on bad predictions.")
@@ -58,7 +71,6 @@ def main():
     print(f"📦 Loading pre-trained model: {args.model_path}")
     
     # Needs QAT scope if model was trained with QAT
-    from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss, sparse_focal_loss, focal_loss
     custom_objects = {
         "DynamicSparseFocalLoss": DynamicSparseFocalLoss,
         "DynamicFocalLoss": DynamicFocalLoss,
@@ -102,7 +114,6 @@ def main():
 
     # 2. Load the weighted dataset
     print("\n📊 Loading datasets (Original Data + Heavy Weighted Bad Predictions)...")
-    from utils.multi_source_loader import load_combined_dataset
     x_data, y_data = load_combined_dataset()
     # x_data, y_data already shuffled by load_combined_dataset
     
@@ -130,7 +141,6 @@ def main():
     
     # Use Dynamic loss if IntelligentFocalLossController is active to prevent mid-train recompile crashes
     if params.LOSS_TYPE in ["IntelligentFocalLossController", "focal_loss"]:
-        from utils.losses import DynamicSparseFocalLoss
         loss_fn = DynamicSparseFocalLoss(from_logits=params.USE_LOGITS)
         print(f"🎯 Using DynamicSparseFocalLoss (Alpha: {params.FOCAL_ALPHA}, Gamma: {params.FOCAL_GAMMA})")
     else:
@@ -144,14 +154,13 @@ def main():
     
     # Set up export directory following project standard
     color_suffix = "GRAY" if params.INPUT_CHANNELS == 1 else "RGB"
+    model_name = Path(args.model_path).stem
     base_dir = f"exported_models/{params.NB_CLASSES}cls_{color_suffix}"
-    export_dir = os.path.join(base_dir, f"retrained_{params.MODEL_ARCHITECTURE}")
+    #export_dir = os.path.join(base_dir, f"retrained_{params.MODEL_ARCHITECTURE}")
+    export_dir = os.path.join(base_dir, f"retrained_{model_name}")
     os.makedirs(export_dir, exist_ok=True)
     
     # ── Project Infrastructure for Callbacks ──
-    from utils.train_modelmanager import TFLiteModelManager
-    from utils.train_trainingmonitor import TrainingMonitor
-    
     tflite_manager = TFLiteModelManager(export_dir)
     monitor = TrainingMonitor(export_dir)
     rep_x_processed = preprocess_for_training(x_train_raw[:100])
@@ -189,7 +198,8 @@ def main():
     rep_x = x_train_raw[:500]
     def representative_dataset_gen():
         for i in range(len(rep_x)):
-            img = preprocess_for_training(tf.expand_dims(rep_x[i], 0))
+            # Use numpy expansion to avoid triggering OpenCV Tensor errors
+            img = preprocess_for_training(np.expand_dims(rep_x[i], 0))
             yield [img]
             
     converter.representative_dataset = representative_dataset_gen
@@ -219,13 +229,11 @@ def main():
         
         print(f"\n🚀 STARTING TQT PIPELINE FOR TARGETS: {', '.join(targets)}")
         
-        from utils.export_onnx import export_keras_to_onnx
         student_variant = params.MODEL_ARCHITECTURE
         onnx_path = os.path.join(export_dir, f"retrained_{student_variant}.onnx")
         
         # CRITICAL: Simplify MUST be True to avoid -11 crashes in esp-ppq
         if export_keras_to_onnx(model, onnx_path, simplify=True):
-            import subprocess
             color_mode = "gray" if params.INPUT_CHANNELS == 1 else "rgb"
             
             for target_soc in targets:

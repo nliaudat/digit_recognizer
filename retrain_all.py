@@ -25,8 +25,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.stdout.reconfigure(encoding='utf-8')
-sys.stderr.reconfigure(encoding='utf-8')
+# Optional project imports
+try:
+    import parameters as p
+except ImportError:
+    p = None
+
+# Ensure UTF-8 on Windows
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
 
 
 # ---------------------------------------------------------------------------
@@ -242,11 +251,8 @@ def main():
 
     # Load parameters to get default patience
     default_patience = 30
-    try:
-        import parameters as p
+    if p:
         default_patience = getattr(p, 'EARLY_STOPPING_PATIENCE', 30)
-    except Exception:
-        pass
     
     patience = args.patience if args.patience is not None else default_patience
 
@@ -314,10 +320,9 @@ def main():
     # Auto-detect epochs parameter if not provided
     default_target_epochs = args.epochs
     if default_target_epochs is None:
-        try:
-            import parameters as p
+        if p:
             default_target_epochs = p.EPOCHS
-        except Exception:
+        else:
             default_target_epochs = 0
             
     for run in runs:

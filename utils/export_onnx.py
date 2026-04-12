@@ -14,12 +14,34 @@ Typical integration via quantize_espdl.py:
     onnx_path = export_keras_to_onnx(keras_path, onnx_path)
 """
 
+import atexit
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
+import traceback
 from pathlib import Path
 
+import tensorflow as tf
+
 import parameters as params
+
+# Optional/Third party imports
+try:
+    import tf2onnx
+except ImportError:
+    tf2onnx = None
+
+try:
+    import onnx
+except ImportError:
+    onnx = None
+
+try:
+    import onnxsim
+except ImportError:
+    onnxsim = None
 
 
 def export_keras_to_onnx(
@@ -48,7 +70,6 @@ def export_keras_to_onnx(
     input_name : str
         Name of the input tensor to transpose when inputs_as_nchw=True.
     """
-    import tensorflow as tf
     onnx_path = str(Path(onnx_path).resolve())
     os.makedirs(os.path.dirname(onnx_path) or ".", exist_ok=True)
 
@@ -74,9 +95,6 @@ def export_keras_to_onnx(
     
     # ── Keras 3 SavedModel Workaround ─────────────────────────────────────────
     if model is not None:
-        import tempfile
-        import atexit
-        import shutil
         
         actual_input_name = model.inputs[0].name.split(':')[0]
         temp_sm_dir = tempfile.mkdtemp(prefix="tf2onnx_sm_")
@@ -92,7 +110,8 @@ def export_keras_to_onnx(
     print(f"   Converting to ONNX (opset {opset})...")
     
     try:
-        import tf2onnx
+        if tf2onnx is None:
+            raise ImportError("tf2onnx not found")
         
         if model is not None:
             # ── Case 1: Live Model Object (Direct via Python API) ─────
@@ -129,7 +148,6 @@ def export_keras_to_onnx(
         print(f"   Please run: pip install tf2onnx")
         return None
     except Exception as e:
-        import traceback
         print(f"❌ ONNX export failed: {e}")
         # traceback.print_exc()
         return None
@@ -137,16 +155,28 @@ def export_keras_to_onnx(
     # ── Optional simplification ───────────────────────────────────────────────
     if simplify:
         try:
-            import onnx
-            import onnxsim
+            if onnx is None or onnxsim is None:
+                raise ImportError("onnx/onnxsim not found")
 
             print("🔧 Running onnxsim simplification…")
-            model = onnx.load(onnx_path)
-            model_simplified, check = onnxsim.simplify(model)
-            assert check, "onnxsim validation failed — simplified model is invalid"
-            model_simplified = onnx.shape_inference.infer_shapes(model_simplified)
-            onnx.save(model_simplified, onnx_path)
-            print("✅ onnxsim simplification done")
+            
+            # Use subprocess to isolate onnxsim from potential Keras/TF library conflicts
+            # and force CPU execution to prevent -11 crashes.
+            cmd = [sys.executable, "-m", "onnxsim", onnx_path, onnx_path]
+            env = os.environ.copy()
+            env["CUDA_VISIBLE_DEVICES"] = ""
+            
+            try:
+                subprocess.run(cmd, check=True, env=env, capture_output=True, text=True)
+                print("✅ onnxsim simplification done")
+                
+                # Perform shape inference to ensure clean graph
+                model_proto = onnx.load(onnx_path)
+                model_proto = onnx.shape_inference.infer_shapes(model_proto)
+                onnx.save(model_proto, onnx_path)
+            except subprocess.CalledProcessError as e:
+                print(f"⚠️  onnxsim subprocess failed (code {e.returncode}): {e.stderr}")
+                print("   (Keeping unsimplified ONNX)")
         except ImportError:
             print("⚠️  onnx / onnxsim not installed — skipping simplification")
         except AssertionError as exc:

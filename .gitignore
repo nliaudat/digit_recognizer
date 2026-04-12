@@ -22,3 +22,5 @@ dropbox_ignore.ps
 runned_command.log
 /exported_models
 /.continue
+docker/commands.txt
+docker/requirements_v2.txt

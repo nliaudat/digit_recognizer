@@ -2,6 +2,9 @@
 import os
 import shutil
 import argparse
+from datetime import datetime, timedelta
+
+import parameters as params
 
 def cleanup_training_directory(output_dir, debug=False):
     """
@@ -102,7 +105,6 @@ def cleanup_all_training_directories(base_dir=None, debug=False):
         base_dir: Base directory to search for training directories
         debug: If True, show what would be deleted without actually deleting
     """
-    import parameters as params
     
     if base_dir is None:
         base_dir = getattr(params, 'OUTPUT_DIR', 'output')
@@ -141,8 +143,6 @@ def cleanup_old_training_runs(days_old=7, debug=False):
         days_old: Delete directories older than this many days
         debug: If True, show what would be deleted without actually deleting
     """
-    import parameters as params
-    from datetime import datetime, timedelta
     
     print(f"🧹 CLEANING UP TRAINING RUNS OLDER THAN {days_old} DAYS")
     print("=" * 50)

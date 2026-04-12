@@ -19,20 +19,35 @@ Usage:
   python train_super_validator.py --no-mixup --no-mixed-precision
 """
 
+import argparse
+import math
 import os
 import sys
-import math
-import argparse
+from datetime import datetime
+from pathlib import Path
+
 import numpy as np
 import tensorflow as tf
-from pathlib import Path
+
+# Add project root to path before other imports
+_ROOT = str(Path(__file__).resolve().parent)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 import parameters as params
+from models.super_high_accuracy_validator import (
+    create_super_high_accuracy_validator
+)
 from utils.losses import focal_loss
-from utils.train_helpers import IntelligentFocalLossController, PerClassAccuracyCallback
+from utils.train_helpers import (
+    IntelligentFocalLossController, PerClassAccuracyCallback
+)
 
 # Force UTF-8 output on Windows to support emojis
-if sys.stdout.encoding != 'utf-8':
+if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CLI Arguments
@@ -493,7 +508,6 @@ def main():
     os.environ['DIGIT_NB_CLASSES']    = str(NB_CLASSES)
     os.environ['DIGIT_INPUT_CHANNELS'] = str(INPUT_SHAPE[2])
 
-    from models.super_high_accuracy_validator import create_super_high_accuracy_validator
     model = create_super_high_accuracy_validator(
         nb_classes=NB_CLASSES, input_shape=INPUT_SHAPE)
     print(f"  Parameters: {model.count_params():,}")

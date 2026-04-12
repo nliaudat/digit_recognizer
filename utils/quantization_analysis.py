@@ -8,12 +8,27 @@ Comprehensive quantization analysis tools for evaluating:
 """
 
 import os
+from typing import Any, Dict, Optional, Tuple
+
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-from typing import Dict, Tuple, Optional
-import matplotlib.pyplot as plt
 
 import parameters as params
+from utils.preprocess import preprocess_for_inference
+
+# Optional/complex dependencies
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
+
+try:
+    import torch
+    from esp_ppq.api import PPQTorchExecutor
+except ImportError:
+    torch = None
+    PPQTorchExecutor = None
 
 class QuantizationAnalyzer:
     """Comprehensive analyzer for quantization impact assessment"""
@@ -390,52 +405,48 @@ def compare_float_vs_tqt(
     x_val,
     y_val,
 ):
-    import numpy as np
-    from utils.preprocess import preprocess_for_inference
-
     print("\n" + "=" * 60)
     print("📊 FLOAT ONNX vs TQT QUANTIZED -- COMPARISON")
     print("=" * 60)
 
     float_preds = None
     float_accuracy = 0.0
-    try:
-        import onnxruntime as ort
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        session = ort.InferenceSession(onnx_path, providers=providers)
-        iname = session.get_inputs()[0].name
-        x_f = preprocess_for_inference(x_val).astype("float32").transpose(0, 3, 1, 2)
-        float_preds = np.array([
-            session.run(None, {iname: x_f[i:i+1]})[0][0] for i in range(len(x_f))
-        ])
-        float_accuracy = float(np.mean(np.argmax(float_preds, axis=1) == y_val))
-        print(f"   Float ONNX accuracy  : {float_accuracy:.4f} ({float_accuracy*100:.2f}%)")
-    except ImportError:
+    if ort:
+        try:
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            session = ort.InferenceSession(onnx_path, providers=providers)
+            iname = session.get_inputs()[0].name
+            x_f = preprocess_for_inference(x_val).astype("float32").transpose(0, 3, 1, 2)
+            float_preds = np.array([
+                session.run(None, {iname: x_f[i:i+1]})[0][0] for i in range(len(x_f))
+            ])
+            float_accuracy = float(np.mean(np.argmax(float_preds, axis=1) == y_val))
+            print(f"   Float ONNX accuracy  : {float_accuracy:.4f} ({float_accuracy*100:.2f}%)")
+        except Exception as exc:
+            print(f"⚠️  Float ONNX inference failed: {exc}")
+    else:
         print("⚠️  onnxruntime not installed -- skipping float evaluation")
-    except Exception as exc:
-        print(f"⚠️  Float ONNX inference failed: {exc}")
 
     tqt_preds = None
     tqt_accuracy = 0.0
-    try:
-        import torch
-        from esp_ppq.api import PPQTorchExecutor
-        x_f = preprocess_for_inference(x_val).astype("float32").transpose(0, 3, 1, 2)
-        x_t = torch.from_numpy(x_f)
-        executor = PPQTorchExecutor(quant_ppq_graph, device="cpu")
-        tqt_out = []
-        for i in range(len(x_t)):
-            with torch.no_grad():
-                out = executor.forward(x_t[i:i+1])
-            logits = out[0] if isinstance(out, (list, tuple)) else out
-            tqt_out.append(logits.squeeze().cpu().numpy())
-        tqt_preds = np.array(tqt_out)
-        tqt_accuracy = float(np.mean(np.argmax(tqt_preds, axis=1) == y_val))
-        print(f"   TQT quantized accuracy: {tqt_accuracy:.4f} ({tqt_accuracy*100:.2f}%)")
-    except ImportError:
+    if torch and PPQTorchExecutor:
+        try:
+            x_f = preprocess_for_inference(x_val).astype("float32").transpose(0, 3, 1, 2)
+            x_t = torch.from_numpy(x_f)
+            executor = PPQTorchExecutor(quant_ppq_graph, device="cpu")
+            tqt_out = []
+            for i in range(len(x_t)):
+                with torch.no_grad():
+                    out = executor.forward(x_t[i:i+1])
+                logits = out[0] if isinstance(out, (list, tuple)) else out
+                tqt_out.append(logits.squeeze().cpu().numpy())
+            tqt_preds = np.array(tqt_out)
+            tqt_accuracy = float(np.mean(np.argmax(tqt_preds, axis=1) == y_val))
+            print(f"   TQT quantized accuracy: {tqt_accuracy:.4f} ({tqt_accuracy*100:.2f}%)")
+        except Exception as exc:
+            print(f"⚠️  TQT graph inference failed: {exc}")
+    else:
         print("⚠️  esp_ppq or torch not installed -- skipping TQT evaluation")
-    except Exception as exc:
-        print(f"⚠️  TQT graph inference failed: {exc}")
 
     mean_mse = float("nan")
     if float_preds is not None and tqt_preds is not None:

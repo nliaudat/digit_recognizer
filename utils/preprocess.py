@@ -3,13 +3,10 @@ import cv2
 import numpy as np
 import tensorflow as tf
 
-def _lazy_import_params():
-    import parameters as params
-    return params
+import parameters as params
 
 def _preprocess_common(images, target_size, grayscale):
     """Resize / colour convert images, preserving the original dtype."""
-    params = _lazy_import_params()
     if target_size is None:
         target_size = (params.INPUT_WIDTH, params.INPUT_HEIGHT)
     if grayscale is None:
@@ -37,7 +34,6 @@ def preprocess_for_training(images, target_size=None, grayscale=None):
     Return data format based on quantization settings.
     For QAT: Use float32 [0,1] internally but the model will handle quantization
     """
-    params = _lazy_import_params()
     arr = _preprocess_common(images, target_size, grayscale)
     
     if params.USE_QAT and params.QUANTIZE_MODEL:
@@ -103,7 +99,6 @@ def preprocess_for_inference(images, target_size=None, grayscale=None):
     Return data in the exact format the exported TFLite model expects.
     FIXED VERSION with correct ESP-DL handling
     """
-    params = _lazy_import_params()
     # Handle single image input
     single_image = False
     if isinstance(images, np.ndarray) and len(images.shape) == 3:
@@ -170,7 +165,6 @@ def preprocess_images(images, target_size=None, grayscale=None, for_training=Tru
 
 def preprocess_images_esp_dl(images, target_size=None):
     """ESP DL specific preprocessing – returns UINT8 [0, 255]."""
-    params = _lazy_import_params()
     if target_size is None:
         target_size = (params.INPUT_WIDTH, params.INPUT_HEIGHT)
 
@@ -209,7 +203,6 @@ def preprocess_images_for_qat_calibration(images):
         # return np.float32, 0.0, 1.0, "Float32 [0, 1] (Standard)"
 def get_qat_training_format():
     """Return the data format used during QAT training."""
-    params = _lazy_import_params()
     # CORRECTED: QAT training uses float32 [0,1] regardless of ESP-DL setting
     if params.USE_QAT and params.QUANTIZE_MODEL:
         return np.float32, 0.0, 1.0, "Float32 [0, 1] (QAT Training)"
@@ -221,7 +214,6 @@ def validate_preprocessing_consistency():
     Validate that data types are consistent between training and inference.
     CRITICAL FOR QAT: Training and inference must use identical data formats.
     """
-    params = _lazy_import_params()
     print("\n🔍 VALIDATING DATA TYPE CONSISTENCY")
     print("=" * 60)
 
@@ -308,7 +300,6 @@ def validate_preprocessing_consistency():
 
 def get_preprocessing_info():
     """Return a summary of the current preprocessing configuration."""
-    params = _lazy_import_params()
     # CORRECTED: QAT training uses float32 [0,1], inference uses integer types
     if not params.QUANTIZE_MODEL:
         if params.USE_QAT:
@@ -357,16 +348,13 @@ def test_all_preprocessing_combinations():
     value ranges.
 
     The nine configurations correspond to the three boolean flags:
-
         * QUANTIZE_MODEL
         * USE_QAT
         * ESP_DL_QUANTIZE
-
     The function prints a human readable table and returns a dictionary
     mapping the textual description of each configuration to the result
     string (e.g. “CONSISTENT …”, “INCONSISTENT …”, “INVALID”, or “FAILED”).
     """
-    params = _lazy_import_params()
     print("\n🧪 TESTING ALL 9 PREPROCESSING COMBINATIONS")
     print("=" * 70)
 

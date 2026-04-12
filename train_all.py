@@ -14,6 +14,8 @@ if "DIGIT_NB_CLASSES" not in os.environ:
 if "DIGIT_INPUT_CHANNELS" not in os.environ:
     os.environ["DIGIT_INPUT_CHANNELS"] = "1"
 
+import parameters as params
+
 def main():
     parser = argparse.ArgumentParser(description="Launch training for all active models in parameters.py across all 4 combinations (10/100 classes, Grayscale/RGB) sequentially or concurrently.")
     
@@ -45,9 +47,7 @@ def main():
 
     args = parser.parse_args()
         
-    # Import params to get the list of active models
-    import parameters as params
-    
+    # Use the active models from params
     active_models = params.AVAILABLE_MODELS
     
     if not active_models:

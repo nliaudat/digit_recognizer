@@ -19,16 +19,34 @@ All functions rely only on the public API of the project (`parameters`,
 something goes wrong.
 """
 
-from typing import Tuple, Callable, Optional
+import logging
+import os
+import sys
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import tensorflow as tf
 
-# --------------------------------------------------------------------------- #
-#  Imports from the rest of the project
-# --------------------------------------------------------------------------- #
+try:
+    import tensorflow_model_optimization as tfmot
+except ImportError:
+    tfmot = None
+
+# ── Project imports ─────────────────────────────────────────────────────
 import parameters as params
-from utils.preprocess import preprocess_for_training, preprocess_for_inference
+
+# Models/Circular dependency cautious imports
+try:
+    from models import create_model
+except ImportError:
+    create_model = None
+
+from utils import get_data_splits
+from utils.preprocess import (
+    get_qat_training_format, preprocess_for_inference, preprocess_for_training
+)
+
+logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------- #
@@ -39,7 +57,8 @@ def apply_qat_to_model(model: tf.keras.Model) -> tf.keras.Model:
     Apply QAT wrappers using modern clustering presets.
     """
     try:
-        import tensorflow_model_optimization as tfmot
+        if tfmot is None:
+            raise ImportError("tensorflow_model_optimization not available")
         print(f"✅ QAT available: TF {tf.__version__}, TFMo {tfmot.__version__}")
         # Annotate the model for quantization
         annotated_model = tfmot.quantization.keras.quantize_annotate(model)
@@ -58,7 +77,6 @@ def create_qat_model(model: tf.keras.Model = None) -> tf.keras.Model:
     Create a new model or wrap an existing one for QAT using the unified factory.
     """
     if model is None:
-        from models import create_model
         model = create_model()
         
     print(f"🎯 Wrapping {model.name if hasattr(model, 'name') else 'model'} for QAT...")
@@ -134,7 +152,6 @@ def check_qat_compatibility(qat_available):
     
     # Check data type consistency for QAT
     if params.USE_QAT and params.QUANTIZE_MODEL:
-        from utils.preprocess import get_qat_training_format
         train_dtype, _, _, _ = get_qat_training_format()
         if params.QUANTIZE_MODEL:
             infer_dtype = np.uint8
@@ -487,9 +504,6 @@ def validate_qat_data_consistency():
     print("\n🔍 VALIDATING QAT DATA FLOW")
     print("=" * 50)
     
-    # Import here to avoid circular imports
-    from utils.preprocess import preprocess_for_training, preprocess_for_inference
-    
     # Create test data
     test_images = np.random.randint(0, 255, (2, params.INPUT_HEIGHT, params.INPUT_WIDTH, params.INPUT_CHANNELS), dtype=np.uint8)
     
@@ -552,8 +566,6 @@ def validate_complete_qat_setup(model: tf.keras.Model = None, debug: bool = Fals
                 
             # Check 4: Data flow test
             try:
-                from utils import get_data_splits
-                from utils.preprocess import preprocess_for_training
                 (x_train_raw, _), _, _ = get_data_splits()
                 x_sample = preprocess_for_training(x_train_raw[:1])
                 flow_ok, flow_msg = validate_qat_data_flow(model, x_sample, debug)
@@ -782,7 +794,8 @@ def two_phase_qat_training(x_train, y_train, x_val, y_val):
     params.USE_QAT = True
     
     try:
-        import tensorflow_model_optimization as tfmot
+        if tfmot is None:
+            raise ImportError("tensorflow_model_optimization required for Phase 2")
         
         # Create QAT model
         with tfmot.quantization.keras.quantize_scope():

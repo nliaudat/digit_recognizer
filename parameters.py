@@ -6,11 +6,11 @@ Comprehensive hyperparameter configuration for neural network training
 import os
 import sys
 
+import tensorflow as tf
+
 # Force UTF-8 output on Windows to support emojis
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
-
-import tensorflow as tf
 
 # ==============================================================================
 # MODEL SELECTION
@@ -326,7 +326,6 @@ DATASET_CACHE_DIR = os.environ.get("DATASET_CACHE_DIR", ".dataset_cache")
 USE_TF_DATA_PIPELINE = False
 
 try:
-    import tensorflow as tf
     TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
     TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
 except (ImportError, NameError, AttributeError):

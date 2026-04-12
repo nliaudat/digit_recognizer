@@ -65,23 +65,19 @@ Available existing models for retraining
 v3, v4, v6, v7, v15, v16, v17, v18, v19
 """
 
-import os
-# Silence TensorFlow C++ and XLA PTX diagnostic warnings
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-import sys
 import argparse
 import logging
+import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
-# ── ensure project root is on sys.path ────────────────────────────────────
+# Add project root to path before other imports
 _ROOT = str(Path(__file__).resolve().parent)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 # Set class/channel env-vars BEFORE importing parameters.py
-# (will be overridden again inside load_distillation_data, but avoids the
-#  interactive prompt that parameters.py triggers when both env-vars are absent)
 if "DIGIT_NB_CLASSES" not in os.environ:
     os.environ["DIGIT_NB_CLASSES"] = "10"
 if "DIGIT_INPUT_CHANNELS" not in os.environ:
@@ -89,12 +85,15 @@ if "DIGIT_INPUT_CHANNELS" not in os.environ:
 
 import parameters as params
 from utils.train_distill_helper import (
-    TEACHERS,
-    STUDENTS,
-    run_distillation_pipeline,
-    train_teacher,
-    load_distillation_data,
+    STUDENTS, TEACHERS, load_distillation_data, run_distillation_pipeline,
+    train_teacher
 )
+
+# Optional project imports
+try:
+    from utils.retrain_with_teacher import main as retrain_main
+except ImportError:
+    retrain_main = None
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
@@ -353,7 +352,9 @@ def main() -> None:
         if args.phase != "all":
             logger.info("--retrain-existing overrides --phase. Running retraining pipeline.")
         
-        from utils.retrain_with_teacher import main as retrain_main
+        if retrain_main is None:
+            logger.error("Could not import retrain_with_teacher. Ensure utility is available.")
+            sys.exit(1)
         
         # Redirect arguments to retrain_with_teacher
         redirect_args = [

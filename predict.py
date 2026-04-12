@@ -1,19 +1,24 @@
-# predict.py
-import tensorflow as tf
-import numpy as np
-import cv2
-import os
 import argparse
-from utils.preprocess import preprocess_for_inference
+import os
+import sys
 from pathlib import Path
+
+import cv2
+import numpy as np
+import tensorflow as tf
+
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
+
 import parameters as params
+from utils.preprocess import preprocess_for_inference
 
 
 class OnnxDigitPredictor:
     def __init__(self, onnx_path: str):
-        try:
-            import onnxruntime as ort
-        except ImportError:
+        if ort is None:
             raise ImportError("onnxruntime not installed.")
         self.onnx_path = onnx_path
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
@@ -31,8 +36,6 @@ class OnnxDigitPredictor:
         return self._num_classes
 
     def predict(self, image, debug=False):
-        from utils.preprocess import preprocess_for_inference
-        import numpy as np
         processed = preprocess_for_inference(image).astype("float32")
         if processed.ndim == 2:
             processed = processed[:, :, None]
