@@ -666,37 +666,52 @@ def run_distillation_pipeline(
 
         # ── TQT / ESP-DL Quantitative Pipeline ──
         if use_tqt:
-            logger.info("🚀 TRIGGERING ESP-DL TQT PIPELINE FOR STUDENT...")
+            # Loop through all targets if requested
+            targets = getattr(params, 'TQT_ALL_TARGETS', [params.TQT_TARGET]) if getattr(params, 'TQT_EXPORT_ALL_TARGETS', False) else [params.TQT_TARGET]
+            
+            logger.info(f"\n🚀 STARTING TQT PIPELINE FOR TARGETS: {', '.join(targets)}")
+            
             from utils.export_onnx import export_keras_to_onnx
             onnx_path = os.path.join(output_dir, f"{student_variant}.onnx")
             
-            if export_keras_to_onnx(student, onnx_path):
+            # CRITICAL: Simplify MUST be True to avoid -11 crashes in esp-ppq
+            if export_keras_to_onnx(student, onnx_path, simplify=True):
                 import subprocess
-                cmd = [
-                    sys.executable, "quantize_espdl.py",
-                    "--model", student_variant,
-                    "--onnx", onnx_path,
-                    "--output", output_dir,
-                    "--bits", str(params.TQT_NUM_BITS),
-                    "--target", params.TQT_TARGET,
-                    "--classes", str(params.NB_CLASSES),
-                    "--color", color_mode.lower(),
-                    "--steps", str(params.TQT_STEPS),
-                    "--lr", str(params.TQT_LR),
-                    "--device", params.TQT_COLLECTING_DEVICE,
-                    "--no_simplify",
-                    "--skip_onnx_export",
-                    "--tflite" # Student models ALWAYS want the TFLite scale-preserved version
-                ]
-                
-                logger.info(f"   Executing TQT command: {' '.join(cmd)}")
-                try:
-                    subprocess.run(cmd, check=True)
-                    logger.info("✅ TQT Pipeline finished successfully for student")
-                except subprocess.CalledProcessError as e:
-                    logger.error(f"❌ TQT Pipeline failed with exit code {e.returncode}")
-                except Exception as e:
-                    logger.error(f"❌ TQT Pipeline error: {e}")
+                for target_soc in targets:
+                    logger.info(f"\n⚙️ Quantizing for target: {target_soc}...")
+                    cmd = [
+                        sys.executable, "quantize_espdl.py",
+                        "--model", student_variant,
+                        "--onnx", onnx_path,
+                        "--output", output_dir,
+                        "--bits", str(params.TQT_NUM_BITS),
+                        "--target", target_soc,
+                        "--classes", str(params.NB_CLASSES),
+                        "--color", color_mode.lower(),
+                        "--steps", str(params.TQT_STEPS),
+                        "--lr", str(params.TQT_LR),
+                        "--device", params.TQT_COLLECTING_DEVICE,
+                        "--calib_steps", str(params.TQT_CALIB_STEPS),
+                        "--skip_onnx_export",
+                        "--tflite" # Student models ALWAYS want the TFLite scale-preserved version
+                    ]
+
+                    if getattr(params, 'TQT_IS_WEIGHT_TRAINABLE', False):
+                        cmd.append("--tune_weights")
+                    
+                    logger.info(f"   Executing TQT command: {' '.join(cmd)}")
+                    try:
+                        # CRITICAL FIX for exit code -11: Hide GPU from child if running on CPU
+                        env = os.environ.copy()
+                        if params.TQT_COLLECTING_DEVICE == "cpu":
+                            env["CUDA_VISIBLE_DEVICES"] = ""
+
+                        subprocess.run(cmd, check=True, env=env)
+                        logger.info(f"✅ TQT Pipeline finished successfully for {target_soc}")
+                    except subprocess.CalledProcessError as e:
+                        logger.error(f"❌ TQT Pipeline failed for {target_soc} with exit code {e.returncode}")
+                    except Exception as e:
+                        logger.error(f"❌ TQT Pipeline error for {target_soc}: {e}")
             else:
                 logger.error("❌ TQT Pipeline aborted: Student ONNX export failed")
 

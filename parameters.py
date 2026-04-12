@@ -253,7 +253,9 @@ QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
 # TQT (ESP-DL) Training-then-Quantization Pipeline
 USE_TQT_PIPELINE = True  # Enable high-precision float-to-TQT export pipeline
 TQT_NUM_BITS = 8         # Quantization bit width (8 recommended for ESP32-S3)
-TQT_TARGET = 'esp32'     # Choices: 'esp32', 'esp32s2', 'esp32s3', 'esp32c3', 'esp32p4'
+TQT_TARGET = 'esp32'     # Default target (Choices: 'esp32', 'esp32s3', 'esp32p4')
+TQT_EXPORT_ALL_TARGETS = True # Generate artifacts for ALL targets in every run
+TQT_ALL_TARGETS = ['esp32', 'esp32s3', 'esp32p4'] # Active targets for batch export
 
 # --- TQT Device Detection ---
 def _detect_tqt_device():
@@ -265,46 +267,50 @@ TQT_DEVICE = _detect_tqt_device()
 
 _TQT_DEFAULTS = {
     "esp32": {
-        "TQT_STEPS":              500,
-        "TQT_LR":                 5e-6,
-        "TQT_BLOCK_SIZE":         2,
-        "TQT_INT_LAMBDA":         0.50,
-        "TQT_IS_SCALE_TRAINABLE": True,
-        "TQT_COLLECTING_DEVICE":  TQT_DEVICE,
-        "TQT_CALIB_STEPS":        32,
-        "TQT_CALIB_BATCH_SIZE":   1,
+        "TQT_STEPS":               200,      # Reduced to avoid overfitting calib set
+        "TQT_LR":                  1e-6,     # Safer for scale-only
+        "TQT_BLOCK_SIZE":          2,
+        "TQT_INT_LAMBDA":          0.10,     # Less aggressive integer penalty
+        "TQT_IS_SCALE_TRAINABLE":  True,
+        "TQT_IS_WEIGHT_TRAINABLE": False,    # DISABLED: Scale-only is safer
+        "TQT_COLLECTING_DEVICE":   TQT_DEVICE,
+        "TQT_CALIB_STEPS":         300,      # Balance between accuracy and speed
+        "TQT_CALIB_BATCH_SIZE":    1,
     },
     "esp32s3": {
-        "TQT_STEPS":              500,
-        "TQT_LR":                 1e-5,
-        "TQT_BLOCK_SIZE":         4,
-        "TQT_INT_LAMBDA":         0.35,
-        "TQT_IS_SCALE_TRAINABLE": True,
-        "TQT_COLLECTING_DEVICE":  TQT_DEVICE,
-        "TQT_CALIB_STEPS":        32,
-        "TQT_CALIB_BATCH_SIZE":   1,
+        "TQT_STEPS":               200,
+        "TQT_LR":                  1e-6,
+        "TQT_BLOCK_SIZE":          2,        # Reduced risk for small models
+        "TQT_INT_LAMBDA":          0.05,     # Very low penalty
+        "TQT_IS_SCALE_TRAINABLE":  True,
+        "TQT_IS_WEIGHT_TRAINABLE": False,
+        "TQT_COLLECTING_DEVICE":   TQT_DEVICE,
+        "TQT_CALIB_STEPS":         300,
+        "TQT_CALIB_BATCH_SIZE":    1,
     },
     "esp32p4": {
-        "TQT_STEPS":              500,
-        "TQT_LR":                 1e-5,
-        "TQT_BLOCK_SIZE":         4,
-        "TQT_INT_LAMBDA":         0.25,
-        "TQT_IS_SCALE_TRAINABLE": True,
-        "TQT_COLLECTING_DEVICE":  TQT_DEVICE,
-        "TQT_CALIB_STEPS":        32,
-        "TQT_CALIB_BATCH_SIZE":   1,
+        "TQT_STEPS":               200,
+        "TQT_LR":                  1e-6,
+        "TQT_BLOCK_SIZE":          2,
+        "TQT_INT_LAMBDA":          0.0,      # No penalty initially
+        "TQT_IS_SCALE_TRAINABLE":  True,
+        "TQT_IS_WEIGHT_TRAINABLE": False,
+        "TQT_COLLECTING_DEVICE":   TQT_DEVICE,
+        "TQT_CALIB_STEPS":         300,
+        "TQT_CALIB_BATCH_SIZE":    1,
     },
 }
 
 _tqt_cfg = _TQT_DEFAULTS.get(TQT_TARGET, _TQT_DEFAULTS["esp32"])
-TQT_STEPS              = _tqt_cfg["TQT_STEPS"]
-TQT_LR                 = _tqt_cfg["TQT_LR"]
-TQT_BLOCK_SIZE         = _tqt_cfg["TQT_BLOCK_SIZE"]
-TQT_INT_LAMBDA         = _tqt_cfg["TQT_INT_LAMBDA"]
-TQT_IS_SCALE_TRAINABLE = _tqt_cfg["TQT_IS_SCALE_TRAINABLE"]
-TQT_COLLECTING_DEVICE  = _tqt_cfg["TQT_COLLECTING_DEVICE"]
-TQT_CALIB_STEPS        = _tqt_cfg["TQT_CALIB_STEPS"]
-TQT_CALIB_BATCH_SIZE   = _tqt_cfg["TQT_CALIB_BATCH_SIZE"]
+TQT_STEPS               = _tqt_cfg["TQT_STEPS"]
+TQT_LR                  = _tqt_cfg["TQT_LR"]
+TQT_BLOCK_SIZE          = _tqt_cfg["TQT_BLOCK_SIZE"]
+TQT_INT_LAMBDA          = _tqt_cfg["TQT_INT_LAMBDA"]
+TQT_IS_SCALE_TRAINABLE  = _tqt_cfg["TQT_IS_SCALE_TRAINABLE"]
+TQT_IS_WEIGHT_TRAINABLE = _tqt_cfg["TQT_IS_WEIGHT_TRAINABLE"]
+TQT_COLLECTING_DEVICE   = _tqt_cfg["TQT_COLLECTING_DEVICE"]
+TQT_CALIB_STEPS         = _tqt_cfg["TQT_CALIB_STEPS"]
+TQT_CALIB_BATCH_SIZE    = _tqt_cfg["TQT_CALIB_BATCH_SIZE"]
 
 # Automatically disable quantization flags for PC-only validator models
 # PC_ONLY_MODELS = {"high_accuracy_validator", "super_high_accuracy_validator"}

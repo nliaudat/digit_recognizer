@@ -214,40 +214,55 @@ def main():
         
     # ── TQT / ESP-DL Quantitative Pipeline ──
     if args.tqt:
-        print("\n🚀 TRIGGERING ESP-DL TQT PIPELINE FOR FINETUNED MODEL...")
+        # Loop through all targets if requested
+        targets = getattr(params, 'TQT_ALL_TARGETS', [params.TQT_TARGET]) if getattr(params, 'TQT_EXPORT_ALL_TARGETS', False) else [params.TQT_TARGET]
+        
+        print(f"\n🚀 STARTING TQT PIPELINE FOR TARGETS: {', '.join(targets)}")
+        
         from utils.export_onnx import export_keras_to_onnx
-        # We use the name from params
         student_variant = params.MODEL_ARCHITECTURE
         onnx_path = os.path.join(export_dir, f"retrained_{student_variant}.onnx")
         
-        if export_keras_to_onnx(model, onnx_path):
+        # CRITICAL: Simplify MUST be True to avoid -11 crashes in esp-ppq
+        if export_keras_to_onnx(model, onnx_path, simplify=True):
             import subprocess
             color_mode = "gray" if params.INPUT_CHANNELS == 1 else "rgb"
-            cmd = [
-                sys.executable, "quantize_espdl.py",
-                "--model", f"retrained_{student_variant}",
-                "--onnx", onnx_path,
-                "--output", export_dir,
-                "--bits", str(params.TQT_NUM_BITS),
-                "--target", params.TQT_TARGET,
-                "--classes", str(params.NB_CLASSES),
-                "--color", color_mode,
-                "--steps", str(params.TQT_STEPS),
-                "--lr", str(params.TQT_LR),
-                "--device", params.TQT_COLLECTING_DEVICE,
-                "--no_simplify",
-                "--skip_onnx_export",
-                "--tflite" 
-            ]
             
-            print(f"   Executing TQT command: {' '.join(cmd)}")
-            try:
-                subprocess.run(cmd, check=True)
-                print("✅ TQT Pipeline finished successfully for finetuned model")
-            except subprocess.CalledProcessError as e:
-                print(f"❌ TQT Pipeline failed with exit code {e.returncode}")
-            except Exception as e:
-                print(f"❌ TQT Pipeline error: {e}")
+            for target_soc in targets:
+                print(f"\n⚙️ Quantizing for target: {target_soc}...")
+                cmd = [
+                    sys.executable, "quantize_espdl.py",
+                    "--model", f"retrained_{student_variant}",
+                    "--onnx", onnx_path,
+                    "--output", export_dir,
+                    "--bits", str(params.TQT_NUM_BITS),
+                    "--target", target_soc,
+                    "--classes", str(params.NB_CLASSES),
+                    "--color", color_mode,
+                    "--steps", str(params.TQT_STEPS),
+                    "--lr", str(params.TQT_LR),
+                    "--device", params.TQT_COLLECTING_DEVICE,
+                    "--calib_steps", str(params.TQT_CALIB_STEPS),
+                    "--skip_onnx_export",
+                    "--tflite" 
+                ]
+
+                if getattr(params, 'TQT_IS_WEIGHT_TRAINABLE', False):
+                    cmd.append("--tune_weights")
+                
+                print(f"   Executing TQT command: {' '.join(cmd)}")
+                try:
+                    # CRITICAL FIX for exit code -11: Hide GPU from child if running on CPU
+                    env = os.environ.copy()
+                    if params.TQT_COLLECTING_DEVICE == "cpu":
+                        env["CUDA_VISIBLE_DEVICES"] = ""
+
+                    subprocess.run(cmd, check=True, env=env)
+                    print(f"✅ TQT Pipeline finished successfully for {target_soc}")
+                except subprocess.CalledProcessError as e:
+                    print(f"❌ TQT Pipeline failed for {target_soc} with exit code {e.returncode}")
+                except Exception as e:
+                    print(f"❌ TQT Pipeline error for {target_soc}: {e}")
         else:
             print("❌ TQT Pipeline aborted: Finetuned ONNX export failed")
 

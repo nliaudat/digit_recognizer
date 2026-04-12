@@ -6,6 +6,10 @@ import numpy as np
 import torch
 from pathlib import Path
 
+# Stability: Limit high-parallelism threading which can cause -11 segfaults in some environments
+# We MUST do this before any other torch operations
+torch.set_num_threads(1)
+
 def parse_args():
     parser = argparse.ArgumentParser(description="TQT/ESP-DL Minimal Worker")
     parser.add_argument("--model",    help="Model name to resolve paths automatically")
@@ -14,8 +18,9 @@ def parse_args():
     parser.add_argument("--output",   help="Explicit output .espdl path")
     parser.add_argument("--target",   default="esp32", help="Target chip (esp32, esp32s3, etc.)")
     parser.add_argument("--bits",     type=int,   default=8)
-    parser.add_argument("--steps",    type=int,   default=500)
-    parser.add_argument("--lr",       type=float, default=1e-5)
+    parser.add_argument("--steps",    type=int,   default=300)
+    parser.add_argument("--lr",       type=float, default=1e-6)
+    parser.add_argument("--tune_weights", action="store_true", help="Fine-tune weights during TQT (default is scale-only)")
     def detect_device():
         try:
             import torch
@@ -45,9 +50,9 @@ def resolve_paths(args):
     onnx_path  = args.onnx   or os.path.join(out_dir, f"{model_name}.onnx")
     
     if args.output and os.path.isdir(args.output):
-        espdl_path = os.path.join(args.output, f"{model_name}.espdl")
+        espdl_path = os.path.join(args.output, f"{model_name}_{args.target}.espdl")
     else:
-        espdl_path = args.output or os.path.join(out_dir, f"{model_name}.espdl")
+        espdl_path = args.output or os.path.join(out_dir, f"{model_name}_{args.target}.espdl")
 
     return keras_path, onnx_path, espdl_path
 
@@ -75,25 +80,55 @@ def main():
 
     # 2. Prepare data
     print(f"📦 Loading calibration data ({args.classes} classes, {args.color})...")
+    from utils.preprocess import preprocess_for_training
     (x_train, _), _, _ = get_data_splits()
     n = min(args.calib_steps, len(x_train))
-    x = preprocess_for_inference(x_train[:n]).astype('float32')
+    
+    # CRITICAL: Use preprocess_for_training to ensure Float32 [0, 1] 
+    # TQT needs calibration data in the same range as training data
+    x = preprocess_for_training(x_train[:n]).astype('float32')
+    
+    # Add debug code right before TQT
+    print("🔍 Debug: Checking calibration data statistics")
+    sample = x[0]
+    print(f"  Shape: {sample.shape}")
+    print(f"  Value range: [{x.min():.3f}, {x.max():.3f}]")
+    print(f"  Mean: {x.mean():.3f}, Std: {x.std():.3f}")
+
+    # Compare with training data distribution (informational)
+    print(f"  Training sample range: [{x.min():.3f}, {x.max():.3f}]")
+
     # NHWC -> NCHW list
     calib_data = [torch.from_numpy(x[i].transpose(2, 0, 1)).unsqueeze(0) for i in range(n)]
 
     # 3. Target mapping
-    target_backend = 'c' if args.target == 'esp32' else args.target
+    target_backend = args.target # Use literal target name (e.g., 'esp32', 'esp32s3')
 
-    # 4. Configure TQT
+    # 4. Configure TQT with target-specific settings from parameters.py
+    # This allows the worker to pick up the correct LR/Steps for S3 vs Generic vs P4
+    tqt_cfg = params._TQT_DEFAULTS.get(args.target, params._TQT_DEFAULTS.get("esp32"))
+    
     quant_setting = QuantizationSettingFactory.espdl_setting()
     quant_setting.tqt_optimization = (args.steps > 0)
     if quant_setting.tqt_optimization:
         s = quant_setting.tqt_optimization_setting
-        s.steps = args.steps
-        s.lr = args.lr
+        
+        # Priority: CLI argument > target-specific default > global default
+        s.steps = args.steps if args.steps != 300 else tqt_cfg.get("TQT_STEPS", args.steps)
+        s.lr = args.lr if args.lr != 1e-6 else tqt_cfg.get("TQT_LR", args.lr)
         s.collecting_device = args.device
-        s.int_lambda = 0.5
+        
+        s.int_lambda = tqt_cfg.get("TQT_INT_LAMBDA", 0.1)
+        s.block_size = tqt_cfg.get("TQT_BLOCK_SIZE", 2)
+        s.gamma = 0.01             
+        
         s.is_scale_trainable = True
+        s.is_weight_trainable = args.tune_weights
+        
+        if args.tune_weights:
+             print("🧠 TQT: Tuning BOTH scales and weights (High risk of overfitting calibration set)")
+        else:
+             print("⚖️ TQT: Tuning SCALES ONLY (Safer for small calibration sets)")
 
     # 5. Run Quantization
     print(f"🚀 Starting TQT: {onnx_path} -> {espdl_path}")
@@ -101,7 +136,22 @@ def main():
     
     try:
         # 5. Run Quantization
-        # espdl_quantize_onnx returns the quantized graph
+        # Defensive check: Can we load and check the ONNX graph?
+        import onnx
+        import gc
+        gc.collect() # Free memory before heavy Torch lifting
+        
+        try:
+            _m = onnx.load(onnx_path)
+            onnx.checker.check_model(_m)
+            print("✅ ONNX graph check passed")
+        except Exception as e:
+            print(f"⚠️ ONNX graph check failed: {e}")
+
+        # Final stability attempt: set random seeds
+        torch.manual_seed(42)
+        if torch.cuda.is_available(): torch.cuda.empty_cache()
+
         graph = espdl_quantize_onnx(
             onnx_import_file   = onnx_path,
             espdl_export_file  = espdl_path,
@@ -117,7 +167,8 @@ def main():
 
         # 6. Export Quantized ONNX (Scale-Preserving)
         # This ONNX contains QDQ nodes (QuantizeLinear/DequantizeLinear) with TQT-optimized scales
-        quant_onnx_path = onnx_path.replace(".onnx", "_quantized.onnx")
+        # We base the name on espdl_path to ensure the target SoC is in the filename
+        quant_onnx_path = espdl_path.replace(".espdl", "_quantized.onnx")
         print(f"🔄 Exporting Scale-Preserving ONNX -> {quant_onnx_path}")
         export_ppq_graph(graph, platform=TargetPlatform.ONNXRUNTIME, graph_save_to=quant_onnx_path)
         

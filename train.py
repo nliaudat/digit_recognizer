@@ -1142,43 +1142,60 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
 
         # ── TQT / ESP-DL Quantitative Pipeline ──
         if params.USE_TQT_PIPELINE:
-            print("\n🚀 TRIGGERING ESP-DL TQT PIPELINE...")
+            import subprocess
+            # Loop through all targets if requested
+            targets = getattr(params, 'TQT_ALL_TARGETS', [params.TQT_TARGET]) if getattr(params, 'TQT_EXPORT_ALL_TARGETS', False) else [params.TQT_TARGET]
+            
+            print(f"\n🚀 STARTING TQT PIPELINE FOR TARGETS: {', '.join(targets)}")
+            
             from utils.export_onnx import export_keras_to_onnx
             onnx_path = os.path.join(training_dir, f"{params.MODEL_ARCHITECTURE}.onnx")
             
-            if export_keras_to_onnx(model, onnx_path):
-                import subprocess
+            # CRITICAL: Simplify MUST be True to avoid -11 crashes in esp-ppq
+            # onnxsim removes complex/unsupported nodes before quantization
+            export_keras_to_onnx(model, onnx_path, simplify=True)
+            
+            for target_soc in targets:
+                print(f"\n⚙️ Quantizing for target: {target_soc}...")
+                
                 cmd = [
                     sys.executable, "quantize_espdl.py",
                     "--model", params.MODEL_ARCHITECTURE,
                     "--onnx", onnx_path,
                     "--output", training_dir,
                     "--bits", str(params.TQT_NUM_BITS),
-                    "--target", params.TQT_TARGET,
+                    "--target", target_soc,  # Use loop target
                     "--classes", str(params.NB_CLASSES),
                     "--color", color_mode.lower(),
                     "--steps", str(params.TQT_STEPS),
                     "--lr", str(params.TQT_LR),
                     "--device", params.TQT_COLLECTING_DEVICE,
-                    "--no_simplify",
+                    "--calib_steps", str(params.TQT_CALIB_STEPS),
                     "--skip_onnx_export"
                 ]
                 
+                if getattr(params, 'TQT_IS_WEIGHT_TRAINABLE', False):
+                    cmd.append("--tune_weights")
+
                 if getattr(params, 'USE_TQT_FOR_TFLITE', True):
                     cmd.append("--tflite")
                     
                 print(f"   Executing TQT command: {' '.join(cmd)}")
                 try:
-                    # Run quantization directly (streaming output to console)
-                    subprocess.run(cmd, check=True)
-                    print("✅ TQT Pipeline finished successfully")
+                    # CRITICAL FIX for exit code -11 (Segfault): 
+                    env = os.environ.copy()
+                    if params.TQT_COLLECTING_DEVICE == "cpu":
+                        env["CUDA_VISIBLE_DEVICES"] = ""
+                    
+                    subprocess.run(cmd, check=True, env=env)
+                    print(f"✅ TQT Pipeline finished successfully for {target_soc}")
                     
                     # Verify artifacts were actually created
-                    artifacts = [f for f in os.listdir(training_dir) if f.endswith(".espdl") or "_tqt.tflite" in f]
+                    artifacts = [f for f in os.listdir(training_dir) if f.endswith(".espdl") or ".tflite" in f]
                     if artifacts:
                         print(f"📦 TQT Artifacts generated: {', '.join(artifacts)}")
                     else:
-                        print("⚠️ TQT Pipeline finished but no artifacts (.espdl) were found!")
+                        print(f"⚠️ TQT Pipeline finished for {target_soc} but no artifacts were found in {training_dir}")
                     
                     # Log artifacts to MLFlow if available
                     if MLFLOW_AVAILABLE:
