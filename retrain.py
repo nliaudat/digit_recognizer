@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -154,10 +155,43 @@ def main():
     
     # Set up export directory following project standard
     color_suffix = "GRAY" if params.INPUT_CHANNELS == 1 else "RGB"
-    model_name = Path(args.model_path).stem
-    base_dir = f"exported_models/{params.NB_CLASSES}cls_{color_suffix}"
-    #export_dir = os.path.join(base_dir, f"retrained_{params.MODEL_ARCHITECTURE}")
-    export_dir = os.path.join(base_dir, f"retrained_{model_name}")
+    color_mode = "gray" if params.INPUT_CHANNELS == 1 else "rgb"
+    
+    # Determine quantization suffix for the folder name
+    if getattr(params, 'USE_TQT_PIPELINE', False):
+        quant_suffix = "TQT"
+    elif getattr(params, 'USE_QAT', False):
+        quant_suffix = "QAT"
+    elif getattr(params, 'ESP_DL_QUANTIZE', False):
+        quant_suffix = "INT8"
+    else:
+        quant_suffix = "UINT8"
+    
+    # Determine logits vs softmax suffix
+    activation_suffix = "LOGITS" if getattr(params, 'USE_LOGITS', False) else "SOFTMAX"
+
+    # Construct descriptive folder name: retrained_[model]_[classes]_[color]_[quantization]_[activation]
+    model_name_stem = Path(args.model_path).stem
+    
+    # If standard 'best_model' is used, try to extract a better name from the parent folder
+    # Example: exported_models/10cls_RGB/digit_recognizer_v3_10cls_RGB.../best_model.keras -> v3
+    if model_name_stem == "best_model":
+        parent_name = Path(args.model_path).parent.name
+        # Look for the classes suffix which standardizes our exports
+        parts = re.split(r'_\d+cls', parent_name)
+        if parts:
+            extracted_name = parts[0]
+            # Strip common prefixes for a clean, short name (e.g. 'v3')
+            extracted_name = extracted_name.replace("train_", "").replace("digit_recognizer_", "")
+            model_name_stem = extracted_name
+    
+    # Update params.MODEL_ARCHITECTURE so subsequent calls (TQT, MLflow) use the clean name
+    params.MODEL_ARCHITECTURE = model_name_stem
+    
+    export_folder = f"retrained_{model_name_stem}_{params.NB_CLASSES}cls_{color_suffix}_{quant_suffix}_{activation_suffix}"
+    export_dir = os.path.join("exported_models", f"{params.NB_CLASSES}cls_{color_suffix}", export_folder)
+    
+    print(f"📂 Exporting results to: {export_dir}")
     os.makedirs(export_dir, exist_ok=True)
     
     # ── Project Infrastructure for Callbacks ──
@@ -234,15 +268,13 @@ def main():
         
         # CRITICAL: Simplify MUST be True to avoid -11 crashes in esp-ppq
         if export_keras_to_onnx(model, onnx_path, simplify=True):
-            color_mode = "gray" if params.INPUT_CHANNELS == 1 else "rgb"
-            
             for target_soc in targets:
                 print(f"\n⚙️ Quantizing for target: {target_soc}...")
                 cmd = [
                     sys.executable, "quantize_espdl.py",
                     "--model", f"retrained_{student_variant}",
-                    "--onnx", onnx_path,
-                    "--output", export_dir,
+                    "--onnx", os.path.abspath(onnx_path),
+                    "--output", os.path.abspath(export_dir),
                     "--bits", str(params.TQT_NUM_BITS),
                     "--target", target_soc,
                     "--classes", str(params.NB_CLASSES),

@@ -437,10 +437,15 @@ def main() -> None:
             # ── Output directory logic (similar to train.py) ───────────────────
             color_label = color_mode.upper()
             timestamp = datetime.now().strftime("%m%d_%H%M")
-            run_folder = f"teacher_{t_type}_{num_classes}cls_{color_label}_{timestamp}"
             
-            # Base directory consistent with train.py
-            output_dir = os.path.join(params.OUTPUT_DIR, run_folder)
+            # Determine logits vs softmax suffix
+            activation_suffix = "LOGITS" if getattr(params, 'USE_LOGITS', False) else "SOFTMAX"
+            
+            # Pattern: teacher_[model]_[classes]_[color]_FLOAT_[activation]_[timestamp]
+            run_folder = f"teacher_{t_type}_{num_classes}cls_{color_label}_FLOAT_{activation_suffix}_{timestamp}"
+            
+            # Use category-based nesting consistent with project standard
+            output_dir = os.path.join("exported_models", f"{num_classes}cls_{color_label}", run_folder)
             # Main model assets go into 'model' subdirectory
             model_dir = os.path.join(output_dir, "model")
             os.makedirs(model_dir, exist_ok=True)

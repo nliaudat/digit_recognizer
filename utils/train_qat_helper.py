@@ -61,7 +61,7 @@ def apply_qat_to_model(model: tf.keras.Model) -> tf.keras.Model:
             raise ImportError("tensorflow_model_optimization not available")
         print(f"✅ QAT available: TF {tf.__version__}, TFMo {tfmot.__version__}")
         # Annotate the model for quantization
-        annotated_model = tfmot.quantization.keras.quantize_annotate(model)
+        annotated_model = tfmot.quantization.keras.quantize_annotate_model(model)
         # Apply quantization with the default 8-bit cluster preset
         qat_model = tfmot.quantization.keras.quantize_apply(
             annotated_model,

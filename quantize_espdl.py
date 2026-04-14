@@ -69,16 +69,35 @@ def resolve_paths(args):
     import parameters as params
     
     model_name = args.model or params.MODEL_ARCHITECTURE
-    out_dir = os.path.join(params.OUTPUT_DIR, model_name)
-    os.makedirs(out_dir, exist_ok=True)
+    
+    # 1. Determine output directory (out_dir)
+    # Priority: args.output (if directory), dirname(args.output) (if file), or default metadata path
+    if args.output:
+        if os.path.isdir(args.output):
+            out_dir = args.output
+        elif "." in os.path.basename(args.output):
+            # args.output likely points to a file, use its directory
+            out_dir = os.path.dirname(args.output) or "."
+        else:
+            # args.output likely points to a non-existent directory, create it
+            out_dir = args.output
+            os.makedirs(out_dir, exist_ok=True)
+    else:
+        # Fallback to standard project structure: exported_models/[NB_CLASSES]cls_[COLOR]/[model]
+        out_dir = os.path.join(params.OUTPUT_DIR, model_name)
+        os.makedirs(out_dir, exist_ok=True)
 
+    # 2. Resolve Keras and ONNX paths
     keras_path = args.keras  or os.path.join(out_dir, "best_model.keras")
     onnx_path  = args.onnx   or os.path.join(out_dir, f"{model_name}.onnx")
     
-    if args.output and os.path.isdir(args.output):
-        espdl_path = os.path.join(args.output, f"{model_name}_{args.target}.espdl")
+    # 3. Resolve ESPDL path
+    if args.output and not os.path.isdir(args.output):
+        # If user passed a specific file path, use it
+        espdl_path = args.output
     else:
-        espdl_path = args.output or os.path.join(out_dir, f"{model_name}_{args.target}.espdl")
+        # Default name inside the output directory
+        espdl_path = os.path.join(out_dir, f"{model_name}_{args.target}.espdl")
 
     return keras_path, onnx_path, espdl_path
 

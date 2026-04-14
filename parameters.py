@@ -215,47 +215,52 @@ update_derived_parameters()
 # QUANTIZATION MODES (9 possible combinations):
 
 # 1. QUANTIZE_MODEL=False, USE_QAT=False, ESP_DL_QUANTIZE=False
-   # Float32 training & inference
+   # Float32 training & inference (Reference baseline)
 
 # 2. QUANTIZE_MODEL=False, USE_QAT=False, ESP_DL_QUANTIZE=True  
-   # INVALID (ESP_DL requires quantization)
+   # INVALID (ESP-DL requires quantization enabled)
 
 # 3. QUANTIZE_MODEL=False, USE_QAT=True, ESP_DL_QUANTIZE=False
-   # QAT training, float32 inference
+   # QAT training, float32 inference (Fake-quantization only)
 
 # 4. QUANTIZE_MODEL=False, USE_QAT=True, ESP_DL_QUANTIZE=True
-   # INVALID (ESP_DL requires quantization)
+   # INVALID (ESP-DL requires quantization enabled)
 
 # 5. QUANTIZE_MODEL=True, USE_QAT=False, ESP_DL_QUANTIZE=False
-   # Standard training, UINT8 post-quantization
+   # Standard training -> TFLite UINT8 Post-Training Quantization (PTQ)
 
 # 6. QUANTIZE_MODEL=True, USE_QAT=False, ESP_DL_QUANTIZE=True
-   # Standard training, INT8 post-quantization (ESP-DL)
+   # Standard training -> TFLite INT8 Post-Training Quantization (ESP-DL compatible)
 
 # 7. QUANTIZE_MODEL=True, USE_QAT=True, ESP_DL_QUANTIZE=False  
-   # QAT training, UINT8 quantization
+   # Quantization Aware Training (QAT) -> UINT8 Quantized Model
 
 # 8. QUANTIZE_MODEL=True, USE_QAT=True, ESP_DL_QUANTIZE=True
-   # QAT training, INT8 quantization (ESP-DL)
+   # Quantization Aware Training (QAT) -> INT8 Quantized Model (ESP-DL standard)
+
+# 9. USE_TQT_PIPELINE=True (RECOMMENDED)
+   # SOTA Trainable Quantization Thresholds (TQT) Pipeline via esp-ppq.
+   # Fine-tunes scales on calibration data. Best balance of speed/accuracy.
+   # Produces both .espdl (ESP32) and .tflite (if USE_TQT_FOR_TFLITE=True).
 
 # TFLite Conversion Parameters
 QUANTIZE_MODEL = False # Enable post-training quantization for the TFLite model
 # ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
 ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
-USE_TQT_FOR_TFLITE = True # Whether to use TQT for TFLite export
                          
 # Quantization Aware Training
 USE_QAT = False  # Enable Quantization Aware Training
 QAT_QUANTIZE_ALL = False  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
 
-# TQT (ESP-DL) Training-then-Quantization Pipeline
-USE_TQT_PIPELINE = True  # Enable high-precision float-to-TQT export pipeline
-TQT_NUM_BITS = 8         # Quantization bit width (8 recommended for ESP32-S3)
-TQT_TARGET = 'esp32'     # Default target (Choices: 'esp32', 'esp32s3', 'esp32p4')
-TQT_EXPORT_ALL_TARGETS = True # Generate artifacts for ALL targets in every run
-TQT_ALL_TARGETS = ['esp32', 'esp32s3', 'esp32p4'] # Active targets for batch export
+# TQT (ESP-DL) Trainable Quantization Thresholds Pipeline
+USE_TQT_PIPELINE = True       # Enable high-precision float-to-TQT export pipeline (RECOMMENDED)
+USE_TQT_FOR_TFLITE = True      # Generate TFLite metadata from TQT scales (higher accuracy than standard PTQ)
+TQT_NUM_BITS = 8               # Quantization bit width (8-bit fixed point for ESP32/S3/P4)
+TQT_TARGET = 'esp32'           # Default target for single-model export ('esp32', 'esp32s3', 'esp32p4')
+TQT_EXPORT_ALL_TARGETS = True  # Generate artifacts for ALL targets in every run (Automatic batch export)
+TQT_ALL_TARGETS = ['esp32', 'esp32s3', 'esp32p4'] # Active targets for the batch export pipeline
 
 # --- TQT Device Detection ---
 def _detect_tqt_device():
@@ -263,7 +268,7 @@ def _detect_tqt_device():
     # esp-ppq often segfaults on CUDA (exit code -11) especially in mixed environments.
     return "cpu"
 
-TQT_DEVICE = _detect_tqt_device()
+TQT_DEVICE = _detect_tqt_device() # Forced to 'cpu' to prevent esp-ppq GPU segmentation faults
 
 _TQT_DEFAULTS = {
     "esp32": {

@@ -486,9 +486,22 @@ def run_distillation_pipeline(
         color_label = color_mode.upper()
         timestamp   = datetime.now().strftime("%m%d_%H%M")
         
-        # Match train.py naming convention: exported_models/10cls_RGB/distilled_v30_to_v4_10cls_RGB_0328_1910
-        run_folder = f"distilled_{teacher_type_str}_to_{student_variant}_{num_classes}cls_{color_label}_{timestamp}"
-        output_dir = os.path.join(params.OUTPUT_DIR, run_folder)
+        # Determine quantization suffix for student
+        if use_tqt:
+            quant_suffix = "TQT"
+        elif getattr(params, 'USE_QAT', False):
+            quant_suffix = "QAT"
+        elif getattr(params, 'ESP_DL_QUANTIZE', False):
+            quant_suffix = "INT8"
+        else:
+            quant_suffix = "UINT8"
+            
+        # Determine logits vs softmax suffix
+        activation_suffix = "LOGITS" if getattr(params, 'USE_LOGITS', False) else "SOFTMAX"
+
+        # Pattern: distilled_[student]_[classes]_[color]_[quantization]_[activation]_[timestamp]
+        run_folder = f"distilled_{student_variant}_{num_classes}cls_{color_label}_{quant_suffix}_{activation_suffix}_{timestamp}"
+        output_dir = os.path.join("exported_models", f"{num_classes}cls_{color_label}", run_folder)
     
     os.makedirs(output_dir, exist_ok=True)
     
@@ -690,8 +703,8 @@ def run_distillation_pipeline(
                     cmd = [
                         sys.executable, "quantize_espdl.py",
                         "--model", student_variant,
-                        "--onnx", onnx_path,
-                        "--output", output_dir,
+                        "--onnx", os.path.abspath(onnx_path),
+                        "--output", os.path.abspath(output_dir),
                         "--bits", str(params.TQT_NUM_BITS),
                         "--target", target_soc,
                         "--classes", str(params.NB_CLASSES),
