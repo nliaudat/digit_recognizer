@@ -1,24 +1,43 @@
 import argparse
-import os
-import sys
-import glob
 import csv
-import time
-import json
+import glob
 import hashlib
-import shutil
+import json
 import logging
+import os
+import random
+import shutil
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import tensorflow as tf
-import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import tensorflow as tf
 from PIL import Image
 from tqdm import tqdm
+
+# ── Optional/Third party imports ──
+try:
+    from tabulate import tabulate
+except ImportError:
+    # Simple fallback for tabulate when it's not installed.
+    def tabulate(table_data, headers=None, tablefmt=None, stralign=None):
+        if not table_data: return ""
+        if not headers: headers = [f"Col{i}" for i in range(len(table_data[0]))]
+        cols = list(zip(*([headers] + table_data)))
+        col_widths = [max(len(str(x)) for x in col) for col in cols]
+        lines = []
+        header_line = " | ".join(f"{str(h):{w}}" for h, w in zip(headers, col_widths))
+        lines.append(header_line)
+        lines.append("-" * len(header_line))
+        for row in table_data:
+            lines.append(" | ".join(f"{str(val):{w}}" for val, w in zip(row, col_widths)))
+        return "\n".join(lines)
 
 # ── Environment Setup ──────────────────────────────────────────────────────
 # Pre-parse classes and color mode to set env-vars BEFORE parameters.py
@@ -38,27 +57,11 @@ if _pre_args.color:
 
 # ── Project Imports ───────────────────────────────────────────────────────
 import parameters as params
-from utils.preprocess import preprocess_for_inference
 from utils.model_distiller_utils import create_tflite_interpreter
 from utils.multi_source_loader import clear_cache
+from utils.preprocess import preprocess_for_inference
 
-# ── Utility Imports ───────────────────────────────────────────────────────
-try:
-    from tabulate import tabulate
-except ImportError:
-    # Simple fallback for tabulate when it's not installed.
-    def tabulate(table_data, headers=None, tablefmt=None, stralign=None):
-        if not table_data: return ""
-        if not headers: headers = [f"Col{i}" for i in range(len(table_data[0]))]
-        cols = list(zip(*([headers] + table_data)))
-        col_widths = [max(len(str(x)) for x in col) for col in cols]
-        lines = []
-        header_line = " | ".join(f"{str(h):{w}}" for h, w in zip(headers, col_widths))
-        lines.append(header_line)
-        lines.append("-" * len(header_line))
-        for row in table_data:
-            lines.append(" | ".join(f"{str(val):{w}}" for val, w in zip(row, col_widths)))
-        return "\n".join(lines)
+
 
 
 
@@ -1733,7 +1736,6 @@ def save_failed_images(failed_predictions, output_dir):
             
             # If same name (collision), add random 3 digits
             if os.path.exists(filepath):
-                import random
                 filename = f"{original_fname}_{predicted_label:.1f}_conf_{confidence:.3f}_{random.randint(100, 999)}.jpg"
                 filepath = os.path.join(failed_dir, filename)
                 
@@ -2014,10 +2016,18 @@ def main():
                         help='Enable verbose output for debugging model predictions and data loading.')
     parser.add_argument('--tolerance', type=float, default=0.1, 
                         help='Acceptable error tolerance in decimal scale (default: 0.1). E.g. +-0.1 allows +-1 class for 100 classes.')
+    parser.add_argument('--espdl', type=str, default=None,
+                        help='Path to a .espdl file to inspect (size, header, quantization metadata).')
     parser.add_argument('--new', type=str, 
                         help='Test a new model and update the existing CSV results (e.g. distilled_many_to_v16_10cls_RGB).')
     
     args, unknown = parser.parse_known_args()
+
+    # Handle --espdl inspection mode (standalone, no dataset needed)
+    if args.espdl:
+        inspect_espdl(args.espdl)
+        return
+
     
     # Use output dir from params if nothing was specified
     if args.input_dir == 'exported_models':
@@ -2128,3 +2138,36 @@ if __name__ == "__main__":
 
 # py bench_predict.py --model digit_recognizer_v4.tflite --list-failed --save-failed
 # py bench_predict.py --test_all --input_dir exported_models\100cls_RGB
+
+# ---------------------------------------------------------------------------
+# ESPDL metadata inspection (Phase 5c of TQT plan)
+# ---------------------------------------------------------------------------
+
+def inspect_espdl(espdl_path: str) -> dict:
+    if not os.path.exists(espdl_path):
+        print(f"espdl file not found: {espdl_path}")
+        return {}
+
+    size_bytes = os.path.getsize(espdl_path)
+    size_kb    = size_bytes / 1024
+
+    print("\n" + "=" * 60)
+    print("  ESPDL MODEL METADATA")
+    print("=" * 60)
+    print(f"  File  : {espdl_path}")
+    print(f"  Size  : {size_kb:.1f} KB  ({size_bytes:,} bytes)")
+    print()
+    print("  Quantization: TQT-optimized Power-of-2 INT8 (Per-Tensor, Symmetric)")
+    print("  NOTE: This .espdl uses TQT-learned scales -- NOT standard PTQ.")
+    print("        Do not compare accuracy with the onnx2tf .tflite directly.")
+    print()
+
+    try:
+        with open(espdl_path, "rb") as f:
+            header = f.read(16).hex()
+        print(f"  Header (hex): {header}")
+    except Exception:
+        pass
+
+    return {"path": espdl_path, "size_bytes": size_bytes, "size_kb": size_kb}
+

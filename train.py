@@ -3,158 +3,114 @@
 
 """
 train.py – Central training script with robust quantisation handling.
-
-Features
---------
-* Deterministic seeding and optional GPU configuration.
-* Automatic validation / correction of the three quantisation flags.
-* Unified loss selection (categorical vs sparse).
-* Proper PTQ representative data (float32 [0, 1]).
-* QAT aware representative data that uses the *training* preprocessing.
-* QAT models skip the representative dataset (they already embed scales).
-* Explicit model.build() before any training / conversion.
-* Detailed callbacks (early stop, LR scheduler, CSV logger, TFLite checkpoint,
-  tqdm progress bar, optional augmentation safety monitor).
-* Comprehensive final reporting (TXT + CSV + model summary file).
-* Optional hyper parameter tuning (via `tuner.py`).
-* Integrated training analysis and automatic cleanup.
 """
 
-# --------------------------------------------------------------------------- #
-# Standard library imports
-# --------------------------------------------------------------------------- #
+import argparse
+import gc
+import json
+import logging
 import os
+import random
+import shutil
+import subprocess
 import sys
+import traceback
+import warnings
+from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
 
+# ── Environment Setup ──
 # Set default environment variables strictly before importing parameters.py
-# This prevents parameters.py from triggering the interactive input prompt
 if "DIGIT_NB_CLASSES" not in os.environ:
     os.environ["DIGIT_NB_CLASSES"] = "10"
 if "DIGIT_INPUT_CHANNELS" not in os.environ:
     os.environ["DIGIT_INPUT_CHANNELS"] = "1"
 
-import argparse
-import logging
-import warnings
-import random
-import json
-import shutil
-import gc
-from datetime import datetime
-from contextlib import contextmanager
-from pathlib import Path
-
-# --------------------------------------------------------------------------- #
-#  Third party imports
-# --------------------------------------------------------------------------- #
+import absl.logging
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from tqdm.auto import tqdm
-import matplotlib.pyplot as plt
 
-# --------------------------------------------------------------------------- #
-#  Project imports (core utilities)
-# --------------------------------------------------------------------------- #
-from models import create_model, compile_model, model_summary
-from utils import get_data_splits,  preprocess_for_training, preprocess_for_inference, get_calibration_data, suppress_all_output
-from utils.preprocess import (
-    validate_preprocessing_consistency,
-    get_qat_training_format,
-    get_preprocessing_info,
-)
-from utils.data_pipeline import create_tf_dataset_from_arrays
-from utils.custom_logger import log_print
-from utils.multi_source_loader import clear_cache
+# ── Optional/Third party imports ──
+try:
+    import mlflow
+except ImportError:
+    mlflow = None
 
-from utils.augmentation import (
-    create_augmentation_pipeline,
-    apply_augmentation_to_dataset,
-    test_augmentation_pipeline,
-    print_augmentation_summary,
-    create_augmentation_safety_monitor,
-    setup_augmentation_for_training,
-)
-
-# --------------------------------------------------------------------------- #
-#  Parameter handling
-# --------------------------------------------------------------------------- #
-import parameters as params
-from parameters import (
-    get_hyperparameter_summary_text,
-    validate_quantization_parameters,
-)
-
-# --------------------------------------------------------------------------- #
-#  Optional QAT import
-# --------------------------------------------------------------------------- #
 try:
     import tensorflow_model_optimization as tfmot
-    QAT_AVAILABLE = True
-except Exception:  # pragma: no cover
-    log_print(
-        "⚠️  tensorflow-model-optimization not available. Install with: pip install tensorflow-model-optimization",
-        level=1,
-    )
-    QAT_AVAILABLE = False
+except (ImportError, Exception):
     tfmot = None
 
-# --------------------------------------------------------------------------- #
-#  Import the refactored helper classes
-# --------------------------------------------------------------------------- #
-from utils.train_modelmanager   import TFLiteModelManager
-from utils.train_trainingmonitor import TrainingMonitor
-from utils.train_checkpoint     import TFLiteCheckpoint
-from utils.train_progressbar    import TQDMProgressBar
+try:
+    from sklearn.utils.class_weight import compute_class_weight
+except ImportError:
+    compute_class_weight = None
 
-from utils.train_qat_helper     import (
-    create_qat_model,
-    create_qat_representative_dataset,
-    validate_qat_data_flow,
-    _is_qat_model,
-    check_qat_compatibility,
-    debug_preprocessing_flow,
-    diagnose_quantization_settings,
-    validate_quantization_combination,
-    validate_qat_data_consistency,
-    validate_complete_qat_setup,
-    verify_qat_model,
-    debug_qat_layers,
-    check_qat_gradient_flow,
-    diagnose_qat_output_behavior
+# ── Project imports ──
+import parameters as params
+from models import compile_model, create_model, model_summary
+from parameters import (
+    get_hyperparameter_summary_text, print_hyperparameter_summary,
+    validate_quantization_parameters
 )
-
-
+from tuner import run_architecture_tuning
+from utils import (
+    get_calibration_data, get_data_splits, preprocess_for_inference,
+    preprocess_for_training, suppress_all_output
+)
+from utils.augmentation import (
+    apply_augmentation_to_dataset, create_augmentation_pipeline,
+    create_augmentation_safety_monitor, print_augmentation_summary,
+    setup_augmentation_for_training, test_augmentation_pipeline
+)
+from utils.custom_logger import log_print
+from utils.data_pipeline import create_tf_dataset_from_arrays
+from utils.multi_source_loader import clear_cache
+from utils.preprocess import (
+    get_preprocessing_info, get_qat_training_format,
+    validate_preprocessing_consistency
+)
+from utils.quantization_analysis import QuantizationAnalyzer
+from utils.train_analyse import (
+    analyze_confusion_matrix, analyze_quantization_impact,
+    analyze_training_history, debug_model_architecture, evaluate_keras_model,
+    evaluate_tflite_model, get_keras_model_size, get_tflite_model_size,
+    measure_keras_inference_time, measure_tflite_inference_time,
+    model_size_analysis, training_diagnostics, verify_model_predictions,
+    verify_tflite_full_qat
+)
 from utils.train_callbacks import create_callbacks
+from utils.train_checkpoint import TFLiteCheckpoint
+from utils.train_cleaning import (
+    cleanup_multiple_training_runs, cleanup_training_directory
+)
 from utils.train_helpers import (
-    print_training_summary, 
-    save_model_summary_to_file,
-    save_training_config,
+    print_training_summary, save_model_summary_to_file, save_training_config,
     save_training_csv
 )
-
-from utils.train_cleaning import cleanup_training_directory, cleanup_multiple_training_runs
-
-# --------------------------------------------------------------------------- #
-#  Import analysis functions
-# --------------------------------------------------------------------------- #
-from utils.train_analyse import (
-    evaluate_keras_model,
-    evaluate_tflite_model,
-    get_keras_model_size,
-    get_tflite_model_size,
-    measure_keras_inference_time,
-    measure_tflite_inference_time,
-    analyze_quantization_impact,
-    training_diagnostics,
-    debug_model_architecture,
-    verify_model_predictions,
-    analyze_confusion_matrix,
-    analyze_training_history,
-    model_size_analysis
+from utils.train_modelmanager import TFLiteModelManager
+from utils.train_progressbar import TQDMProgressBar
+from utils.train_qat_helper import (
+    _is_qat_model, check_qat_compatibility, check_qat_gradient_flow,
+    create_qat_model, create_qat_representative_dataset,
+    debug_preprocessing_flow, debug_qat_layers, diagnose_qat_output_behavior,
+    diagnose_quantization_settings, validate_complete_qat_setup,
+    validate_qat_data_consistency, validate_qat_data_flow,
+    validate_quantization_combination, verify_qat_model
 )
+from utils.train_trainingmonitor import TrainingMonitor
 
+# ── Conditional project imports ──
+try:
+    from utils.export_onnx import export_keras_to_onnx
+except ImportError:
+    export_keras_to_onnx = None
 
-from utils.quantization_analysis import QuantizationAnalyzer
+MLFLOW_AVAILABLE = mlflow is not None
+QAT_AVAILABLE = tfmot is not None
 
 # --------------------------------------------------------------------------- #
 #  Suppress TF logs unless --debug is requested
@@ -181,7 +137,7 @@ def setup_tensorflow_logging(debug: bool = False):
         os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
         os.environ["TF_CPP_MAX_VLOG_LEVEL"] = "0"
         try:
-            import absl.logging
+        
             absl.logging.set_verbosity(absl.logging.ERROR)
         except Exception:
             pass
@@ -353,6 +309,12 @@ def parse_arguments():
     parser.add_argument("--classes", type=int, choices=[10, 100], help="Number of classes (10 or 100).")
     parser.add_argument("--color", type=str, choices=["rgb", "gray"], help="Color mode (rgb or gray).")
 
+    # --- Quantization Strategies ---
+    parser.add_argument("--qat", action="store_true", default=None, help="Enable Quantization Aware Training (QAT).")
+    parser.add_argument("--no-qat", action="store_true", help="Disable Quantization Aware Training (QAT).")
+    parser.add_argument("--tqt", action="store_true", default=None, help="Enable TQT/ESP-DL quantization pipeline.")
+    parser.add_argument("--no-tqt", action="store_true", help="Disable TQT/ESP-DL quantization pipeline.")
+
     return parser.parse_args()
 
 
@@ -444,9 +406,7 @@ def run_comprehensive_analysis(model, history, training_dir, x_test, y_test, deb
         
     except Exception as e:
         print(f"❌ Comprehensive analysis failed: {e}")
-        if debug:
-            import traceback
-            traceback.print_exc()
+
         return False
 
 
@@ -627,11 +587,32 @@ def main():
     if args.initial_epoch:
         params.INITIAL_EPOCH = args.initial_epoch
 
+    # Quantization overrides
+    if args.qat:
+        params.USE_QAT = True
+    if args.no_qat:
+        params.USE_QAT = False
+    if args.tqt:
+        params.USE_TQT_PIPELINE = True
+    if args.no_tqt:
+        params.USE_TQT_PIPELINE = False
+
+    # -----------------------------------------------------------------
+    #  REFRESH DERIVED PARAMETERS (Apply CLI overrides to paths/shapes)
+    # -----------------------------------------------------------------
+    params.update_derived_parameters()
+    
+    # -----------------------------------------------------------------
+    #  PRINT FINAL CONFIGURATION SUMMARY
+    # -----------------------------------------------------------------
+    print_hyperparameter_summary()
+
+
     # -----------------------------------------------------------------
     #  Hyper parameter tuning mode
     # -----------------------------------------------------------------
     if args.use_tuner:
-        from tuner import run_architecture_tuning
+
 
         print("🚀 Running hyper parameter tuning …")
         # Load a *small* subset for faster tuning
@@ -726,12 +707,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         setup_tensorflow_logging(debug)
         set_all_seeds(params.SHUFFLE_SEED)
         
-        try:
-            import mlflow
-            MLFLOW_AVAILABLE = True
-        except ImportError:
-            MLFLOW_AVAILABLE = False
-            print("ℹ️ MLflow not installed. Skipping experiment tracking. (Run `pip install mlflow` to enable)")
+
         
         # Validate quantization parameters
         # Validate quantization parameters
@@ -748,6 +724,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             params.QUANTIZE_MODEL = corrected_params['QUANTIZE_MODEL']
             params.USE_QAT = corrected_params['USE_QAT']
             params.ESP_DL_QUANTIZE = corrected_params['ESP_DL_QUANTIZE']
+            params.USE_TQT_PIPELINE = corrected_params['USE_TQT_PIPELINE']
             print("✅ Corrected parameters applied")
         
         # Validate quantization combination
@@ -764,23 +741,31 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         # Setup hardware
         strategy = setup_gpu()
         
-        # Create output directory
-        color_mode = "GRAY" if params.USE_GRAYSCALE else "RGB"
-        quantization_mode = ""
-        if params.USE_QAT:
-            quantization_mode = "_QAT"
-        if params.ESP_DL_QUANTIZE:
-            quantization_mode += "_ESP-DL"
-        elif params.QUANTIZE_MODEL:
-            quantization_mode += "_QUANT"
+        # Create output directory following project standard
+        color_suffix = "GRAY" if params.USE_GRAYSCALE else "RGB"
+        color_mode = "gray" if params.USE_GRAYSCALE else "rgb"
         
-        # Use task name if provided
-        task_prefix = f"{params.TASK_NAME}_" if getattr(params, 'TASK_NAME', None) else ""
+        # Determine quantization suffix for the folder name
+        if getattr(params, 'USE_TQT_PIPELINE', False):
+            quant_suffix = "TQT"
+        elif getattr(params, 'USE_QAT', False):
+            quant_suffix = "QAT"
+        elif getattr(params, 'ESP_DL_QUANTIZE', False):
+            quant_suffix = "INT8"
+        else:
+            quant_suffix = "UINT8"
+
+        # Determine logits vs softmax suffix
+        activation_suffix = "LOGITS" if getattr(params, 'USE_LOGITS', False) else "SOFTMAX"
+
+        # Determine task prefix
+        prefix = getattr(params, 'TASK_NAME', '')
+        folder_prefix = f"{prefix}_" if prefix else ""
         
-        training_dir = os.path.join(
-            params.OUTPUT_DIR, 
-            f"{task_prefix}{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls{quantization_mode}_{color_mode}_{datetime.now().strftime('%m%d_%H%M')}"
-        )
+        # Construct descriptive folder name: [model]_[classes]_[color]_[quantization]_[activation]_[timestamp]
+        export_folder = f"{folder_prefix}{params.MODEL_ARCHITECTURE}_{params.NB_CLASSES}cls_{color_suffix}_{quant_suffix}_{activation_suffix}_{datetime.now().strftime('%m%d_%H%M')}"
+        
+        training_dir = os.path.join("exported_models", f"{params.NB_CLASSES}cls_{color_suffix}", export_folder)
         os.makedirs(training_dir, exist_ok=True)
         print(f"📁 Output directory: {training_dir}")
         
@@ -873,7 +858,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         # ✅ MOVE COMPREHENSIVE QAT VALIDATION HERE
         if params.USE_QAT and params.QUANTIZE_MODEL:
             print("🎯 RUNNING COMPREHENSIVE QAT VALIDATION...")
-            from tqdm import tqdm
+
             with tqdm(total=1, desc="QAT Validation", leave=False) as pbar:
                 qat_valid, qat_summary = validate_complete_qat_setup(model, debug=debug)
                 pbar.update(1)
@@ -982,7 +967,6 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         active_run = None
         if MLFLOW_AVAILABLE:
             try:
-                import mlflow
                 mlflow.set_tracking_uri("file://" + os.path.abspath("mlruns"))
                 mlflow.set_experiment("Digit_Recognizer")
                 active_run = mlflow.start_run(run_name=f"{params.MODEL_ARCHITECTURE}_{color_mode}")
@@ -993,7 +977,6 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                 mlflow.log_param("batch_size", params.BATCH_SIZE)
             except Exception as e:
                 print(f"⚠️ MLflow tracking initialization failed: {e}")
-                MLFLOW_AVAILABLE = False
 
         if params.USE_DATA_AUGMENTATION:
             train_dataset, val_dataset, _ = setup_augmentation_for_training(
@@ -1004,7 +987,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             
             print("\n⏳ Loading dataset and optimizing computation graph...")
             print("   (This may take a minute for the first epoch)")
-            from tqdm import tqdm
+
             with tqdm(total=1, desc="Graph Optimization", leave=False) as pbar:
                 history = model.fit(
                     train_dataset,
@@ -1018,7 +1001,6 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         else:
             # Compute class weights to handle imbalanced datasets
             try:
-                from sklearn.utils.class_weight import compute_class_weight
                 unique_classes = np.unique(y_train_final)
                 weights = compute_class_weight(
                     class_weight='balanced',
@@ -1075,7 +1057,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             'size_reduction': 0.0
         }
 
-        if os.path.exists(quantized_tflite_path) and params.QUANTIZE_MODEL:
+        if os.path.exists(quantized_tflite_path):
             try:
                 print("🔍 Running quantization analysis...")
                 # Use the analysis function with correct parameter order
@@ -1108,7 +1090,6 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             except Exception as e:
                 print(f"❌ Quantization analysis failed: {e}")
                 if debug:
-                    import traceback
                     traceback.print_exc()
                 # Fallback measurements with error handling
                 try:
@@ -1126,6 +1107,71 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             run_comprehensive_analysis(model, history, training_dir, x_test, y_test_final, debug)
         else:
             print("⏭️  Skipping comprehensive analysis (--no_analysis flag used)")
+
+        # ── TQT / ESP-DL Quantitative Pipeline ──
+        if params.USE_TQT_PIPELINE:
+            # Loop through all targets if requested
+            targets = getattr(params, 'TQT_ALL_TARGETS', [params.TQT_TARGET]) if getattr(params, 'TQT_EXPORT_ALL_TARGETS', False) else [params.TQT_TARGET]
+            
+            print(f"\n🚀 STARTING TQT PIPELINE FOR TARGETS: {', '.join(targets)}")
+            
+            onnx_path = os.path.join(training_dir, f"{params.MODEL_ARCHITECTURE}.onnx")
+            
+            # CRITICAL: Simplify MUST be True to avoid -11 crashes in esp-ppq
+            if export_keras_to_onnx is not None:
+                if export_keras_to_onnx(model, onnx_path, simplify=True):
+                    for target_soc in targets:
+                        print(f"\n⚙️ Quantizing for target: {target_soc}...")
+                        
+                        cmd = [
+                            sys.executable, "quantize_espdl.py",
+                            "--model", params.MODEL_ARCHITECTURE,
+                            "--onnx", os.path.abspath(onnx_path),
+                            "--output", os.path.abspath(training_dir),
+                            "--bits", str(params.TQT_NUM_BITS),
+                            "--target", target_soc,
+                            "--classes", str(params.NB_CLASSES),
+                            "--color", color_mode,
+                            "--steps", str(params.TQT_STEPS),
+                            "--lr", str(params.TQT_LR),
+                            "--device", params.TQT_COLLECTING_DEVICE,
+                            "--calib_steps", str(params.TQT_CALIB_STEPS),
+                            "--skip_onnx_export"
+                        ]
+                        
+                        if getattr(params, 'TQT_IS_WEIGHT_TRAINABLE', False):
+                            cmd.append("--tune_weights")
+
+                        if getattr(params, 'USE_TQT_FOR_TFLITE', True):
+                            cmd.append("--tflite")
+                            
+                        print(f"   Executing TQT command: {' '.join(cmd)}")
+                        try:
+                            # CRITICAL FIX for exit code -11 (Segfault)
+                            env = os.environ.copy()
+                            if params.TQT_COLLECTING_DEVICE == "cpu":
+                                env["CUDA_VISIBLE_DEVICES"] = ""
+
+                            subprocess.run(cmd, check=True, env=env)
+                            print(f"✅ TQT Pipeline finished successfully for {target_soc}")
+                            
+                            # Verify and log artifacts
+                            artifacts = [f for f in os.listdir(training_dir) if f.endswith(".espdl") or ".tflite" in f]
+                            if artifacts:
+                                print(f"📦 TQT Artifacts generated: {', '.join(artifacts)}")
+                                if MLFLOW_AVAILABLE:
+                                    for f in artifacts:
+                                        mlflow.log_artifact(os.path.join(training_dir, f))
+                            else:
+                                print(f"⚠️ TQT Pipeline finished for {target_soc} but no artifacts found.")
+                                
+                        except subprocess.CalledProcessError as e:
+                            print(f"❌ TQT Pipeline failed for {target_soc} with exit code {e.returncode}")
+                        except Exception as e:
+                            print(f"❌ TQT Pipeline error for {target_soc}: {e}")
+                else:
+                    print("❌ TQT Pipeline aborted: Student ONNX export failed")
+        
         
         # Save training plots and configuration
         monitor.save_training_plots()
@@ -1152,7 +1198,6 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             # ── Full QAT Verification ──
             try:
                 if quantized_tflite_path and os.path.exists(quantized_tflite_path):
-                    from utils.train_analyse import verify_tflite_full_qat
                     qat_report = verify_tflite_full_qat(quantized_tflite_path, debug=debug)
                     if qat_report:
                         if qat_report['is_full_qat']:
@@ -1207,12 +1252,10 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
 
     except Exception as e:
         print(f"\n💥 CRITICAL TRAINING ERROR: {e}")
-        import traceback
         traceback.print_exc()
         # End any active MLflow run if it exists
         try:
-            import mlflow
-            if mlflow.active_run():
+            if MLFLOW_AVAILABLE and mlflow.active_run():
                 mlflow.end_run(status="FAILED")
         except:
             pass

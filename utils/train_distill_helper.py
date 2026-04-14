@@ -17,34 +17,50 @@ Workflow
 
 from __future__ import annotations
 
-import os
-import sys
-import logging
+import importlib
+import inspect
 import json
+import logging
+import os
+import shutil
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any, List
-
-# ── make sure the project root is on sys.path ──────────────────────────────
-_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import tensorflow as tf
 
-# ── project imports ────────────────────────────────────────────────────────
+# ── Project root setup ──────────────────────────────────────────────────
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 import parameters as params
-from utils import get_data_splits, preprocess_for_training, preprocess_for_inference
-from utils.distiller import Distiller, ProgressiveDistiller, MixedInputDistiller, DistillationProgressCallback
-from utils.model_distiller_utils import (
-    export_student_for_edge,
-    evaluate_distilled_model,
-    compare_teacher_student,
-    save_distillation_results,
-    get_model_size_kb,
-    freeze_teacher_model,
+from models.model_factory import create_model_by_name
+from utils import (
+    get_data_splits, preprocess_for_inference, preprocess_for_training
 )
+from utils.distiller import (
+    DistillationProgressCallback, Distiller, MixedInputDistiller,
+    ProgressiveDistiller
+)
+from utils.ensemble_teacher import EnsembleTeacher
+from utils.export_onnx import export_keras_to_onnx
+from utils.losses import (
+    DynamicFocalLoss, DynamicSparseFocalLoss, focal_loss, sparse_focal_loss
+)
+from utils.model_distiller_utils import (
+    compare_teacher_student, evaluate_distilled_model, export_student_for_edge,
+    freeze_teacher_model, get_model_size_kb, save_distillation_results
+)
+from utils.train_analyse import (
+    analyze_confusion_matrix, analyze_training_history, verify_tflite_full_qat
+)
+from utils.train_helpers import save_model_summary_to_file
+from utils.train_qat_helper import create_qat_model
+from utils.train_trainingmonitor import TrainingMonitor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -154,8 +170,13 @@ def train_teacher(
             pretrained=pretrained,
             freeze_backbone=freeze_backbone,
         )
+        teacher = builder(
+            num_classes=num_classes,
+            input_shape=input_shape,
+            pretrained=pretrained,
+            freeze_backbone=freeze_backbone,
+        )
     else:
-        from models.model_factory import create_model_by_name
         teacher = create_model_by_name(
             teacher_type,
             num_classes=num_classes,
@@ -181,9 +202,6 @@ def train_teacher(
     )
     
     # ── Parity with train.py: Logging and Monitoring ─────────────────────
-    from utils.train_trainingmonitor import TrainingMonitor
-    from utils.train_helpers import save_model_summary_to_file
-    from utils.train_analyse import analyze_confusion_matrix, analyze_training_history
     
     # Training logs and monitor
     log_csv_path = os.path.join(checkpoint_dir, "training_log.csv")
@@ -296,12 +314,10 @@ def train_student_distillation(
         builder = STUDENTS[student_variant]
         student = builder(num_classes=num_classes, input_shape=input_shape)
     else:
-        from models.model_factory import create_model_by_name
         student = create_model_by_name(student_variant, num_classes=num_classes, input_shape=input_shape)
     
     # Wrap student for QAT if enabled in parameters
     if getattr(params, 'USE_QAT', False) and getattr(params, 'QUANTIZE_MODEL', False):
-        from utils.train_qat_helper import create_qat_model
         logger.info(f"🎯 Wrapping student {student_variant} for QAT...")
         student = create_qat_model(student)
     logger.info(f"Student parameters: {student.count_params():,}")
@@ -390,7 +406,6 @@ def train_student_distillation(
     log_csv_path = os.path.join(checkpoint_dir, "training_log.csv")
     callbacks.append(tf.keras.callbacks.CSVLogger(log_csv_path))
     
-    from utils.train_trainingmonitor import TrainingMonitor
     monitor = TrainingMonitor(checkpoint_dir)
     
     class TrainingMonitorCallbackWrapper(tf.keras.callbacks.Callback):
@@ -448,6 +463,7 @@ def run_distillation_pipeline(
     checkpoint_dir: str = "checkpoints",
     output_dir: Optional[str] = None,
     export_quantized: bool = True,
+    use_tqt: bool = False,
     target_hardware: str = "esp32",
 ) -> Dict[str, Any]:
     """
@@ -470,9 +486,22 @@ def run_distillation_pipeline(
         color_label = color_mode.upper()
         timestamp   = datetime.now().strftime("%m%d_%H%M")
         
-        # Match train.py naming convention: exported_models/10cls_RGB/distilled_v30_to_v4_10cls_RGB_0328_1910
-        run_folder = f"distilled_{teacher_type_str}_to_{student_variant}_{num_classes}cls_{color_label}_{timestamp}"
-        output_dir = os.path.join(params.OUTPUT_DIR, run_folder)
+        # Determine quantization suffix for student
+        if use_tqt:
+            quant_suffix = "TQT"
+        elif getattr(params, 'USE_QAT', False):
+            quant_suffix = "QAT"
+        elif getattr(params, 'ESP_DL_QUANTIZE', False):
+            quant_suffix = "INT8"
+        else:
+            quant_suffix = "UINT8"
+            
+        # Determine logits vs softmax suffix
+        activation_suffix = "LOGITS" if getattr(params, 'USE_LOGITS', False) else "SOFTMAX"
+
+        # Pattern: distilled_[student]_[classes]_[color]_[quantization]_[activation]_[timestamp]
+        run_folder = f"distilled_{student_variant}_{num_classes}cls_{color_label}_{quant_suffix}_{activation_suffix}_{timestamp}"
+        output_dir = os.path.join("exported_models", f"{num_classes}cls_{color_label}", run_folder)
     
     os.makedirs(output_dir, exist_ok=True)
     
@@ -503,11 +532,6 @@ def run_distillation_pipeline(
 
     loaded_teachers = []
     
-    # Pre-load required modules to avoid doing it in the loop
-    from utils.retrain_with_teacher import find_best_checkpoint
-    from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss, sparse_focal_loss, focal_loss
-    import importlib, inspect
-    
     # Flags and caching for dataset loading
     teacher_data_loaded = False
     x_train_teacher, y_train_teacher, x_val_teacher, y_val_teacher = None, None, None, None
@@ -517,6 +541,7 @@ def run_distillation_pipeline(
         
         # Auto-find checkpoint if not provided
         if not t_checkpoint:
+            from utils.retrain_with_teacher import find_best_checkpoint
             t_checkpoint = find_best_checkpoint(t_type, num_classes, teacher_color)
         
         if t_checkpoint and os.path.exists(t_checkpoint):
@@ -573,7 +598,6 @@ def run_distillation_pipeline(
         loaded_teachers.append(t_model)
 
     if len(loaded_teachers) > 1:
-        from utils.ensemble_teacher import EnsembleTeacher
         teacher = EnsembleTeacher(loaded_teachers, teacher_weights=teacher_weights)
         teacher_size = sum(get_model_size_kb(t) for t in loaded_teachers)
     else:
@@ -662,6 +686,56 @@ def run_distillation_pipeline(
             target_hardware=target_hardware,
         )
         logger.info(f"Student TFLite → {tflite_path}")
+
+        # ── TQT / ESP-DL Quantitative Pipeline ──
+        if use_tqt:
+            # Loop through all targets if requested
+            targets = getattr(params, 'TQT_ALL_TARGETS', [params.TQT_TARGET]) if getattr(params, 'TQT_EXPORT_ALL_TARGETS', False) else [params.TQT_TARGET]
+            
+            logger.info(f"\n🚀 STARTING TQT PIPELINE FOR TARGETS: {', '.join(targets)}")
+            
+            onnx_path = os.path.join(output_dir, f"{student_variant}.onnx")
+            
+            # CRITICAL: Simplify MUST be True to avoid -11 crashes in esp-ppq
+            if export_keras_to_onnx(student, onnx_path, simplify=True):
+                for target_soc in targets:
+                    logger.info(f"\n⚙️ Quantizing for target: {target_soc}...")
+                    cmd = [
+                        sys.executable, "quantize_espdl.py",
+                        "--model", student_variant,
+                        "--onnx", os.path.abspath(onnx_path),
+                        "--output", os.path.abspath(output_dir),
+                        "--bits", str(params.TQT_NUM_BITS),
+                        "--target", target_soc,
+                        "--classes", str(params.NB_CLASSES),
+                        "--color", color_mode.lower(),
+                        "--steps", str(params.TQT_STEPS),
+                        "--lr", str(params.TQT_LR),
+                        "--device", params.TQT_COLLECTING_DEVICE,
+                        "--calib_steps", str(params.TQT_CALIB_STEPS),
+                        "--skip_onnx_export",
+                        "--tflite" # Student models ALWAYS want the TFLite scale-preserved version
+                    ]
+
+                    if getattr(params, 'TQT_IS_WEIGHT_TRAINABLE', False):
+                        cmd.append("--tune_weights")
+                    
+                    logger.info(f"   Executing TQT command: {' '.join(cmd)}")
+                    try:
+                        # CRITICAL FIX for exit code -11: Hide GPU from child if running on CPU
+                        env = os.environ.copy()
+                        if params.TQT_COLLECTING_DEVICE == "cpu":
+                            env["CUDA_VISIBLE_DEVICES"] = ""
+
+                        subprocess.run(cmd, check=True, env=env)
+                        logger.info(f"✅ TQT Pipeline finished successfully for {target_soc}")
+                    except subprocess.CalledProcessError as e:
+                        logger.error(f"❌ TQT Pipeline failed for {target_soc} with exit code {e.returncode}")
+                    except Exception as e:
+                        logger.error(f"❌ TQT Pipeline error for {target_soc}: {e}")
+            else:
+                logger.error("❌ TQT Pipeline aborted: Student ONNX export failed")
+
     else:
         student.save(f"{export_path}.keras")
         tflite_path = None
@@ -710,9 +784,6 @@ def run_distillation_pipeline(
         json.dump(results, f, indent=2)
     
     # ── 7. Generate Training Resume (parity with train.py) ───────────────
-    from utils.train_helpers import save_model_summary_to_file
-    from utils.train_analyse import analyze_confusion_matrix, analyze_training_history
-    import shutil
     
     # Save standard best_model.keras in the root
     student.save(os.path.join(output_dir, "best_model.keras"))
@@ -747,7 +818,6 @@ def run_distillation_pipeline(
     # ── 8. Full QAT Verification ──
     try:
         if export_quantized:
-            from utils.train_analyse import verify_tflite_full_qat
             tflite_path = results['student'].get('tflite_path')
             if tflite_path and os.path.exists(tflite_path):
                 qat_report = verify_tflite_full_qat(tflite_path, debug=True)

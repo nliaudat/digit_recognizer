@@ -1,19 +1,33 @@
-# tuner.py
+import argparse
+import json
+import os
+import random
+import sys
+import traceback
+from datetime import datetime
+from itertools import product
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
 import tensorflow as tf
+
 try:
     import keras_tuner as kt
 except ImportError:
-    kt = None  # keras_tuner is optional — not used by SimpleGuaranteedTuner / FineTuneTuner
+    kt = None  # keras_tuner is optional
+
+# Project imports
 import parameters as params
-from models import create_model, compile_model
-from utils.losses import focal_loss, sparse_focal_loss
-import os
-from datetime import datetime
-import random
-import numpy as np
-from itertools import product
-import json
-import pandas as pd
+from models import compile_model, create_model
+from utils import get_data_splits, preprocess_for_training
+from utils.losses import (
+    DynamicFocalLoss, DynamicSparseFocalLoss, focal_loss, sparse_focal_loss
+)
+
+# Force UTF-8 on Windows
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
 
 class SimpleGuaranteedTuner:
     """Simple tuner that guarantees unique hyperparameter combinations"""
@@ -490,15 +504,14 @@ class FineTuneTuner(SimpleGuaranteedTuner):
         self.unfreeze_last_n = getattr(params, 'FINETUNE_UNFREEZE_LAST_N', 0)
 
         # Override search space before calling super()
-        import parameters as _p
-        _p.TUNER_OPTIMIZERS   = getattr(_p, 'TUNER_FINETUNE_OPTIMIZERS',
-                                        ['adam', 'rmsprop', 'nadam', 'sgd'])
-        _p.TUNER_LEARNING_RATES = getattr(_p, 'TUNER_FINETUNE_LRS',
-                                          [5e-5, 1e-4, 3e-4, 5e-4])
-        _p.TUNER_BATCH_SIZES  = getattr(_p, 'TUNER_BATCH_SIZES', [32, 64])
+        params.TUNER_OPTIMIZERS = getattr(params, 'TUNER_FINETUNE_OPTIMIZERS',
+                                          ['adam', 'rmsprop', 'nadam', 'sgd'])
+        params.TUNER_LEARNING_RATES = getattr(params, 'TUNER_FINETUNE_LRS',
+                                              [5e-5, 1e-4, 3e-4, 5e-4])
+        params.TUNER_BATCH_SIZES = getattr(params, 'TUNER_BATCH_SIZES', [32, 64])
         # Fine-tune over LR factors; store them as the "gamma" axis (reuse Cartesian product)
-        _p.TUNER_GAMMAS       = getattr(_p, 'TUNER_LR_FACTORS', [0.3, 0.5, 0.7])
-        _p.TUNER_ALPHAS       = [params.FOCAL_ALPHA]  # single value — not tuned here
+        params.TUNER_GAMMAS = getattr(params, 'TUNER_LR_FACTORS', [0.3, 0.5, 0.7])
+        params.TUNER_ALPHAS = [params.FOCAL_ALPHA]  # single value — not tuned here
 
         super().__init__(hypermodel, objective, max_trials, directory, project_name)
         print(f"🔁 FineTuneTuner: loading weights from {model_path}")
@@ -549,7 +562,6 @@ class FineTuneTuner(SimpleGuaranteedTuner):
         # Recompile with the existing loss type
         is_haverland = (params.MODEL_ARCHITECTURE == "original_haverland")
         if params.LOSS_TYPE in ["focal_loss", "IntelligentFocalLossController"]:
-            from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss
             loss_fn = (DynamicFocalLoss(gamma=params.FOCAL_GAMMA, alpha=params.FOCAL_ALPHA)
                        if is_haverland else
                        DynamicSparseFocalLoss(gamma=params.FOCAL_GAMMA, alpha=params.FOCAL_ALPHA))
@@ -621,7 +633,7 @@ class FineTuneTuner(SimpleGuaranteedTuner):
 
             except Exception as e:
                 print(f"   ❌ Trial failed: {e}")
-                import traceback; traceback.print_exc()
+                traceback.print_exc()
                 self.trials.append({
                     'trial_id': i + 1, 'optimizer': optimizer,
                     'learning_rate': lr, 'batch_size': bs,
@@ -754,8 +766,6 @@ def run_finetune_tuning(x_train, y_train, x_val, y_val,
 # ==============================================================================
 
 if __name__ == '__main__':
-    import argparse
-    import os
     os.environ.setdefault('DIGIT_NB_CLASSES', str(params.NB_CLASSES))
     os.environ.setdefault('DIGIT_INPUT_CHANNELS', str(params.INPUT_CHANNELS))
 
@@ -782,8 +792,6 @@ if __name__ == '__main__':
                         help='Verbose output during tuning')
     args = parser.parse_args()
 
-    # Load data (common to both modes) — mirrors train.py's loading pattern
-    from utils import get_data_splits, preprocess_for_training
     print("📦 Loading dataset...")
     try:
         (x_train_raw, y_train_raw), (x_val_raw, y_val_raw), _ = get_data_splits()
@@ -791,9 +799,8 @@ if __name__ == '__main__':
         x_val   = preprocess_for_training(x_val_raw)
         # For haverland (one-hot labels); all other architectures use sparse integer labels
         if params.MODEL_ARCHITECTURE == "original_haverland":
-            import tensorflow as _tf
-            y_train = _tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
-            y_val   = _tf.keras.utils.to_categorical(y_val_raw,   params.NB_CLASSES)
+            y_train = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
+            y_val = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES)
         else:
             y_train = y_train_raw.copy()
             y_val   = y_val_raw.copy()

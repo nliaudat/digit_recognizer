@@ -6,11 +6,11 @@ Comprehensive hyperparameter configuration for neural network training
 import os
 import sys
 
+import tensorflow as tf
+
 # Force UTF-8 output on Windows to support emojis
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
-
-import tensorflow as tf
 
 # ==============================================================================
 # MODEL SELECTION
@@ -215,39 +215,107 @@ update_derived_parameters()
 # QUANTIZATION MODES (9 possible combinations):
 
 # 1. QUANTIZE_MODEL=False, USE_QAT=False, ESP_DL_QUANTIZE=False
-   # Float32 training & inference
+   # Float32 training & inference (Reference baseline)
 
 # 2. QUANTIZE_MODEL=False, USE_QAT=False, ESP_DL_QUANTIZE=True  
-   # INVALID (ESP_DL requires quantization)
+   # INVALID (ESP-DL requires quantization enabled)
 
 # 3. QUANTIZE_MODEL=False, USE_QAT=True, ESP_DL_QUANTIZE=False
-   # QAT training, float32 inference
+   # QAT training, float32 inference (Fake-quantization only)
 
 # 4. QUANTIZE_MODEL=False, USE_QAT=True, ESP_DL_QUANTIZE=True
-   # INVALID (ESP_DL requires quantization)
+   # INVALID (ESP-DL requires quantization enabled)
 
 # 5. QUANTIZE_MODEL=True, USE_QAT=False, ESP_DL_QUANTIZE=False
-   # Standard training, UINT8 post-quantization
+   # Standard training -> TFLite UINT8 Post-Training Quantization (PTQ)
 
 # 6. QUANTIZE_MODEL=True, USE_QAT=False, ESP_DL_QUANTIZE=True
-   # Standard training, INT8 post-quantization (ESP-DL)
+   # Standard training -> TFLite INT8 Post-Training Quantization (ESP-DL compatible)
 
 # 7. QUANTIZE_MODEL=True, USE_QAT=True, ESP_DL_QUANTIZE=False  
-   # QAT training, UINT8 quantization
+   # Quantization Aware Training (QAT) -> UINT8 Quantized Model
 
 # 8. QUANTIZE_MODEL=True, USE_QAT=True, ESP_DL_QUANTIZE=True
-   # QAT training, INT8 quantization (ESP-DL)
+   # Quantization Aware Training (QAT) -> INT8 Quantized Model (ESP-DL standard)
+
+# 9. USE_TQT_PIPELINE=True (RECOMMENDED)
+   # SOTA Trainable Quantization Thresholds (TQT) Pipeline via esp-ppq.
+   # Fine-tunes scales on calibration data. Best balance of speed/accuracy.
+   # Produces both .espdl (ESP32) and .tflite (if USE_TQT_FOR_TFLITE=True).
 
 # TFLite Conversion Parameters
-QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
+QUANTIZE_MODEL = False # Enable post-training quantization for the TFLite model
 # ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
 ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
                          
 # Quantization Aware Training
-USE_QAT = True  # Enable Quantization Aware Training
-QAT_QUANTIZE_ALL = True  # Quantize all layers
+USE_QAT = False  # Enable Quantization Aware Training
+QAT_QUANTIZE_ALL = False  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
+
+# TQT (ESP-DL) Trainable Quantization Thresholds Pipeline
+USE_TQT_PIPELINE = True       # Enable high-precision float-to-TQT export pipeline (RECOMMENDED)
+USE_TQT_FOR_TFLITE = True      # Generate TFLite metadata from TQT scales (higher accuracy than standard PTQ)
+TQT_NUM_BITS = 8               # Quantization bit width (8-bit fixed point for ESP32/S3/P4)
+TQT_TARGET = 'esp32'           # Default target for single-model export ('esp32', 'esp32s3', 'esp32p4')
+TQT_EXPORT_ALL_TARGETS = True  # Generate artifacts for ALL targets in every run (Automatic batch export)
+TQT_ALL_TARGETS = ['esp32', 'esp32s3', 'esp32p4'] # Active targets for the batch export pipeline
+
+# --- TQT Device Detection ---
+def _detect_tqt_device():
+    # Use CPU by default for TQT stability. 
+    # esp-ppq often segfaults on CUDA (exit code -11) especially in mixed environments.
+    return "cpu"
+
+TQT_DEVICE = _detect_tqt_device() # Forced to 'cpu' to prevent esp-ppq GPU segmentation faults
+
+_TQT_DEFAULTS = {
+    "esp32": {
+        "TQT_STEPS":               200,      # Reduced to avoid overfitting calib set
+        "TQT_LR":                  1e-6,     # Safer for scale-only
+        "TQT_BLOCK_SIZE":          2,
+        "TQT_INT_LAMBDA":          0.10,     # Less aggressive integer penalty
+        "TQT_IS_SCALE_TRAINABLE":  True,
+        "TQT_IS_WEIGHT_TRAINABLE": False,    # DISABLED: Scale-only is safer
+        "TQT_COLLECTING_DEVICE":   TQT_DEVICE,
+        "TQT_CALIB_STEPS":         300,      # Balance between accuracy and speed
+        "TQT_CALIB_BATCH_SIZE":    1,
+    },
+    "esp32s3": {
+        "TQT_STEPS":               200,
+        "TQT_LR":                  1e-6,
+        "TQT_BLOCK_SIZE":          2,        # Reduced risk for small models
+        "TQT_INT_LAMBDA":          0.05,     # Very low penalty
+        "TQT_IS_SCALE_TRAINABLE":  True,
+        "TQT_IS_WEIGHT_TRAINABLE": False,
+        "TQT_COLLECTING_DEVICE":   TQT_DEVICE,
+        "TQT_CALIB_STEPS":         300,
+        "TQT_CALIB_BATCH_SIZE":    1,
+    },
+    "esp32p4": {
+        "TQT_STEPS":               200,
+        "TQT_LR":                  1e-6,
+        "TQT_BLOCK_SIZE":          2,
+        "TQT_INT_LAMBDA":          0.0,      # No penalty initially
+        "TQT_IS_SCALE_TRAINABLE":  True,
+        "TQT_IS_WEIGHT_TRAINABLE": False,
+        "TQT_COLLECTING_DEVICE":   TQT_DEVICE,
+        "TQT_CALIB_STEPS":         300,
+        "TQT_CALIB_BATCH_SIZE":    1,
+    },
+}
+
+_tqt_cfg = _TQT_DEFAULTS.get(TQT_TARGET, _TQT_DEFAULTS["esp32"])
+TQT_STEPS               = _tqt_cfg["TQT_STEPS"]
+TQT_LR                  = _tqt_cfg["TQT_LR"]
+TQT_BLOCK_SIZE          = _tqt_cfg["TQT_BLOCK_SIZE"]
+TQT_INT_LAMBDA          = _tqt_cfg["TQT_INT_LAMBDA"]
+TQT_IS_SCALE_TRAINABLE  = _tqt_cfg["TQT_IS_SCALE_TRAINABLE"]
+TQT_IS_WEIGHT_TRAINABLE = _tqt_cfg["TQT_IS_WEIGHT_TRAINABLE"]
+TQT_COLLECTING_DEVICE   = _tqt_cfg["TQT_COLLECTING_DEVICE"]
+TQT_CALIB_STEPS         = _tqt_cfg["TQT_CALIB_STEPS"]
+TQT_CALIB_BATCH_SIZE    = _tqt_cfg["TQT_CALIB_BATCH_SIZE"]
 
 # Automatically disable quantization flags for PC-only validator models
 # PC_ONLY_MODELS = {"high_accuracy_validator", "super_high_accuracy_validator"}
@@ -263,7 +331,6 @@ DATASET_CACHE_DIR = os.environ.get("DATASET_CACHE_DIR", ".dataset_cache")
 USE_TF_DATA_PIPELINE = False
 
 try:
-    import tensorflow as tf
     TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
     TF_DATA_PREFETCH_SIZE = tf.data.AUTOTUNE
 except (ImportError, NameError, AttributeError):
@@ -282,6 +349,8 @@ SHUFFLE_SEED = 42
 
 # Post training analyse
 # ANALYSE_SAMPLES = 25000
+
+
 
 # ==============================================================================
 # MODEL-SPECIFIC PARAMETERS
@@ -832,7 +901,8 @@ def validate_quantization_parameters():
     original_params = {
         'QUANTIZE_MODEL': QUANTIZE_MODEL,
         'USE_QAT': USE_QAT, 
-        'ESP_DL_QUANTIZE': ESP_DL_QUANTIZE
+        'ESP_DL_QUANTIZE': ESP_DL_QUANTIZE,
+        'USE_TQT_PIPELINE': USE_TQT_PIPELINE
     }
     
     corrected_params = original_params.copy()
@@ -866,8 +936,10 @@ def validate_quantization_parameters():
         messages.append("💡 Using QAT + ESP-DL quantization (INT8)")
     
     # Determine the final mode
-    if not corrected_params['QUANTIZE_MODEL']:
+    if not corrected_params['QUANTIZE_MODEL'] and not corrected_params['USE_TQT_PIPELINE']:
         mode = "Float32 training & inference"
+    elif corrected_params['USE_TQT_PIPELINE']:
+        mode = "Float training with TQT (ESP-DL) export pipeline"
     else:
         if corrected_params['USE_QAT']:
             if corrected_params['ESP_DL_QUANTIZE']:
@@ -930,6 +1002,7 @@ def get_hyperparameter_summary():
             'qat': USE_QAT,
             'post_training': QUANTIZE_MODEL,
             'esp_dl': ESP_DL_QUANTIZE,
+            'tqt': USE_TQT_PIPELINE,
         }
     }
     
@@ -1011,7 +1084,3 @@ try:
     validate_quantization_parameters()
 except Exception as e:
     print(f"❌ Parameter validation failed: {e}")
-
-# Print summary when module is imported
-if __name__ != "__main__":
-    print_hyperparameter_summary()

@@ -65,23 +65,19 @@ Available existing models for retraining
 v3, v4, v6, v7, v15, v16, v17, v18, v19
 """
 
-import os
-# Silence TensorFlow C++ and XLA PTX diagnostic warnings
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-import sys
 import argparse
 import logging
+import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
-# ── ensure project root is on sys.path ────────────────────────────────────
+# Add project root to path before other imports
 _ROOT = str(Path(__file__).resolve().parent)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 # Set class/channel env-vars BEFORE importing parameters.py
-# (will be overridden again inside load_distillation_data, but avoids the
-#  interactive prompt that parameters.py triggers when both env-vars are absent)
 if "DIGIT_NB_CLASSES" not in os.environ:
     os.environ["DIGIT_NB_CLASSES"] = "10"
 if "DIGIT_INPUT_CHANNELS" not in os.environ:
@@ -89,12 +85,15 @@ if "DIGIT_INPUT_CHANNELS" not in os.environ:
 
 import parameters as params
 from utils.train_distill_helper import (
-    TEACHERS,
-    STUDENTS,
-    run_distillation_pipeline,
-    train_teacher,
-    load_distillation_data,
+    STUDENTS, TEACHERS, load_distillation_data, run_distillation_pipeline,
+    train_teacher
 )
+
+# Optional project imports
+try:
+    from utils.retrain_with_teacher import main as retrain_main
+except ImportError:
+    retrain_main = None
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
@@ -256,7 +255,7 @@ def parse_args() -> argparse.Namespace:
         help="Use ProgressiveDistiller (dynamic temperature & alpha)"
     )
 
-    # ── Shared / infrastructure ────────────────────────────────────────────
+    # ── shared / infrastructure ────────────────────────────────────────────
     parser.add_argument(
         "--batch",
         type=int,
@@ -284,11 +283,29 @@ def parse_args() -> argparse.Namespace:
         help="Skip TFLite quantization export"
     )
     parser.add_argument(
+        "--tqt",
+        action="store_true",
+        default=None,
+        help="Enable TQT/ESP-DL quantization pipeline for the student"
+    )
+    parser.add_argument(
+        "--no-tqt",
+        action="store_true",
+        help="Disable TQT/ESP-DL quantization pipeline for the student"
+    )
+    parser.add_argument(
         "--target-hardware",
         type=str,
         default="esp32",
-        choices=["esp32", "raspberry_pi", "generic"],
-        help="Target hardware for TFLite quantization (default: esp32)"
+        choices=["esp32", "esp32s3", "esp32c3", "esp32p4"],
+        help="Target ESP32 SoC for quantization parameters"
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=params.TQT_COLLECTING_DEVICE,
+        choices=["cpu", "cuda"],
+        help=f"Device for TQT calibration/training (default: {params.TQT_COLLECTING_DEVICE})"
     )
 
     # ── Retrain existing model ────────────────────────────────────────────
@@ -335,7 +352,9 @@ def main() -> None:
         if args.phase != "all":
             logger.info("--retrain-existing overrides --phase. Running retraining pipeline.")
         
-        from utils.retrain_with_teacher import main as retrain_main
+        if retrain_main is None:
+            logger.error("Could not import retrain_with_teacher. Ensure utility is available.")
+            sys.exit(1)
         
         # Redirect arguments to retrain_with_teacher
         redirect_args = [
@@ -382,6 +401,15 @@ def main() -> None:
     num_classes   = args.classes
     export_quant  = not args.no_quantize
 
+    # Quantization overrides
+    if args.tqt:
+        params.USE_TQT_PIPELINE = True
+    
+    if args.device:
+        params.TQT_COLLECTING_DEVICE = args.device
+    if args.no_tqt:
+        params.USE_TQT_PIPELINE = False
+
     logger.info("=" * 60)
     logger.info("🚀  Distillation Configuration")
     logger.info("=" * 60)
@@ -395,6 +423,7 @@ def main() -> None:
     logger.info(f"  Alpha:           {args.alpha}")
     logger.info(f"  Mode:            {args.mode}")
     logger.info(f"  Progressive:     {args.progressive}")
+    logger.info(f"  TQT Pipeline:    {params.USE_TQT_PIPELINE}")
     logger.info("=" * 60)
 
     if args.phase == "teacher":
@@ -408,10 +437,15 @@ def main() -> None:
             # ── Output directory logic (similar to train.py) ───────────────────
             color_label = color_mode.upper()
             timestamp = datetime.now().strftime("%m%d_%H%M")
-            run_folder = f"teacher_{t_type}_{num_classes}cls_{color_label}_{timestamp}"
             
-            # Base directory consistent with train.py
-            output_dir = os.path.join(params.OUTPUT_DIR, run_folder)
+            # Determine logits vs softmax suffix
+            activation_suffix = "LOGITS" if getattr(params, 'USE_LOGITS', False) else "SOFTMAX"
+            
+            # Pattern: teacher_[model]_[classes]_[color]_FLOAT_[activation]_[timestamp]
+            run_folder = f"teacher_{t_type}_{num_classes}cls_{color_label}_FLOAT_{activation_suffix}_{timestamp}"
+            
+            # Use category-based nesting consistent with project standard
+            output_dir = os.path.join("exported_models", f"{num_classes}cls_{color_label}", run_folder)
             # Main model assets go into 'model' subdirectory
             model_dir = os.path.join(output_dir, "model")
             os.makedirs(model_dir, exist_ok=True)
@@ -459,6 +493,7 @@ def main() -> None:
             checkpoint_dir=args.checkpoint_dir,
             output_dir=args.output_dir,
             export_quantized=export_quant,
+            use_tqt=params.USE_TQT_PIPELINE,
             target_hardware=args.target_hardware,
         )
 
@@ -485,6 +520,7 @@ def main() -> None:
             checkpoint_dir=args.checkpoint_dir,
             output_dir=args.output_dir,
             export_quantized=export_quant,
+            use_tqt=params.USE_TQT_PIPELINE,
             target_hardware=args.target_hardware,
         )
 

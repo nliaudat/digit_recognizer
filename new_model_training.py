@@ -8,9 +8,10 @@ import platform
 os.environ.setdefault("DIGIT_NB_CLASSES", "10")
 os.environ.setdefault("DIGIT_INPUT_CHANNELS", "3")
 
-# Ensure stderr can handle emojis/unicode on Windows
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
+
+import parameters as params
 
 def main():
     parser = argparse.ArgumentParser(description="Launch training for a specific model across all 4 combinations")
@@ -18,9 +19,6 @@ def main():
     args = parser.parse_args()
     
     model_name = args.model_name
-    
-    # Import parameters ONLY after environment defaults are set
-    import parameters as params
     
     if model_name not in params.AVAILABLE_MODELS:
         print(f"Error: '{model_name}' is not a valid model architecture.")

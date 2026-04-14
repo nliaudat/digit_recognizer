@@ -10,17 +10,13 @@ Usage:
 
 import argparse
 import os
+import re
+import subprocess
 import sys
-import tensorflow as tf
 from pathlib import Path
 
-# Project imports
-import parameters as params
-from utils.multi_source_loader import MultiSourceDataLoader, shuffle_dataset
-from utils.preprocess import preprocess_for_training
-from utils.augmentation import setup_augmentation_for_training
-from utils.train_callbacks import create_callbacks
-from utils.train_qat_helper import validate_qat_data_flow, create_qat_representative_dataset
+import numpy as np
+import tensorflow as tf
 
 try:
     import tensorflow_model_optimization as tfmot
@@ -29,6 +25,24 @@ except ImportError:
     QAT_AVAILABLE = False
     tfmot = None
 
+# ── Project imports ──
+import parameters as params
+from utils.augmentation import setup_augmentation_for_training
+from utils.export_onnx import export_keras_to_onnx
+from utils.losses import (
+    DynamicFocalLoss, DynamicSparseFocalLoss, focal_loss, sparse_focal_loss
+)
+from utils.multi_source_loader import (
+    MultiSourceDataLoader, load_combined_dataset, shuffle_dataset
+)
+from utils.preprocess import preprocess_for_training
+from utils.train_callbacks import create_callbacks
+from utils.train_modelmanager import TFLiteModelManager
+from utils.train_qat_helper import (
+    create_qat_representative_dataset, validate_qat_data_flow
+)
+from utils.train_trainingmonitor import TrainingMonitor
+
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune an existing model on bad predictions.")
     parser.add_argument("--model_path", type=str, required=True, help="Path to the trained .keras model to fine-tune")
@@ -36,11 +50,20 @@ def main():
     parser.add_argument("--epochs", type=int, default=30, help="Number of fine-tuning epochs")
     parser.add_argument("--lr", type=float, default=0.0001, help="Very low learning rate to prevent catastrophic forgetting")
     parser.add_argument("--weight", type=float, default=20.0, help="Weight multiplier for the bad images dataset")
+    parser.add_argument("--tqt", action="store_true", help="Enable TQT/ESP-DL quantization pipeline after fine-tuning")
+    parser.add_argument("--device", type=str, default=params.TQT_COLLECTING_DEVICE, choices=["cpu", "cuda"], 
+                        help=f"Device for TQT (default: {params.TQT_COLLECTING_DEVICE})")
     args = parser.parse_args()
 
     print("\n" + "="*50)
     print("🚀 STARTING FINE-TUNING PROCESS")
     print("="*50)
+    
+    if args.tqt:
+        params.USE_TQT_PIPELINE = True
+    
+    if args.device:
+        params.TQT_COLLECTING_DEVICE = args.device
     
     if not os.path.exists(args.model_path):
         print(f"❌ Error: Model not found at {args.model_path}")
@@ -49,16 +72,22 @@ def main():
     print(f"📦 Loading pre-trained model: {args.model_path}")
     
     # Needs QAT scope if model was trained with QAT
-    custom_objects = {}
+    custom_objects = {
+        "DynamicSparseFocalLoss": DynamicSparseFocalLoss,
+        "DynamicFocalLoss": DynamicFocalLoss,
+        "sparse_focal_loss": sparse_focal_loss,
+        "focal_loss": focal_loss
+    }
+    
     if QAT_AVAILABLE:
-        custom_objects = {"quantize_scope": tfmot.quantization.keras.quantize_scope}
+        custom_objects["quantize_scope"] = tfmot.quantization.keras.quantize_scope
     
     try:
         if QAT_AVAILABLE:
             with tfmot.quantization.keras.quantize_scope():
-                model = tf.keras.models.load_model(args.model_path)
+                model = tf.keras.models.load_model(args.model_path, custom_objects=custom_objects, safe_mode=False)
         else:
-            model = tf.keras.models.load_model(args.model_path)
+            model = tf.keras.models.load_model(args.model_path, custom_objects=custom_objects, safe_mode=False)
         print("✅ Model loaded successfully!")
     except Exception as e:
         print(f"❌ Failed to load model: {e}")
@@ -86,9 +115,8 @@ def main():
 
     # 2. Load the weighted dataset
     print("\n📊 Loading datasets (Original Data + Heavy Weighted Bad Predictions)...")
-    loader = MultiSourceDataLoader()
-    x_data, y_data = loader.load_all_sources()
-    x_data, y_data = shuffle_dataset(x_data, y_data)
+    x_data, y_data = load_combined_dataset()
+    # x_data, y_data already shuffled by load_combined_dataset
     
     # Split directly 80/20 train/val for fine-tuning
     split_idx = int(len(x_data) * 0.8)
@@ -111,20 +139,76 @@ def main():
     # 4. Compile with fine-tuning learning rate
     print(f"\n⚙️ Compiling model with Low LR: {args.lr}")
     optimizer = tf.keras.optimizers.RMSprop(learning_rate=args.lr) # Standard for this project
-    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=params.USE_LOGITS)
+    
+    # Use Dynamic loss if IntelligentFocalLossController is active to prevent mid-train recompile crashes
+    if params.LOSS_TYPE in ["IntelligentFocalLossController", "focal_loss"]:
+        loss_fn = DynamicSparseFocalLoss(from_logits=params.USE_LOGITS)
+        print(f"🎯 Using DynamicSparseFocalLoss (Alpha: {params.FOCAL_ALPHA}, Gamma: {params.FOCAL_GAMMA})")
+    else:
+        loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=params.USE_LOGITS)
+        print(f"🎯 Using Standard SparseCategoricalCrossentropy")
     
     model.compile(optimizer=optimizer, loss=loss_fn, metrics=['accuracy'])
     
     # 5. Fine-Tune
     print("\n🔥 Starting Fine-Tuning Training loop...")
     
-    # Set up export directory
-    model_name = Path(args.model_path).stem
-    timestamp = tf.timestamp().numpy()
-    export_dir = f"exported_models/{model_name}_finetuned_{int(timestamp)}"
+    # Set up export directory following project standard
+    color_suffix = "GRAY" if params.INPUT_CHANNELS == 1 else "RGB"
+    color_mode = "gray" if params.INPUT_CHANNELS == 1 else "rgb"
+    
+    # Determine quantization suffix for the folder name
+    if getattr(params, 'USE_TQT_PIPELINE', False):
+        quant_suffix = "TQT"
+    elif getattr(params, 'USE_QAT', False):
+        quant_suffix = "QAT"
+    elif getattr(params, 'ESP_DL_QUANTIZE', False):
+        quant_suffix = "INT8"
+    else:
+        quant_suffix = "UINT8"
+    
+    # Determine logits vs softmax suffix
+    activation_suffix = "LOGITS" if getattr(params, 'USE_LOGITS', False) else "SOFTMAX"
+
+    # Construct descriptive folder name: retrained_[model]_[classes]_[color]_[quantization]_[activation]
+    model_name_stem = Path(args.model_path).stem
+    
+    # If standard 'best_model' is used, try to extract a better name from the parent folder
+    # Example: exported_models/10cls_RGB/digit_recognizer_v3_10cls_RGB.../best_model.keras -> v3
+    if model_name_stem == "best_model":
+        parent_name = Path(args.model_path).parent.name
+        # Look for the classes suffix which standardizes our exports
+        parts = re.split(r'_\d+cls', parent_name)
+        if parts:
+            extracted_name = parts[0]
+            # Strip common prefixes for a clean, short name (e.g. 'v3')
+            extracted_name = extracted_name.replace("train_", "").replace("digit_recognizer_", "")
+            model_name_stem = extracted_name
+    
+    # Update params.MODEL_ARCHITECTURE so subsequent calls (TQT, MLflow) use the clean name
+    params.MODEL_ARCHITECTURE = model_name_stem
+    
+    export_folder = f"retrained_{model_name_stem}_{params.NB_CLASSES}cls_{color_suffix}_{quant_suffix}_{activation_suffix}"
+    export_dir = os.path.join("exported_models", f"{params.NB_CLASSES}cls_{color_suffix}", export_folder)
+    
+    print(f"📂 Exporting results to: {export_dir}")
     os.makedirs(export_dir, exist_ok=True)
     
-    callbacks = create_callbacks(export_dir, args.epochs, batch_size, False)
+    # ── Project Infrastructure for Callbacks ──
+    tflite_manager = TFLiteModelManager(export_dir)
+    monitor = TrainingMonitor(export_dir)
+    rep_x_processed = preprocess_for_training(x_train_raw[:100])
+    
+    callbacks = create_callbacks(
+        output_dir=export_dir,
+        tflite_manager=tflite_manager,
+        representative_data=rep_x_processed,
+        total_epochs=args.epochs,
+        monitor=monitor,
+        debug=True,
+        validation_data=val_dataset,
+        x_train_raw=x_train_raw[:100]
+    )
     
     history = model.fit(
         train_dataset,
@@ -135,8 +219,8 @@ def main():
     
     print("\n✅ Fine-tuning complete!")
     
-    # 6. Export Keras Model and TFLite
-    final_keras_path = os.path.join(export_dir, f"{model_name}_finetuned.keras")
+    final_keras_name = f"retrained_{params.MODEL_ARCHITECTURE}.keras"
+    final_keras_path = os.path.join(export_dir, final_keras_name)
     model.save(final_keras_path)
     print(f"📦 Saved fine-tuned Keras model to: {final_keras_path}")
     
@@ -148,7 +232,8 @@ def main():
     rep_x = x_train_raw[:500]
     def representative_dataset_gen():
         for i in range(len(rep_x)):
-            img = preprocess_for_training(tf.expand_dims(rep_x[i], 0))
+            # Use numpy expansion to avoid triggering OpenCV Tensor errors
+            img = preprocess_for_training(np.expand_dims(rep_x[i], 0))
             yield [img]
             
     converter.representative_dataset = representative_dataset_gen
@@ -164,13 +249,63 @@ def main():
     
     try:
         tflite_model = converter.convert()
-        tflite_path = os.path.join(export_dir, f"{model_name}_finetuned.tflite")
+        tflite_path = os.path.join(export_dir, f"retrained_{params.MODEL_ARCHITECTURE}_ptq.tflite")
         with open(tflite_path, "wb") as f:
             f.write(tflite_model)
-        print(f"✅ Quantized TFLite model saved to: {tflite_path}")
+        print(f"✅ PTQ TFLite model saved to: {tflite_path}")
     except Exception as e:
         print(f"❌ TFLite Conversion failed: {e}")
         
+    # ── TQT / ESP-DL Quantitative Pipeline ──
+    if args.tqt:
+        # Loop through all targets if requested
+        targets = getattr(params, 'TQT_ALL_TARGETS', [params.TQT_TARGET]) if getattr(params, 'TQT_EXPORT_ALL_TARGETS', False) else [params.TQT_TARGET]
+        
+        print(f"\n🚀 STARTING TQT PIPELINE FOR TARGETS: {', '.join(targets)}")
+        
+        student_variant = params.MODEL_ARCHITECTURE
+        onnx_path = os.path.join(export_dir, f"retrained_{student_variant}.onnx")
+        
+        # CRITICAL: Simplify MUST be True to avoid -11 crashes in esp-ppq
+        if export_keras_to_onnx(model, onnx_path, simplify=True):
+            for target_soc in targets:
+                print(f"\n⚙️ Quantizing for target: {target_soc}...")
+                cmd = [
+                    sys.executable, "quantize_espdl.py",
+                    "--model", f"retrained_{student_variant}",
+                    "--onnx", os.path.abspath(onnx_path),
+                    "--output", os.path.abspath(export_dir),
+                    "--bits", str(params.TQT_NUM_BITS),
+                    "--target", target_soc,
+                    "--classes", str(params.NB_CLASSES),
+                    "--color", color_mode,
+                    "--steps", str(params.TQT_STEPS),
+                    "--lr", str(params.TQT_LR),
+                    "--device", params.TQT_COLLECTING_DEVICE,
+                    "--calib_steps", str(params.TQT_CALIB_STEPS),
+                    "--skip_onnx_export",
+                    "--tflite" 
+                ]
+
+                if getattr(params, 'TQT_IS_WEIGHT_TRAINABLE', False):
+                    cmd.append("--tune_weights")
+                
+                print(f"   Executing TQT command: {' '.join(cmd)}")
+                try:
+                    # CRITICAL FIX for exit code -11: Hide GPU from child if running on CPU
+                    env = os.environ.copy()
+                    if params.TQT_COLLECTING_DEVICE == "cpu":
+                        env["CUDA_VISIBLE_DEVICES"] = ""
+
+                    subprocess.run(cmd, check=True, env=env)
+                    print(f"✅ TQT Pipeline finished successfully for {target_soc}")
+                except subprocess.CalledProcessError as e:
+                    print(f"❌ TQT Pipeline failed for {target_soc} with exit code {e.returncode}")
+                except Exception as e:
+                    print(f"❌ TQT Pipeline error for {target_soc}: {e}")
+        else:
+            print("❌ TQT Pipeline aborted: Finetuned ONNX export failed")
+
     print("\n🎉 FINE-TUNING WORKFLOW CONCLUDED SUCCESSFULLY!")
     print(f"Results located in: {export_dir}")
 

@@ -8,12 +8,27 @@ Comprehensive quantization analysis tools for evaluating:
 """
 
 import os
+from typing import Any, Dict, Optional, Tuple
+
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-from typing import Dict, Tuple, Optional
-import matplotlib.pyplot as plt
 
 import parameters as params
+from utils.preprocess import preprocess_for_inference
+
+# Optional/complex dependencies
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
+
+try:
+    import torch
+    from esp_ppq.api import PPQTorchExecutor
+except ImportError:
+    torch = None
+    PPQTorchExecutor = None
 
 class QuantizationAnalyzer:
     """Comprehensive analyzer for quantization impact assessment"""
@@ -52,7 +67,11 @@ class QuantizationAnalyzer:
         perf_analysis = self._analyze_performance(keras_model, tflite_model_path, x_test)
         results.update(perf_analysis)
         
-        # 6. QAT effectiveness (if applicable)
+        # 6. Structural Validation (Verifying scales/zero-points)
+        structural_results = validate_tflite_structural_quantization(tflite_model_path, verbose=self.debug)
+        results['structural_quantization'] = structural_results
+        
+        # 7. QAT effectiveness (if applicable)
         if params.USE_QAT:
             qat_effectiveness = self._analyze_qat_effectiveness(accuracy_drop)
             results.update(qat_effectiveness)
@@ -232,6 +251,13 @@ class QuantizationAnalyzer:
         print(f"   TFLite Inference: {results.get('tflite_inference_ms', 0):.2f} ms")
         print(f"   Speedup:         {results.get('inference_speedup', 0):.1f}x")
         
+        structural = results.get('structural_quantization', {})
+        if structural:
+            print(f"\n🧩 Structural Validation:")
+            print(f"   Level:           {structural.get('quantization_level', 'Unknown')}")
+            print(f"   Tensors Scanned: {structural.get('tensors_scanned', 0)}")
+            print(f"   Validated:       {'✅ YES' if structural.get('is_valid', False) else '❌ NO'}")
+
         if params.USE_QAT:
             print(f"\n🎯 QAT Effectiveness:")
             print(f"   Rating:          {results.get('qat_effectiveness', 'N/A')}")
@@ -258,7 +284,7 @@ class QuantizationAnalyzer:
         
         report_path = os.path.join(output_dir, "quantization_analysis_report.txt")
         
-        with open(report_path, 'w') as f:
+        with open(report_path, 'w', encoding='utf-8') as f:
             f.write("Quantization Analysis Report\n")
             f.write("=" * 50 + "\n\n")
             
@@ -278,6 +304,12 @@ class QuantizationAnalyzer:
             f.write(f"  TFLite Model Size: {self.analysis_results.get('tflite_size_kb', 0):.1f} KB\n")
             f.write(f"  Size Reduction: {self.analysis_results.get('size_reduction_percent', 0):.1f}%\n\n")
             
+            f.write("STRUCTURAL VALIDATION:\n")
+            structural = self.analysis_results.get('structural_quantization', {})
+            f.write(f"  Quantization Level: {structural.get('quantization_level', 'N/A')}\n")
+            f.write(f"  Is Valid Quantized Model: {structural.get('is_valid', False)}\n")
+            f.write(f"  Tensors with Scales: {structural.get('tensors_with_scales', 0)}\n\n")
+
             f.write("PERFORMANCE ANALYSIS:\n")
             f.write(f"  Keras Inference Time: {self.analysis_results.get('keras_inference_ms', 0):.2f} ms\n")
             f.write(f"  TFLite Inference Time: {self.analysis_results.get('tflite_inference_ms', 0):.2f} ms\n")
@@ -299,10 +331,149 @@ class QuantizationAnalyzer:
         
         print(f" Quantization analysis report saved: {report_path}")
 
+
+# ---------------------------------------------------------------------------
+# TFLite Structural Validation: Verify Scales and Zero-Points
+# ---------------------------------------------------------------------------
+
+def validate_tflite_structural_quantization(tflite_path: str, verbose: bool = False) -> Dict:
+    """
+    Scans internal TFLite tensors to verify if quantization parameters (scales/zero points) 
+    are present and meaningful.
+    """
+    results = {
+        'is_valid': False,
+        'tensors_scanned': 0,
+        'tensors_with_scales': 0,
+        'quantization_level': 'Float'
+    }
+    
+    try:
+        if not os.path.exists(tflite_path):
+            return results
+
+        interpreter = tf.lite.Interpreter(model_path=tflite_path)
+        interpreter.allocate_tensors()
+        
+        details = interpreter.get_tensor_details()
+        results['tensors_scanned'] = len(details)
+        
+        scaled_tensors = 0
+        int8_tensors = 0
+        
+        if verbose:
+            print(f"\n--- TFLite Structural Scan: {os.path.basename(tflite_path)} ---")
+            
+        for detail in details:
+            q_params = detail.get('quantization_parameters')
+            if q_params and len(q_params.get('scales', [])) > 0:
+                scales = q_params['scales']
+                # Check for non-trivial scales
+                if any(s != 0.0 and s != 1.0 for s in scales):
+                    scaled_tensors += 1
+                    if detail['dtype'] in [np.int8, np.uint8, np.int32]:
+                        int8_tensors += 1
+                    
+                    if verbose and scaled_tensors < 10: # Print first few
+                        print(f"  Valid Tensor found: {detail['name']}")
+                        print(f"    - Scale[0]: {scales[0]:.6f}")
+                        print(f"    - Dtype: {detail['dtype']}")
+
+        results['tensors_with_scales'] = scaled_tensors
+        
+        if scaled_tensors > 5: # Threshold for a "quantized model"
+            results['is_valid'] = True
+            if int8_tensors > (scaled_tensors * 0.5):
+                results['quantization_level'] = 'INT8/Fully Quantized'
+            else:
+                results['quantization_level'] = 'Hybrid/Partial'
+        
+        return results
+
+    except Exception as e:
+        if verbose: print(f"Structural validation error: {e}")
+        return results
+
+
+# ---------------------------------------------------------------------------
+# TQT-specific comparison: float ONNX vs TQT-quantized graph
+# ---------------------------------------------------------------------------
+
+def compare_float_vs_tqt(
+    onnx_path: str,
+    quant_ppq_graph,
+    x_val,
+    y_val,
+):
+    print("\n" + "=" * 60)
+    print("📊 FLOAT ONNX vs TQT QUANTIZED -- COMPARISON")
+    print("=" * 60)
+
+    float_preds = None
+    float_accuracy = 0.0
+    if ort:
+        try:
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            session = ort.InferenceSession(onnx_path, providers=providers)
+            iname = session.get_inputs()[0].name
+            x_f = preprocess_for_inference(x_val).astype("float32").transpose(0, 3, 1, 2)
+            float_preds = np.array([
+                session.run(None, {iname: x_f[i:i+1]})[0][0] for i in range(len(x_f))
+            ])
+            float_accuracy = float(np.mean(np.argmax(float_preds, axis=1) == y_val))
+            print(f"   Float ONNX accuracy  : {float_accuracy:.4f} ({float_accuracy*100:.2f}%)")
+        except Exception as exc:
+            print(f"⚠️  Float ONNX inference failed: {exc}")
+    else:
+        print("⚠️  onnxruntime not installed -- skipping float evaluation")
+
+    tqt_preds = None
+    tqt_accuracy = 0.0
+    if torch and PPQTorchExecutor:
+        try:
+            x_f = preprocess_for_inference(x_val).astype("float32").transpose(0, 3, 1, 2)
+            x_t = torch.from_numpy(x_f)
+            executor = PPQTorchExecutor(quant_ppq_graph, device="cpu")
+            tqt_out = []
+            for i in range(len(x_t)):
+                with torch.no_grad():
+                    out = executor.forward(x_t[i:i+1])
+                logits = out[0] if isinstance(out, (list, tuple)) else out
+                tqt_out.append(logits.squeeze().cpu().numpy())
+            tqt_preds = np.array(tqt_out)
+            tqt_accuracy = float(np.mean(np.argmax(tqt_preds, axis=1) == y_val))
+            print(f"   TQT quantized accuracy: {tqt_accuracy:.4f} ({tqt_accuracy*100:.2f}%)")
+        except Exception as exc:
+            print(f"⚠️  TQT graph inference failed: {exc}")
+    else:
+        print("⚠️  esp_ppq or torch not installed -- skipping TQT evaluation")
+
+    mean_mse = float("nan")
+    if float_preds is not None and tqt_preds is not None:
+        n = min(len(float_preds), len(tqt_preds))
+        mean_mse = float(np.mean(np.mean((float_preds[:n] - tqt_preds[:n]) ** 2, axis=1)))
+        print(f"   Mean output MSE (float vs TQT): {mean_mse:.6f}")
+
+    delta = tqt_accuracy - float_accuracy
+    sign = "+" if delta >= 0 else ""
+    print(f"   Accuracy delta (TQT - float): {sign}{delta*100:.2f}pp")
+    if delta >= 0:
+        print("✅ TQT improved or matched float accuracy after quantization.")
+    else:
+        print(f"⚠️  TQT dropped {abs(delta)*100:.2f}pp. Try lower TQT_LR.")
+
+    return {
+        "float_accuracy": float_accuracy,
+        "tqt_accuracy": tqt_accuracy,
+        "accuracy_delta": delta,
+        "mean_output_mse": mean_mse,
+    }
+
+
 # Convenience function for easy usage
 def analyze_quantization_impact(keras_model, tflite_model_path: str, 
                               x_test: np.ndarray, y_test: np.ndarray, 
                               debug: bool = False) -> Dict:
     """Convenience function for quick quantization analysis"""
     analyzer = QuantizationAnalyzer(debug=debug)
-    return analyzer.analyze_quantization_impact(keras_model, tflite_model_path, x_test, y_test)
+    return analyzer.analyze_quantization_impact(keras_model, tflite_model_path, x_test, y_test)

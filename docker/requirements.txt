@@ -15,18 +15,35 @@ plotly==6.2.0
 scikit-learn==1.4.2
 scipy==1.13.0
 scikit-image==0.25.2
-opencv-python==4.10.0.84
 pillow==10.4.0
 h5py==3.11.0
 
 # Utilities & dependencies
 absl-py==1.4.0
-protobuf==6.32.1
-flatbuffers==24.3.25
+protobuf==7.34.1
+flatbuffers>=24.3.25
 packaging==23.2
 typing_extensions==4.15.0
 requests==2.31.0
-tqdm==4.66.2
+tqdm>=4.67.1
 joblib==1.3.2
 threadpoolctl==3.5.0
 
+# TQT / ESP-DL quantization pipeline
+# CUDA is available in this Docker image (tensorflow:2.20.0-gpu base)
+# esp-ppq uses torch CUDA for TQT fine-tuning — significant speedup over CPU
+esp-ppq>=1.2.7
+tf2onnx==1.17.0
+onnx==1.17.0
+cmake
+onnxsim-prebuilt==0.4.39.post2
+onnxruntime-gpu>=1.18.0
+# onnx2tf: converts float ONNX → TFLite with standard PTQ (NOT TQT-optimized scales).
+# The .tflite produced alongside .espdl is a good INT8 model but uses calibration-derived
+# scales, not the backprop-learned TQT scales baked into the .espdl. Do not compare
+# .tflite vs .espdl accuracy as a TQT quality benchmark.
+onnx2tf==1.28.8
+onnx_graphsurgeon>=0.3.27
+sng4onnx>=1.0.1
+psutil>=5.9.0
+ai-edge-litert>=0.1.0

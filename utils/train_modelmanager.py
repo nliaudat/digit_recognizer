@@ -1,22 +1,22 @@
-# utils/train_modelmanager.py
 import os
+import shutil
+import sys
+import traceback
+from contextlib import contextmanager
 from datetime import datetime
 
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
 
-from utils.train_qat_helper import _is_qat_model
-
-# --------------------------------------------------------------------------- #
-#  Absolute imports (no leading dots) – these work when train.py is run directly
-# --------------------------------------------------------------------------- #
+# ── Project imports ─────────────────────────────────────────────────────
 import parameters as params
 from utils import (
-    get_data_splits,
-    get_calibration_data,
-    suppress_all_output,
+    get_calibration_data, get_data_splits, suppress_all_output
 )
 from utils.custom_logger import log_print
+from utils.model_distiller_utils import create_tflite_interpreter
+from utils.preprocess import preprocess_for_inference, preprocess_for_training
+from utils.train_qat_helper import _is_qat_model
 
 
 class TFLiteModelManager:
@@ -100,14 +100,11 @@ class TFLiteModelManager:
             # QAT models need representative dataset with EXACTLY the same preprocessing as training
             if representative_data is None:
                 def qat_representative_dataset():
-                    from utils import get_data_splits
-                    from utils.preprocess import preprocess_for_training  # Use training preprocessing!
                     
                     # Get raw training data
                     if self.cached_x_train is not None:
                         x_train_raw = self.cached_x_train
                     else:
-                        from utils import get_data_splits
                         (x_train_raw, _), _, _ = get_data_splits()
                     
                     # Use a subset for calibration - ensure we have enough samples
@@ -236,11 +233,9 @@ class TFLiteModelManager:
                     if self.cached_x_train is not None:
                         x_train_raw = self.cached_x_train
                     else:
-                        from utils import get_data_splits
                         (x_train_raw, _), _, _ = get_data_splits()
                     
                     calibration_data = x_train_raw[:params.QUANTIZE_NUM_SAMPLES]
-                    from utils.preprocess import preprocess_for_inference
                     calibration_processed = preprocess_for_inference(calibration_data)
                     
                     # Ensure proper format for quantization
@@ -409,14 +404,12 @@ class TFLiteModelManager:
 
     def _get_test_data(self):
         """Get test data for strategy testing"""
-        from utils.preprocess import preprocess_for_training, preprocess_for_inference
         
         if self.cached_x_train is not None and self.cached_x_test is not None and self.cached_y_test is not None:
             x_train_raw = self.cached_x_train
             x_test_raw = self.cached_x_test
             y_test_raw = self.cached_y_test
         else:
-            from utils import get_data_splits
             (x_train_raw, _), _, (x_test_raw, y_test_raw) = get_data_splits()
         
         # Use small subsets for quick testing
@@ -604,7 +597,6 @@ class TFLiteModelManager:
                 tflite_model = converter.convert()
             
             # Cleanup
-            import shutil
             shutil.rmtree(temp_dir)
             
             return self._save_tflite_file(tflite_model, filename, quantize)
@@ -615,10 +607,6 @@ class TFLiteModelManager:
 
     def _completely_suppress_output(self):
         """Completely suppress all output during conversion"""
-        import os
-        import sys
-        from contextlib import contextmanager
-        
         @contextmanager
         def suppress():
             with open(os.devnull, 'w') as devnull:
@@ -687,7 +675,6 @@ class TFLiteModelManager:
     def test_tflite_model(self, tflite_path: str) -> bool:
         """Load a TFLite model and (optionally) print a short summary."""
         try:
-            from utils.model_distiller_utils import create_tflite_interpreter
             interpreter = create_tflite_interpreter(tflite_path)
 
             if self.debug:
@@ -772,9 +759,6 @@ class TFLiteModelManager:
                     converter.representative_dataset = representative_data
                 else:
                     def real_representative_dataset():
-                        from utils import get_data_splits
-                        from utils.preprocess import preprocess_for_inference
-                        
                         # Use real data instead of random
                         (x_train_raw, _), _, _ = get_data_splits()
                         # num_samples = min(100, len(x_train_raw), params.QUANTIZE_NUM_SAMPLES)
@@ -809,7 +793,6 @@ class TFLiteModelManager:
         except Exception as e:
             print(f"❌ Direct TFLite conversion failed: {e}")
             if self.debug:
-                import traceback
                 traceback.print_exc()
             raise
 

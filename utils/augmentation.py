@@ -5,7 +5,13 @@ import parameters as params
 from utils.data_pipeline import create_tf_dataset_from_arrays
 
 
-class PolarityInversionAugmentation(tf.keras.layers.Layer):
+try:
+    import keras
+    BaseLayer = keras.Layer
+except (ImportError, AttributeError):
+    BaseLayer = tf.keras.layers.Layer
+
+class PolarityInversionAugmentation(BaseLayer):
     """
     Random per-sample polarity inversion: output = 1 - input (with 50% probability).
     Applies per image in the batch independently, training only — no-op at inference.

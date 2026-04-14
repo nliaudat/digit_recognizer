@@ -1,7 +1,32 @@
-# models/model_factory.py
-import tensorflow as tf
 import importlib
+from pathlib import Path
+
+import tensorflow as tf
+from tensorflow.keras.callbacks import (
+    EarlyStopping, LearningRateScheduler, ModelCheckpoint, ReduceLROnPlateau,
+    TensorBoard
+)
+from tensorflow.keras.optimizers.schedules import (
+    CosineDecayRestarts, ExponentialDecay
+)
+
+# Optional/Third-party Keras-related imports
+try:
+    import tensorflow_addons as tfa
+except ImportError:
+    tfa = None
+
+# Project imports
 import parameters as params
+
+try:
+    from utils.losses import (
+        DynamicFocalLoss, DynamicSparseFocalLoss, focal_loss, sparse_focal_loss
+    )
+except ImportError:
+    sparse_focal_loss, focal_loss, DynamicSparseFocalLoss, DynamicFocalLoss = (
+        None, None, None, None
+    )
 
 def create_model():
     """Factory function to automatically create model based on parameters"""
@@ -293,8 +318,7 @@ def compile_model(model, loss_type='sparse'):
         
     elif params.OPTIMIZER_TYPE == "adamw":
         # Note: AdamW might require tensorflow-addons or newer TF version
-        try:
-            import tensorflow_addons as tfa
+        if tfa is not None:
             optimizer = tfa.optimizers.AdamW(
                 learning_rate=params.LEARNING_RATE,
                 weight_decay=params.ADAMW_WEIGHT_DECAY,
@@ -303,7 +327,7 @@ def compile_model(model, loss_type='sparse'):
                 epsilon=params.ADAMW_EPSILON
             )
             print(f"🔧 Using AdamW optimizer (weight_decay={params.ADAMW_WEIGHT_DECAY})")
-        except ImportError:
+        else:
             print("⚠️  tensorflow-addons not available, falling back to Adam")
             optimizer = tf.keras.optimizers.Adam(
                 learning_rate=params.LEARNING_RATE,
@@ -348,7 +372,6 @@ def compile_model(model, loss_type='sparse'):
 
     # Handle Focal Loss
     if loss in ["focal_loss", "IntelligentFocalLossController"]:
-        from utils.losses import sparse_focal_loss, focal_loss, DynamicSparseFocalLoss, DynamicFocalLoss
         
         if loss == "IntelligentFocalLossController":
              # We start with gamma=0.0 (equivalent to CrossEntropy)
@@ -439,7 +462,6 @@ def create_learning_rate_scheduler():
         return None
     
     if params.LR_SCHEDULER_TYPE == "reduce_on_plateau":
-        from tensorflow.keras.callbacks import ReduceLROnPlateau
         scheduler = ReduceLROnPlateau(
             monitor=params.LR_SCHEDULER_MONITOR,
             factor=params.LR_SCHEDULER_FACTOR,
@@ -450,7 +472,6 @@ def create_learning_rate_scheduler():
         print(f"🔧 Using ReduceLROnPlateau scheduler (patience={params.LR_SCHEDULER_PATIENCE})")
         
     elif params.LR_SCHEDULER_TYPE == "exponential":
-        from tensorflow.keras.optimizers.schedules import ExponentialDecay
         lr_schedule = ExponentialDecay(
             initial_learning_rate=params.LEARNING_RATE,
             decay_steps=params.EXPONENTIAL_DECAY_STEPS,
@@ -460,7 +481,6 @@ def create_learning_rate_scheduler():
         return lr_schedule
     
     elif params.LR_SCHEDULER_TYPE == "cosine":
-        from tensorflow.keras.optimizers.schedules import CosineDecayRestarts
         lr_schedule = CosineDecayRestarts(
             initial_learning_rate=params.LEARNING_RATE,
             first_decay_steps=1000,
@@ -500,7 +520,6 @@ def create_learning_rate_scheduler():
             else:
                 return float(cosine_schedule(epoch - warmup_steps))
 
-        from tensorflow.keras.callbacks import LearningRateScheduler
         scheduler = LearningRateScheduler(_onecycle_lr, verbose=1)
         print(f"🔧 Using OneCycleLR scheduler (warmup={warmup_steps} epochs)")
 
@@ -513,7 +532,6 @@ def create_learning_rate_scheduler():
             lr = initial_lr * (drop ** (epoch // epochs_drop))
             return lr
         
-        from tensorflow.keras.callbacks import LearningRateScheduler
         scheduler = LearningRateScheduler(step_decay, verbose=1)
         print(f"🔧 Using Step Decay scheduler (step_size={params.STEP_DECAY_STEP_SIZE})")
     
@@ -557,7 +575,6 @@ def get_training_callbacks():
     
     # Early Stopping
     if params.USE_EARLY_STOPPING:
-        from tensorflow.keras.callbacks import EarlyStopping
         early_stopping = EarlyStopping(
             monitor=params.EARLY_STOPPING_MONITOR,
             patience=params.EARLY_STOPPING_PATIENCE,
@@ -570,7 +587,6 @@ def get_training_callbacks():
     
     # Model Checkpoint
     if params.SAVE_CHECKPOINTS:
-        from tensorflow.keras.callbacks import ModelCheckpoint
         checkpoint = ModelCheckpoint(
             filepath=f"checkpoints/{params.MODEL_ARCHITECTURE}_epoch_{{epoch:02d}}.h5",
             monitor=params.CHECKPOINT_MONITOR,
@@ -589,7 +605,6 @@ def get_training_callbacks():
     
     # TensorBoard
     if params.USE_TENSORBOARD:
-        from tensorflow.keras.callbacks import TensorBoard
         tensorboard = TensorBoard(
             log_dir=f"logs/{params.MODEL_ARCHITECTURE}",
             update_freq=params.TENSORBOARD_UPDATE_FREQ,

@@ -1,12 +1,54 @@
-# predict.py
-import tensorflow as tf
-import numpy as np
-import cv2
-import os
 import argparse
-from utils.preprocess import preprocess_for_inference
+import os
+import sys
 from pathlib import Path
+
+import cv2
+import numpy as np
+import tensorflow as tf
+
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
+
 import parameters as params
+from utils.preprocess import preprocess_for_inference
+
+
+class OnnxDigitPredictor:
+    def __init__(self, onnx_path: str):
+        if ort is None:
+            raise ImportError("onnxruntime not installed.")
+        self.onnx_path = onnx_path
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        self.session = ort.InferenceSession(onnx_path, providers=providers)
+        in0  = self.session.get_inputs()[0]
+        out0 = self.session.get_outputs()[0]
+        self.input_name   = in0.name
+        self._num_classes = out0.shape[-1] if out0.shape else params.NB_CLASSES
+        print(f"Loading ONNX model: {onnx_path}")
+        print(f"  Input : {in0.name} {in0.shape}  ({in0.type})")
+        print(f"  Output: {out0.name} {out0.shape}")
+
+    @property
+    def num_classes(self) -> int:
+        return self._num_classes
+
+    def predict(self, image, debug=False):
+        processed = preprocess_for_inference(image).astype("float32")
+        if processed.ndim == 2:
+            processed = processed[:, :, None]
+        x = processed.transpose(2, 0, 1)[None]  # NHWC -> NCHW [1,C,H,W]
+        try:
+            raw = self.session.run(None, {self.input_name: x})[0][0]
+        except Exception:
+            return -1, 0.0, np.zeros(self._num_classes, dtype=np.float32)
+        s = np.sum(raw)
+        if not (abs(s - 1.0) < 0.02 and raw.min() >= -0.05 and raw.max() <= 1.05):
+            raw = np.exp(raw - raw.max())
+            raw = raw / raw.sum()
+        return int(np.argmax(raw)), float(np.max(raw)), raw
 
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
@@ -252,7 +294,8 @@ def find_model_path(model_name=None):
         dir_path = os.path.join(params.OUTPUT_DIR, dir_name)
         # Check if this directory contains .tflite files and is likely a training directory
         tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
-        if tflite_files and not dir_name.startswith('test_results'):
+        onnx_espdl_files = [f for f in os.listdir(dir_path) if f.endswith('.onnx') or f.endswith('.espdl')]
+        if (tflite_files or onnx_espdl_files) and not dir_name.startswith('test_results'):
             training_dirs.append(dir_name)
     
     if not training_dirs:
@@ -428,12 +471,14 @@ def main():
         return
     
     # Load predictor
-    predictor = TFLiteDigitPredictor(model_path)
-    debug_model_expectations(predictor) 
-    
-    # Get model's input requirements
-    input_shape = predictor.input_details[0]['shape']
-    input_channels = input_shape[3]
+    if model_path.endswith('.onnx'):
+        predictor = OnnxDigitPredictor(model_path)
+        input_channels = params.INPUT_CHANNELS
+    else:
+        predictor = TFLiteDigitPredictor(model_path)
+        debug_model_expectations(predictor) 
+        input_shape = predictor.input_details[0]['shape']
+        input_channels = input_shape[3]
     print(f"Model expects input with {input_channels} channel(s)")
     
     # Test with known pattern first if requested

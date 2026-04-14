@@ -1,10 +1,19 @@
-# diagnose_training.py
-import tensorflow as tf
-import numpy as np
 import os
+import sys
+from pathlib import Path
+
 import cv2
-from utils.multi_source_loader import load_combined_dataset
+import numpy as np
+import tensorflow as tf
+
+# Add project root to path before other imports
+_ROOT = str(Path(__file__).resolve().parent)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 import parameters as params
+from utils.multi_source_loader import load_combined_dataset
+from utils.preprocess import preprocess_single_image
 
 def check_dataset_structure():
     """Check the actual dataset structure and class distribution"""
@@ -85,8 +94,6 @@ def check_preprocessing():
     """Check if preprocessing works correctly"""
     print("\n=== PREPROCESSING CHECK ===")
     
-    from utils.preprocess import preprocess_single_image
-    
     # Create test images for different digits
     for digit in [0, 1, 2]:
         # Create a simple test image
@@ -148,7 +155,6 @@ def check_model_predictions_on_real_data():
             test_image = cv2.imread(test_image_path, cv2.IMREAD_GRAYSCALE)
             
             if test_image is not None:
-                from utils.preprocess import preprocess_single_image
                 processed = preprocess_single_image(test_image)
                 
                 # Prepare input

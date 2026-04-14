@@ -1,3 +1,7 @@
+import argparse
+import cv2
+import json
+import logging
 import os
 import sys
 
@@ -6,15 +10,39 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
-import cv2
-import json
-import argparse
 
+import parameters as params
 from models.model_factory import create_model, compile_model
 from utils.preprocess import preprocess_for_inference
+
+# Optional/Keras-related imports
+try:
+    import keras as k3
+except ImportError:
+    k3 = None
+
+try:
+    import tf_keras as k2
+except ImportError:
+    k2 = None
+
+try:
+    import tensorflow_model_optimization as tfmot
+except ImportError:
+    tfmot = None
+
+try:
+    from utils.losses import DynamicSparseFocalLoss, sparse_focal_loss
+except ImportError:
+    DynamicSparseFocalLoss, sparse_focal_loss = None, None
+
+try:
+    from models.digit_recognizer_v4 import create_qat_model
+except ImportError:
+    create_qat_model = None
 
 
 # ============================================================================
@@ -60,14 +88,11 @@ class GradCAM:
         
         # Detect which Keras engine to use based on the model
         model_module = model.__class__.__module__
-        if "tf_keras" in model_module:
-            import tf_keras
-            self.keras = tf_keras
-        elif "keras" in model_module:
-            import keras
-            self.keras = keras
+        if "tf_keras" in model_module and k2:
+            self.keras = k2
+        elif "keras" in model_module and k3:
+            self.keras = k3
         else:
-            import tensorflow as tf
             self.keras = tf.keras
         print(f"GradCAM using engine: {self.keras.__name__}")
 
@@ -211,21 +236,12 @@ def load_model_and_weights(model_arch, weights_path=None):
     Load model architecture and weights.
     Extremely resilient version for Keras 2/3 and QAT.
     """
-    import tensorflow as tf
-    import parameters as params
-    
     # Try multiple keras engines for loading
     engines = []
-    try:
-        import keras as k3
+    if k3:
         engines.append(('keras3', k3))
-    except ImportError:
-        pass
-    try:
-        import tf_keras as k2
+    if k2:
         engines.append(('tf_keras', k2))
-    except ImportError:
-        pass
     engines.append(('tf.keras', tf.keras))
         
     params.MODEL_ARCHITECTURE = model_arch
@@ -237,21 +253,16 @@ def load_model_and_weights(model_arch, weights_path=None):
         
         # Prepare custom objects
         custom_objects = {}
-        try:
-            from utils.losses import DynamicSparseFocalLoss, sparse_focal_loss
-            # Use the local class definition to avoid dependency on v29 model file
-            custom_objects['AdaptiveHybridBinarization'] = AdaptiveHybridBinarization
+        # Use the local class definition to avoid dependency on v29 model file
+        custom_objects['AdaptiveHybridBinarization'] = AdaptiveHybridBinarization
+        if DynamicSparseFocalLoss:
             custom_objects['DynamicSparseFocalLoss'] = DynamicSparseFocalLoss
+        if sparse_focal_loss:
             custom_objects['sparse_focal_loss'] = sparse_focal_loss
-            
-            # QAT objects
-            try:
-                import tensorflow_model_optimization as tfmot
-                custom_objects.update(tfmot.quantization.keras.get_quantize_objects())
-            except:
-                pass
-        except ImportError:
-            pass
+        
+        # QAT objects
+        if tfmot:
+            custom_objects.update(tfmot.quantization.keras.get_quantize_objects())
 
         # Try each engine
         for name, engine in engines:
@@ -270,12 +281,10 @@ def load_model_and_weights(model_arch, weights_path=None):
     model = create_model()
     
     # Apply QAT wrapper if weights suggest QAT
-    if weights_path and 'QAT' in weights_path:
+    if weights_path and 'QAT' in weights_path and tfmot:
         print("Applying QAT wrapper to base model...")
         try:
-            import tensorflow_model_optimization as tfmot
-            if model_arch == 'digit_recognizer_v4':
-                from models.digit_recognizer_v4 import create_qat_model
+            if model_arch == 'digit_recognizer_v4' and create_qat_model:
                 model = create_qat_model(model)
             else:
                 model = tfmot.quantization.keras.quantize_model(model)
@@ -317,7 +326,6 @@ def find_best_weights(model_name):
     Search for the best weights (.keras or .h5) for a given model architecture.
     Looks in exported_models/ and finds the latest training directory.
     """
-    import parameters as params
     
     # We want to check both the class-specific output dir and the general one
     search_dirs = [params.OUTPUT_DIR, "exported_models"]
@@ -358,7 +366,6 @@ def visualize_attention(image_path, model, class_names=None, save_path=None):
     """
     Generate comprehensive attention visualization.
     """
-    import parameters as params
     
     original_img = cv2.imread(image_path)
     if original_img is None:

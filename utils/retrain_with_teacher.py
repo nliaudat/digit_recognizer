@@ -4,35 +4,62 @@ Retrain existing edge models (v4, v16, etc.) using a teacher model.
 This does not modify models/__init__.py - imports directly from model files.
 """
 
-import os
-import sys
 import argparse
-import logging
+import datetime
+import importlib
+import inspect
 import json
+import logging
+import os
 import re
-import tensorflow as tf
-import numpy as np
-from pathlib import Path
+import shutil
+import sys
 from datetime import datetime
-from typing import Optional, Dict, Any, Tuple
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
-# Add project root to path
+import numpy as np
+import tensorflow as tf
+
+# Add project root to path before other imports
 _ROOT = str(Path(__file__).resolve().parent.parent)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import parameters as params
-from utils.distiller import Distiller, ProgressiveDistiller, MixedInputDistiller, DistillationProgressCallback
+from utils.distiller import (
+    DistillationProgressCallback, Distiller, MixedInputDistiller,
+    ProgressiveDistiller
+)
+from utils.losses import (
+    DynamicFocalLoss, DynamicSparseFocalLoss, focal_loss, sparse_focal_loss
+)
 from utils.model_distiller_utils import (
-    export_student_for_edge,
-    evaluate_distilled_model,
-    get_model_size_kb,
-    freeze_teacher_model,
+    evaluate_distilled_model, export_student_for_edge, freeze_teacher_model,
+    get_model_size_kb
+)
+from utils.train_analyse import (
+    analyze_confusion_matrix, analyze_training_history, verify_tflite_full_qat
 )
 from utils.train_distill_helper import load_distillation_data
-from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss
+from utils.train_helpers import save_model_summary_to_file
 from utils.train_trainingmonitor import TrainingMonitor
-import shutil
+
+# Optional/Delayed imports to avoid circularities
+try:
+    from models.model_factory import create_model_by_name
+except ImportError:
+    create_model_by_name = None
+
+try:
+    from utils.ensemble_teacher import EnsembleTeacher
+except ImportError:
+    EnsembleTeacher = None
+
+try:
+    from utils.train_qat_helper import create_qat_model
+except ImportError:
+    create_qat_model = None
 
 # Registry for existing edge models (now dynamic metadata)
 EXISTING_EDGE_MODELS = {
@@ -277,7 +304,6 @@ def load_or_create_model(
     """
     Load existing model or create new one.
     """
-    from models.model_factory import create_model_by_name
     
     channels = 1 if color_mode == "gray" else 3
     input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, channels)
@@ -287,7 +313,6 @@ def load_or_create_model(
     
     # Wrap for QAT if active in parameters
     if getattr(params, 'USE_QAT', False) and getattr(params, 'QUANTIZE_MODEL', False):
-        from utils.train_qat_helper import create_qat_model
         logger.info(f"🎯 Wrapping student {model_name} for QAT...")
         model = create_qat_model(model)
 
@@ -499,15 +524,11 @@ def main():
     args.output_dir = export_dir
     
     # ── Load or create teacher(s) ─────────────────────────────────────────
-    from models.model_factory import create_model_by_name
-    
     teacher_color = args.teacher_color if args.teacher_color else args.color
     teacher_channels = 1 if teacher_color == "gray" else 3
     teacher_input_shape = (params.INPUT_HEIGHT, params.INPUT_WIDTH, teacher_channels)
     
     loaded_teachers = []
-    from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss, sparse_focal_loss, focal_loss
-    import importlib, inspect
     
     for i, t_name in enumerate(args.teachers):
         actual_teacher_checkpoint = None
@@ -557,7 +578,6 @@ def main():
         loaded_teachers.append(t_model)
     
     if len(loaded_teachers) > 1:
-        from utils.ensemble_teacher import EnsembleTeacher
         teacher = EnsembleTeacher(loaded_teachers, teacher_weights=args.teacher_weights)
         teacher_name_str = "+".join(args.teachers)
     else:
@@ -649,8 +669,6 @@ def main():
         json.dump(results, f, indent=2)
     
     # ── 7. Generate Training Resume (parity with train.py) ───────────────
-    from utils.train_helpers import save_model_summary_to_file
-    from utils.train_analyse import analyze_confusion_matrix, analyze_training_history, verify_tflite_full_qat
     
     # Save standard best_model.keras in the root
     retrained_model.save(os.path.join(export_dir, "best_model.keras"))

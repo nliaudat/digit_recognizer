@@ -1,10 +1,25 @@
-# utils/train_helpers.py
+import json
 import os
-import tensorflow as tf
-import numpy as np
+import sys
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+import tensorflow as tf
 from tensorflow.keras import backend as K
+from tqdm import tqdm
+
 import parameters as params
+from utils.losses import (
+    DynamicFocalLoss, DynamicSparseFocalLoss, focal_loss, sparse_focal_loss
+)
+
+# Models/Circular dependency cautious imports
+try:
+    from models.model_factory import compile_model
+except ImportError:
+    compile_model = None
 
 def normalize_validation_data(data, batch_size=32):
     """
@@ -236,7 +251,6 @@ def save_training_config(training_dir, tflite_size, keras_size, tflite_manager,
         print(f"💾 Training configuration saved to: {config_path}")
         
         # Also save as JSON for programmatic access
-        import json
         json_path = os.path.join(training_dir, "training_config.json")
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(config_data, f, indent=2)
@@ -305,7 +319,6 @@ def save_training_config(training_dir, tflite_size, keras_size, tflite_manager,
 
 def save_training_csv(training_dir, history):
     """Save training history to CSV file"""
-    import pandas as pd
     
     if history and hasattr(history, 'history'):
         csv_path = os.path.join(training_dir, "training_log.csv")
@@ -483,7 +496,6 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
             interp_gamma = self._ramp_start_gamma + progress * (self._ramp_target_gamma - self._ramp_start_gamma)
 
         # Apply to the live loss variable (no recompile)
-        from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss
         loss_obj = self.model.loss
         if isinstance(loss_obj, (DynamicSparseFocalLoss, DynamicFocalLoss)):
             loss_obj.gamma.assign(float(interp_gamma))
@@ -532,7 +544,6 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
         
         # We need to find the dynamic loss object if it's wrapped or in a list
         # Check for our dynamic loss types
-        from utils.losses import DynamicSparseFocalLoss, DynamicFocalLoss
         
         target_loss = None
         if isinstance(loss_obj, (DynamicSparseFocalLoss, DynamicFocalLoss)):
@@ -575,7 +586,6 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                 old_lr = float(self.model.optimizer.learning_rate)
             
             # Create new loss based on architecture
-            from utils.losses import sparse_focal_loss, focal_loss
             if params.MODEL_ARCHITECTURE == "original_haverland":
                 new_loss_fn = focal_loss(gamma=new_gamma, alpha=self.alpha)
             else:
@@ -649,7 +659,6 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
         if not hasattr(self, 'val_ds') or self.val_ds is None:
             return None
 
-        from tqdm import tqdm
         print(f"📊 Analyzing per-class accuracy for {params.NB_CLASSES} classes...")
         # Try to get data length for tqdm
         data_len = None
@@ -759,8 +768,6 @@ class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
         
         y_true_all = []
         y_pred_all = []
-        
-        from tqdm import tqdm
         # Try to get data length for tqdm
         data_len = None
         if hasattr(self.val_ds, "cardinality"):
@@ -988,7 +995,6 @@ class DynamicSchedulerController(tf.keras.callbacks.Callback):
         """Recompile the model with a new optimizer (experimental)."""
         print(f"   🔧 Switching optimizer → {opt_type} (lr={lr:.2e})")
         try:
-            from models.model_factory import compile_model
             # Temporarily override params for recompile
             old_opt = params.OPTIMIZER_TYPE
             old_lr = params.LEARNING_RATE
