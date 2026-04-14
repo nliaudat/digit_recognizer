@@ -14,24 +14,7 @@ seaborn==0.13.2
 plotly==6.2.0
 scikit-learn==1.4.2
 scipy==1.13.0
-# Core ML/DL
-tensorflow==2.20.0
-torch==2.8.0
-keras==3.11.3
-tf_keras==2.20.1
-safetensors==0.4.2
-opencv-python-headless==4.10.0.84
-
-# Data processing & visualization
-numpy==1.26.4
-pandas==2.2.2
-matplotlib==3.8.4
-seaborn==0.13.2
-plotly==6.2.0
-scikit-learn==1.4.2
-scipy==1.13.0
 scikit-image==0.25.2
-opencv-python==4.10.0.84
 pillow==10.4.0
 h5py==3.11.0
 
@@ -62,3 +45,5 @@ onnxruntime-gpu>=1.18.0
 onnx2tf==1.28.8
 onnx_graphsurgeon>=0.3.27
 sng4onnx>=1.0.1
+psutil>=5.9.0
+ai-edge-litert>=0.1.0

@@ -24,3 +24,6 @@ runned_command.log
 /.continue
 docker/commands.txt
 docker/requirements_v2.txt
+docker/tensorflow_2.20.0-gpu_requirements.txt
+docker/requirements_v2.old
+docker/requirements_original.txt

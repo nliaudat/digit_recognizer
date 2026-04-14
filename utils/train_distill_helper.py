@@ -55,7 +55,6 @@ from utils.model_distiller_utils import (
     compare_teacher_student, evaluate_distilled_model, export_student_for_edge,
     freeze_teacher_model, get_model_size_kb, save_distillation_results
 )
-from utils.retrain_with_teacher import find_best_checkpoint
 from utils.train_analyse import (
     analyze_confusion_matrix, analyze_training_history, verify_tflite_full_qat
 )
@@ -529,6 +528,7 @@ def run_distillation_pipeline(
         
         # Auto-find checkpoint if not provided
         if not t_checkpoint:
+            from utils.retrain_with_teacher import find_best_checkpoint
             t_checkpoint = find_best_checkpoint(t_type, num_classes, teacher_color)
         
         if t_checkpoint and os.path.exists(t_checkpoint):

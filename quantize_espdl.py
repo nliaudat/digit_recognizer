@@ -1,51 +1,40 @@
-import os
+#!/usr/bin/env python3
 import sys
+import os
 
-# CRITICAL STABILITY: Set threading and GPU isolation AT THE TOP
-# This must happen before any heavy imports (numpy, torch, etc.)
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-os.environ["CUDA_HOME"] = "" # Prevent JIT compilation attempts
+# === DOCKER SEGFAULT PREVENTION ===
+# Must be set BEFORE any torch/numpy imports
 os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1" 
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
+# Prevent TorchInductor /tmp issues
+os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/tmp/pytorch_inductor_cache"
+os.makedirs("/tmp/pytorch_inductor_cache", exist_ok=True)
+
+# Use spawn instead of fork for multiprocessing
+os.environ["PYTORCH_MULTIPROCESSING_START_METHOD"] = "spawn"
+
 import argparse
-import gc
-import io
-import shutil
-import traceback
+import numpy as np
+import torch
 from pathlib import Path
 
-import numpy as np
-import onnx
-import torch
-
-try:
-    import onnx2tf
-except ImportError:
-    onnx2tf = None
-
-try:
-    import ppq
-except ImportError:
-    ppq = None
-
-try:
-    from esp_ppq.api import espdl_quantize_onnx, export_ppq_graph
-    from esp_ppq import QuantizationSettingFactory, TargetPlatform
-except ImportError:
-    espdl_quantize_onnx, export_ppq_graph = None, None
-    QuantizationSettingFactory, TargetPlatform = None, None
-
-# ── Project imports ──
-import parameters as params
-from utils import get_data_splits
-from utils.export_onnx import export_keras_to_onnx
-from utils.preprocess import preprocess_for_inference, preprocess_for_training
-
-# Stability: Limit torch threading
+# Stability: Limit high-parallelism threading which can cause -11 segfaults in some environments
+# We MUST do this before any other torch operations
 torch.set_num_threads(1)
+torch.set_num_interop_threads(1)  # Also limit interop threads
+
+def check_threading_safety():
+    """Verify threading config for Docker safety"""
+    print("🧵 Threading Configuration:")
+    print(f"  OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS', 'not set')}")
+    print(f"  MKL_NUM_THREADS={os.environ.get('MKL_NUM_THREADS', 'not set')}")
+    print(f"  torch.get_num_threads()={torch.get_num_threads()}")
+    print(f"  torch.get_num_interop_threads()={torch.get_num_interop_threads()}")
+
+check_threading_safety()
 
 def parse_args():
     parser = argparse.ArgumentParser(description="TQT/ESP-DL Minimal Worker")
@@ -59,7 +48,11 @@ def parse_args():
     parser.add_argument("--lr",       type=float, default=1e-6)
     parser.add_argument("--tune_weights", action="store_true", help="Fine-tune weights during TQT (default is scale-only)")
     def detect_device():
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        try:
+            import torch
+            return "cuda" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            return "cpu"
 
     parser.add_argument("--device",   default=detect_device())
     parser.add_argument("--classes",  type=int,   default=10)
@@ -72,6 +65,9 @@ def parse_args():
     return parser.parse_args()
 
 def resolve_paths(args):
+    # Delayed import to avoid top-level conflict
+    import parameters as params
+    
     model_name = args.model or params.MODEL_ARCHITECTURE
     out_dir = os.path.join(params.OUTPUT_DIR, model_name)
     os.makedirs(out_dir, exist_ok=True)
@@ -93,17 +89,15 @@ def main():
     os.environ["DIGIT_NB_CLASSES"] = str(args.classes)
     os.environ["DIGIT_INPUT_CHANNELS"] = "1" if args.color == "gray" else "3"
 
-    keras_path, onnx_path, espdl_path = resolve_paths(args)
+    # Delayed imports
+    import parameters as params
+    from esp_ppq.api import espdl_quantize_onnx, export_ppq_graph
+    from esp_ppq import QuantizationSettingFactory, TargetPlatform
+    from utils import get_data_splits
+    from utils.preprocess import preprocess_for_inference
+    from utils.export_onnx import export_keras_to_onnx
 
-    # Version diagnostics
-    print("📋 Environment Diagnostics:")
-    print(f"   Python: {sys.version.split()[0]}")
-    print(f"   PyTorch: {torch.__version__}")
-    print(f"   ONNX: {onnx.__version__}")
-    if ppq:
-        print(f"   PPQ: {ppq.__version__}")
-    else:
-        print("   PPQ version: unknown")
+    keras_path, onnx_path, espdl_path = resolve_paths(args)
 
     # 1. Export ONNX if needed
     if not args.skip_onnx_export:
@@ -112,7 +106,8 @@ def main():
 
     # 2. Prepare data
     print(f"📦 Loading calibration data ({args.classes} classes, {args.color})...")
-    (x_train, _) , _, _ = get_data_splits()
+    from utils.preprocess import preprocess_for_training
+    (x_train, _), _, _ = get_data_splits()
     n = min(args.calib_steps, len(x_train))
     
     # CRITICAL: Use preprocess_for_training to ensure Float32 [0, 1] 
@@ -168,6 +163,8 @@ def main():
     try:
         # 5. Run Quantization
         # Defensive check: Can we load and check the ONNX graph?
+        import onnx
+        import gc
         gc.collect() # Free memory before heavy Torch lifting
         
         try:
@@ -177,46 +174,100 @@ def main():
         except Exception as e:
             print(f"⚠️ ONNX graph check failed: {e}")
 
-        # Final stability attempt: set random seeds
-        torch.manual_seed(42)
-        if torch.cuda.is_available(): torch.cuda.empty_cache()
+        # --- ISOLATION WORKAROUND FOR TENSORFLOW / ONNXSIM SEGFAULT ---
+        # Instead of calling espdl_quantize_onnx in the same process where TensorFlow
+        # is loaded (which causes an onnxsim segmentation fault), we write the arguments
+        # to a temporary worker script and execute it in a clean subprocess.
+        import subprocess
+        import tempfile
+        import pickle
+        import numpy as np
+        
+        calib_npy_path = os.path.join(os.path.dirname(espdl_path), "calib_data_nchw.npy")
+        # calib_data is a list of NCHW tensors. Save them as a single concatenated numpy array
+        calib_concat = torch.cat(calib_data, dim=0).numpy()
+        np.save(calib_npy_path, calib_concat)
+        
+        worker_script = os.path.join(os.path.dirname(espdl_path), "_tqt_worker.py")
+        color_channels = 1 if args.color == "gray" else 3
+        with open(worker_script, 'w') as f:
+            f.write(f'''#!/usr/bin/env python3
+import sys
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+import torch
+import numpy as np
+from esp_ppq.api import espdl_quantize_onnx
+from esp_ppq import QuantizationSettingFactory
+import faulthandler
+faulthandler.enable()
 
-        # Slice dataset to requested number of steps to save memory
-        calibration_dataset = calib_data
-        if len(calibration_dataset) > args.calib_steps:
-            print(f"✂️ Slicing calibration dataset to {args.calib_steps} samples (was {len(calibration_dataset)})")
-            calibration_dataset = calibration_dataset[:args.calib_steps]
-        else:
-            print(f"📊 Using full calibration dataset ({len(calibration_dataset)} samples)")
+torch.set_num_threads(1)
+torch.set_num_interop_threads(1)
 
-        # ── Run TQT/ESP-DL Quantization ───────────────────────────────────────
-        graph = espdl_quantize_onnx(
-            onnx_import_file   = onnx_path,
-            espdl_export_file  = espdl_path,
-            calib_dataloader   = calibration_dataset,
-            calib_steps        = args.calib_steps,
-            input_shape        = [1, (1 if args.color == "gray" else 3), 32, 20],
-            target             = target_backend,
-            num_of_bits        = args.bits,
-            setting            = quant_setting,
-            device             = args.device
-        )
-        print("✅ ESP-DL Quantization finished successfully!")
+quant_setting = QuantizationSettingFactory.espdl_setting()
+quant_setting.tqt_optimization = {quant_setting.tqt_optimization}
+if quant_setting.tqt_optimization:
+    s = quant_setting.tqt_optimization_setting
+    s.steps = {s.steps if quant_setting.tqt_optimization else 0}
+    s.lr = {s.lr if quant_setting.tqt_optimization else 0.0}
+    s.collecting_device = "{args.device}"
+    s.int_lambda = {s.int_lambda if quant_setting.tqt_optimization else 0.0}
+    s.block_size = {s.block_size if quant_setting.tqt_optimization else 0}
+    s.gamma = {s.gamma if quant_setting.tqt_optimization else 0.0}
+    s.is_scale_trainable = True
+    s.is_weight_trainable = {args.tune_weights}
+
+calib_np = np.load("{calib_npy_path}")
+calib_data = [torch.from_numpy(calib_np[i:i+1]) for i in range(calib_np.shape[0])]
+
+print("🚀 [Worker] Starting espdl_quantize_onnx...")
+graph = espdl_quantize_onnx(
+    onnx_import_file="{onnx_path}",
+    espdl_export_file="{espdl_path}",
+    calib_dataloader=calib_data,
+    calib_steps={n},
+    input_shape=[1, {color_channels}, 32, 20],
+    target="{target_backend}",
+    num_of_bits={args.bits},
+    setting=quant_setting,
+    device="{args.device}"
+)
+
+# Export scale-preserving ONNX directly in worker
+from esp_ppq.api.interface import export_ppq_graph
+from esp_ppq import TargetPlatform
+quant_onnx_path = "{espdl_path}".replace(".espdl", "_quantized.onnx")
+print(f"🔄 [Worker] Exporting Scale-Preserving ONNX -> {{quant_onnx_path}}")
+export_ppq_graph(graph, platform=TargetPlatform.ONNXRUNTIME, graph_save_to=quant_onnx_path)
+print("✅ [Worker] ESP-DL Quantization finished successfully!")
+''')
+
+        print("🔄 Spawning isolated TQT worker to prevent onnxsim segfault...")
+        try:
+            subprocess.check_call([sys.executable, worker_script])
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Worker failed with exit code {e.returncode}")
+            sys.exit(1)
+        finally:
+            if os.path.exists(calib_npy_path): os.remove(calib_npy_path)
+            if os.path.exists(worker_script): os.remove(worker_script)
+            
+        print("✅ ESP-DL Quantization finished successfully in worker!")
 
         # 6. Export Quantized ONNX (Scale-Preserving)
-        # This ONNX contains QDQ nodes (QuantizeLinear/DequantizeLinear) with TQT-optimized scales
-        # We base the name on espdl_path to ensure the target SoC is in the filename
+        # (This is now handled inside the isolated worker script)
         quant_onnx_path = espdl_path.replace(".espdl", "_quantized.onnx")
-        print(f"🔄 Exporting Scale-Preserving ONNX -> {quant_onnx_path}")
-        export_ppq_graph(graph, platform=TargetPlatform.ONNXRUNTIME, graph_save_to=quant_onnx_path)
         
         # 7. Optional TFLite Export via onnx2tf
         if args.tflite:
             tflite_path = espdl_path.replace(".espdl", ".tflite")
             output_dir = os.path.dirname(tflite_path)
             try:
-                if onnx2tf is None:
-                    raise ImportError("onnx2tf not installed")
+                import onnx2tf
+                import numpy as np
+                import io
                 
                 # 1. Monkeypatch numpy.load (Pickle Fix)
                 orig_load = np.load
@@ -279,6 +330,7 @@ def main():
                         if found_tflite: break
 
                 if found_tflite:
+                    import shutil
                     if os.path.abspath(found_tflite) != os.path.abspath(tflite_path):
                         shutil.move(found_tflite, tflite_path)
                     print(f"✅ Scale-Preserved TFLite export complete: {tflite_path}")
@@ -287,10 +339,12 @@ def main():
 
             except Exception as e:
                 print(f"⚠️ Scale-Preserved TFLite conversion error: {e}")
+                import traceback
                 traceback.print_exc()
 
     except Exception as e:
         print(f"❌ espdl_quantize_onnx raised an exception: {e}")
+        import traceback
         traceback.print_exc()
         sys.exit(1)
     
