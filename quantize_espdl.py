@@ -190,7 +190,7 @@ def main():
         
         worker_script = os.path.join(os.path.dirname(espdl_path), "_tqt_worker.py")
         color_channels = 1 if args.color == "gray" else 3
-        with open(worker_script, 'w') as f:
+        with open(worker_script, 'w', encoding='utf-8') as f:
             f.write(f'''#!/usr/bin/env python3
 import sys
 import os

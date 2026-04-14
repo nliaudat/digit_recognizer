@@ -1167,8 +1167,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                     print(f"❌ TQT Error output: {e.stderr}")
                 except Exception as e:
                     print(f"❌ TQT Pipeline error: {e}")
-            else:
-                print("❌ TQT Pipeline aborted: ONNX export failed")
+        
         
         # Save training plots and configuration
         monitor.save_training_plots()
