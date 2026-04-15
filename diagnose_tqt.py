@@ -61,7 +61,7 @@ def compare_models(ptq_onnx, tqt_onnx, ptq_tflite, tqt_tflite):
     print("-" * 30)
     
     ptq_scales = []
-    if os.path.exists(ptq_onnx) and ptq_onnx != "":
+    if os.path.exists(ptq_onnx):
         ptq_model = onnx.load(ptq_onnx)
         ptq_scales = extract_scales(ptq_model)
         print(f"  PTQ Scales found: {len(ptq_scales)}")
@@ -69,7 +69,7 @@ def compare_models(ptq_onnx, tqt_onnx, ptq_tflite, tqt_tflite):
         print(f"  [!] PTQ ONNX not found: {ptq_onnx}")
         
     tqt_scales = []
-    if os.path.exists(tqt_onnx) and tqt_onnx != "":
+    if os.path.exists(tqt_onnx):
         tqt_model = onnx.load(tqt_onnx)
         tqt_scales = extract_scales(tqt_model)
         print(f"  TQT Scales found: {len(tqt_scales)}")

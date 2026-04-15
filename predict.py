@@ -42,7 +42,8 @@ class OnnxDigitPredictor:
         x = processed.transpose(2, 0, 1)[None]  # NHWC -> NCHW [1,C,H,W]
         try:
             raw = self.session.run(None, {self.input_name: x})[0][0]
-        except Exception:
+        except Exception as e:
+            print(f"Error during ONNX inference: {e}")
             return -1, 0.0, np.zeros(self._num_classes, dtype=np.float32)
         s = np.sum(raw)
         if not (abs(s - 1.0) < 0.02 and raw.min() >= -0.05 and raw.max() <= 1.05):
