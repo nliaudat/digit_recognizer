@@ -57,7 +57,6 @@ def generate_augmented_dataset():
             "static_augmentation.py",
             "--config", config_name,
             "--output", str(temp_output.resolve()), # absolute output
-            "--inverted", "true",
             "--yes"
         ]
         

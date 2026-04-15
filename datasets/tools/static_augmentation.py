@@ -221,6 +221,7 @@ class AugmentationConfig:
         if "polarity_inversion" in augmentations:
             polarity_inversion = augmentations["polarity_inversion"]
             globals()["AUG_POLARITY_INVERSION"] = polarity_inversion["enabled"]
+            globals()["AUG_POLARITY_INVERSION_PROB"] = polarity_inversion.get("probability", 0.5)
     
     def get_augmentation_probability(self, aug_name):
         """Get probability for a specific augmentation"""
@@ -299,7 +300,7 @@ SELECTED_AUGMENTATIONS = None
 class SingleShotAugmentor:
     """Single-shot data augmentation that processes entire dataset folders"""
     
-    def __init__(self, input_dir=None, output_dir=None, selected_augmentations=None, config_path=None, inverted=True, overwrite=False):
+    def __init__(self, input_dir=None, output_dir=None, selected_augmentations=None, config_path=None, overwrite=False, mirror_inversion=True):
         # Load configuration FIRST
         self.config = AugmentationConfig(config_path)
         
@@ -309,8 +310,8 @@ class SingleShotAugmentor:
         self.input_shape = INPUT_SHAPE
         self.use_grayscale = USE_GRAYSCALE
         self.selected_augmentations = selected_augmentations or SELECTED_AUGMENTATIONS
-        self.inverted = inverted
         self.overwrite = overwrite
+        self.mirror_inversion = mirror_inversion
         
         # Validate input directory
         if not os.path.exists(self.input_dir):
@@ -770,12 +771,21 @@ class SingleShotAugmentor:
         return self.ensure_correct_shape(disturbed)
     
     def apply_polarity_inversion(self, image):
-        """Apply polarity inversion - bitwise NOT operation (1.0 - x)"""
+        """Apply 'Real' polarity inversion - stretches contrast then inverts (1.0 - x)"""
         # Reset random seed for this function
         random.seed()
         np.random.seed()
         
         image = self.ensure_correct_shape(image)
+        
+        # Contrast Stretching: Map min to 0.0 and max to 1.0 before inverting
+        # This ensures "black gets white and white gets dark" even with noisy backgrounds
+        img_min = np.min(image)
+        img_max = np.max(image)
+        
+        if img_max > img_min:
+            image = (image - img_min) / (img_max - img_min)
+            
         # Assuming pixel values are in [0, 1] range
         inverted = 1.0 - image
         return self.ensure_correct_shape(inverted)
@@ -810,7 +820,7 @@ class SingleShotAugmentor:
         
         return available_augs
     
-    def augment_single_image(self, image, label, original_path, augmentation_id):
+    def augment_single_image(self, image, label, original_path, augmentation_id, selected_augs=None):
         """Apply conservative augmentation to a single image"""
         # Initialize random seed for this specific augmentation
         random.seed()  # Use system time for true randomness
@@ -885,47 +895,45 @@ class SingleShotAugmentor:
             
             # Skip if no augmentation was applied (to avoid duplicates of originals)
             if not augmentation_type_short:
-                # print(f"Skipping un-augmented image {original_path}")  # Debug
                 return augmented
 
             # Save normal version
-            self.save_augmented_image(augmented, label, original_path, augmentation_id, augmentation_type_short)
+            self.save_augmented_image(augmented, label, original_path, augmentation_id, augmentation_type_short, is_inverted=False)
             
-            # Save mirrored inverted version if requested
-            if self.inverted:
+            # Save mirrored real-inversion twin if enabled
+            if self.mirror_inversion:
                 inverted_augmented = self.apply_polarity_inversion(augmented)
-                self.save_augmented_image(inverted_augmented, label, original_path, augmentation_id, augmentation_type_short, is_mirrored_inverted=True)
+                self.save_augmented_image(inverted_augmented, label, original_path, augmentation_id, augmentation_type_short, is_inverted=True)
         
         return augmented
     
-    def save_augmented_image(self, image, label, original_path, augmentation_id, augmentation_type_short, is_mirrored_inverted=False):
-        """Save augmented image to disk preserving folder structure with new subfolder logic"""
+    def save_augmented_image(self, image, label, original_path, augmentation_id, augmentation_type_short, is_inverted=False):
+        """Save an augmented image with appropriate naming and directory structure"""
         # Get relative path from input directory
         relative_path = os.path.relpath(os.path.dirname(original_path), self.input_dir)
         
         # Get original dataset name (basename of input_dir)
         original_dataset = os.path.basename(os.path.normpath(self.input_dir))
         
-        # Create new structured path
-        if is_mirrored_inverted:
-            # [inversed] subfolder structure: dataset / [inversed] / codes / file
-            if augmentation_type_short:
-                aug_dir = os.path.join(self.output_dir, relative_path, original_dataset, "[inversed]", augmentation_type_short)
-            else:
-                aug_dir = os.path.join(self.output_dir, relative_path, original_dataset, "[inversed]")
+        # Normal structure: dataset / codes / file (Keep flat as requested)
+        if augmentation_type_short:
+            aug_dir = os.path.join(self.output_dir, relative_path, original_dataset, augmentation_type_short)
         else:
-            # Normal structure: dataset / codes / file
-            if augmentation_type_short:
-                aug_dir = os.path.join(self.output_dir, relative_path, original_dataset, augmentation_type_short)
-            else:
-                aug_dir = os.path.join(self.output_dir, relative_path, original_dataset)
+            aug_dir = os.path.join(self.output_dir, relative_path, original_dataset)
                 
         os.makedirs(aug_dir, exist_ok=True)
         
         # Create filename
         original_filename = os.path.splitext(os.path.basename(original_path))[0]
         suffix = f"_{augmentation_type_short}" if augmentation_type_short else ""
-        filename = f"{original_filename}_{augmentation_id:03d}_aug{suffix}.jpg"
+        
+        if is_inverted:
+            # Suffix _inv and extension .jpeg for inverted twin
+            filename = f"{original_filename}_{augmentation_id:03d}_aug{suffix}_inv.jpeg"
+        else:
+            # Standard .jpg for normal version
+            filename = f"{original_filename}_{augmentation_id:03d}_aug{suffix}.jpg"
+            
         filepath = os.path.join(aug_dir, filename)
         
         # Convert from [0,1] float to [0,255] uint8
@@ -947,52 +955,31 @@ class SingleShotAugmentor:
         
         # Load dataset
         images, labels, paths = self.load_entire_dataset()
-        
-        # Run augmentation
         total_original = len(images)
-        total_augmented = total_original * AUGMENTATION_MULTIPLIER
         
         # Get enabled augmentations for display
         enabled_augs = self.selected_augmentations or self.config.get_enabled_augmentations()
         
         print(f"🔧 Augmentation settings:")
         print(f"   Multiplier: {AUGMENTATION_MULTIPLIER}x")
-        print(f"   Expected output: {total_augmented} images")
         print(f"   Threads: {AUGMENTATION_THREADS}")
         print(f"   Target shape: {INPUT_HEIGHT}x{INPUT_WIDTH}x{INPUT_CHANNELS}")
         print(f"   Configuration file: {self.config.config_path}")
         print(f"   Enabled augmentations: {', '.join(enabled_augs)}")
         
-        # Display augmentation probabilities
-        print(f"   Augmentation probabilities:")
-        for aug_name in enabled_augs:
-            prob = self.config.get_augmentation_probability(aug_name)
-            print(f"     - {aug_name}: {prob:.1%}")
-        
         # Use parallel processing
         with ThreadPoolExecutor(max_workers=AUGMENTATION_THREADS) as executor:
             futures = []
             
-            # 1. 1:1 Mirroring of Original Images (Inverted only)
-            if self.inverted:
-                for i in range(len(images)):
-                    # We pass a special flag or just use a helper to save inverted original
-                    futures.append(
-                        executor.submit(
-                            self._save_inverted_original,
-                            images[i], labels[i], paths[i]
-                        )
-                    )
+            # Main Augmentation Loop
+            for img, label, path in zip(images, labels, paths):
+                # 1. Save mirrored original twin if mirroring is enabled
+                if self.mirror_inversion:
+                    futures.append(executor.submit(self._save_inverted_original, img, label, path))
 
-            # 2. Main Augmentation Loop (Normal + Mirrored Inverted)
-            for i in range(len(images)):
-                for aug_id in range(AUGMENTATION_MULTIPLIER):
-                    futures.append(
-                        executor.submit(
-                            self.augment_single_image, 
-                            images[i], labels[i], paths[i], aug_id
-                        )
-                    )
+                # 2. Perform multiplier iterations for each original image
+                for i in range(AUGMENTATION_MULTIPLIER):
+                    futures.append(executor.submit(self.augment_single_image, img, label, path, i, enabled_augs))
             
             # Process with progress bar
             completed = 0
@@ -1012,8 +999,8 @@ class SingleShotAugmentor:
     def _save_inverted_original(self, image, label, path):
         """Helper for 1:1 original inversion"""
         inverted = self.apply_polarity_inversion(image)
-        # Empty augmentation_type_short means it goes into the [inversed] root
-        self.save_augmented_image(inverted, label, path, augmentation_id=0, augmentation_type_short="", is_mirrored_inverted=True)
+        # Empty augmentation_type_short means it goes into the root
+        self.save_augmented_image(inverted, label, path, augmentation_id=0, augmentation_type_short="", is_inverted=True)
 
 
 def configure_augmentations(selected_augs):
@@ -1052,15 +1039,10 @@ def main():
                        help='Path to JSON configuration file (default: augmentation_params.json)')
     parser.add_argument('--create-config', action='store_true',
                        help='Create a default configuration file and exit')
-    parser.add_argument('--inverted', type=str, default=str(POLARITY_INVERSION_DEFAULT).lower(),
-                       help='Enable Parallel Inversion mirroring (default: from utils.augmentation)')
     parser.add_argument('-y', '--yes', action='store_true',
                        help='Bypass overwrite confirmation prompt')
     
     args = parser.parse_args()
-    
-    # Parse boolean-like string for --inverted
-    inverted_val = args.inverted.lower() in ('true', '1', 'yes', 'on')
     
     # Create config file if requested
     if args.create_config:
@@ -1096,8 +1078,8 @@ def main():
             output_dir=args.output, 
             selected_augmentations=selected_augs,
             config_path=args.config,
-            inverted=inverted_val,
-            overwrite=args.yes
+            overwrite=args.yes,
+            mirror_inversion=True # Always enabled by default now
         )
         
         # Override multiplier from command line if provided

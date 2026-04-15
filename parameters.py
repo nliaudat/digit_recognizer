@@ -720,7 +720,7 @@ TENSORBOARD_WRITE_GRAPHS = True
 # DATA AUGMENTATION
 # ==============================================================================
 
-USE_DATA_AUGMENTATION = True
+USE_DATA_AUGMENTATION = False
 AUGMENTATION_ZOOM_RANGE = 0.1           # ±10% zoom
 AUGMENTATION_ROTATION_RANGE = 1.15      # ±1.15 degrees (converted from ±0.02 radians)
 AUGMENTATION_CONTRAST_RANGE = 0.1       # ±10% contrast
@@ -730,7 +730,7 @@ AUGMENTATION_WIDTH_SHIFT_RANGE = 0.0
 AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.0
 AUGMENTATION_HORIZONTAL_FLIP = False
 AUGMENTATION_VERTICAL_FLIP = False
-AUGMENTATION_POLARITY_INVERSION = True  # 50% random pixel-polarity flip (1-x) — helps all models handle both light-on-dark and dark-on-light
+AUGMENTATION_POLARITY_INVERSION = False  # 50% random pixel-polarity flip (1-x) — helps all models handle both light-on-dark and dark-on-light
 
 # Advanced Augmentations (used by super_high_accuracy_validator)
 USE_MIXUP = False           # Disabled by default for stability (destructive on small images)
