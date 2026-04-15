@@ -5,20 +5,6 @@ keras==3.11.3
 tf_keras==2.20.1
 safetensors==0.4.2
 
-# Data processing & visualization
-numpy==1.26.4
-pandas==2.2.2
-matplotlib==3.8.4
-seaborn==0.13.2
-plotly==6.2.0
-scikit-learn==1.4.2
-scipy==1.13.0
-# Core ML/DL
-tensorflow==2.20.0
-torch==2.8.0
-keras==3.11.3
-tf_keras==2.20.1
-safetensors==0.4.2
 
 # Data processing & visualization
 numpy==1.26.4
