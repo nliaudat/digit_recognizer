@@ -2166,8 +2166,8 @@ def inspect_espdl(espdl_path: str) -> dict:
         with open(espdl_path, "rb") as f:
             header = f.read(16).hex()
         print(f"  Header (hex): {header}")
-    except Exception:
-        pass
+    except (IOError, OSError) as e:
+        print(f"  [!] Could not read header: {e}")
 
     return {"path": espdl_path, "size_bytes": size_bytes, "size_kb": size_kb}
 
