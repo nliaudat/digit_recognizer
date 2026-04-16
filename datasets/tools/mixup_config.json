@@ -1,0 +1,26 @@
+{
+  "image_params": {
+    "width": 20,
+    "height": 32,
+    "channels": 3,
+    "grayscale": false
+  },
+  "dataset": {
+    "input_dir": "../real_integra/images",
+    "output_dir": "../real_integra/images_mixup_only"
+  },
+  "mixup": {
+    "enabled": true,
+    "alpha": 0.2,
+    "max_label_distance": 0.1,
+    "circular": true,
+    "variants_per_image": 2,
+    "max_label": 9.9,
+    "min_label": 0.0
+  },
+  "processing": {
+    "threads": 4,
+    "save_images": true,
+    "random_seed": 42
+  }
+}
