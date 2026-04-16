@@ -587,6 +587,9 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     grayscale = params.USE_GRAYSCALE
 
     for source_config in params.DATA_SOURCES:
+        if source_config.get('not_in_bench'):
+            continue
+            
         source_type = source_config.get('type', '')
         source_path = source_config.get('path', '')
 
