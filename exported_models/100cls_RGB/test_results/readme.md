@@ -2,11 +2,11 @@
 
 ## 📊 Executive Summary
 
-- **Test Date**: 2026-04-10 11:21:20
-- **Models Tested**: 10 quantized models
-- **Best IoT Model**: **digit_recognizer_v3.tflite** (45.1KB, 0.825 acc, 3330 inf/s)
-- **Best Accuracy**: **digit_recognizer_v16.tflite** (0.934)
-- **Fastest Model**: **digit_recognizer_v7.tflite** (4151 inf/s)
+- **Test Date**: 2026-04-10 11:47:24
+- **Models Tested**: 16 quantized models
+- **Best IoT Model**: **digit_recognizer_v3.tflite** (45.1KB, 0.825 acc, 3359 inf/s)
+- **Best Accuracy**: **v32_xl.tflite** (0.964)
+- **Fastest Model**: **digit_recognizer_v7.tflite** (4159 inf/s)
 - **Smallest Model**: **digit_recognizer_v3.tflite** (45.1 KB)
 
 ## 📈 Performance vs Size
@@ -17,16 +17,22 @@
 
 | Model | Size (KB) | Accuracy | Inf/s | Parameters | IoT Score |
 |-------|-----------|----------|-------|------------|-----------|
-| digit_recognizer_v3.tflite | 45.1 | 0.825 | 3330 | 117300 | 0.902 |
-| digit_recognizer_v7.tflite | 56.0 | 0.797 | 4151 | 118200 | 0.868 |
-| digit_recognizer_v4.tflite | 87.1 | 0.907 | 3247 | 178800 | 0.797 |
-| digit_recognizer_v17.tflite | 80.5 | 0.875 | 2487 | 198700 | 0.756 |
-| digit_recognizer_v15.tflite | 107.4 | 0.904 | 2343 | 260200 | 0.723 |
-| digit_recognizer_v18.tflite | 109.7 | 0.894 | 2278 | 238900 | 0.712 |
-| digit_recognizer_v16.tflite | 139.7 | 0.934 | 2026 | 271300 | 0.694 |
-| digit_recognizer_v19.tflite | 146.0 | 0.914 | 1753 | 314600 | 0.666 |
-| original_haverland.tflite | 228.8 | 0.838 | 2714 | 348100 | 0.639 |
-| digit_recognizer_v6.tflite | 160.8 | 0.895 | 1076 | 460900 | 0.615 |
+| digit_recognizer_v3.tflite | 45.1 | 0.825 | 3359 | 117300 | 0.890 |
+| digit_recognizer_v7.tflite | 56.0 | 0.797 | 4159 | 118200 | 0.855 |
+| digit_recognizer_v4.tflite | 87.1 | 0.907 | 3227 | 178800 | 0.781 |
+| digit_recognizer_v17.tflite | 80.5 | 0.875 | 2421 | 198700 | 0.738 |
+| digit_recognizer_v15.tflite | 107.4 | 0.904 | 2324 | 260200 | 0.707 |
+| digit_recognizer_v18.tflite | 109.7 | 0.894 | 1884 | 238900 | 0.678 |
+| digit_recognizer_v16.tflite | 139.7 | 0.934 | 1999 | 271300 | 0.678 |
+| digit_recognizer_v19.tflite | 146.0 | 0.914 | 1641 | 314600 | 0.646 |
+| original_haverland.tflite | 228.8 | 0.838 | 2863 | 348100 | 0.632 |
+| digit_recognizer_v6.tflite | 160.8 | 0.895 | 1080 | 460900 | 0.600 |
+| digit_recognizer_v24.tflite | 433.6 | 0.939 | 918 | 671600 | 0.562 |
+| digit_recognizer_v29.tflite | 437.5 | 0.939 | 859 | 689400 | 0.559 |
+| digit_recognizer_v28.tflite | 432.8 | 0.924 | 924 | 673600 | 0.555 |
+| digit_recognizer_v27.tflite | 433.4 | 0.917 | 914 | 673600 | 0.551 |
+| digit_recognizer_v23.tflite | 427.4 | 0.906 | 958 | 663300 | 0.548 |
+| v32_xl.tflite | 2110.5 | 0.964 | 369 | 2600000 | 0.524 |
 
 ## 💡 IoT-Specific Recommendations
 
@@ -34,19 +40,19 @@
 
 #### 🎯 Best Overall for ESP32
 - **Model**: **digit_recognizer_v3.tflite**
-- **IoT Score**: 0.902
+- **IoT Score**: 0.890
 - **Accuracy**: 0.825
 - **Size**: 45.1 KB
-- **Speed**: 3330 inf/s
+- **Speed**: 3359 inf/s
 - **Efficiency**: 0.0183 accuracy per KB
 
 #### 📊 IoT Model Comparison (Under 100KB)
 | Model | Accuracy | Size | Speed | IoT Score | Use Case |
 |-------|----------|------|-------|-----------|----------|
-| digit_recognizer_v3.tflite | 0.825 | 45.1KB | 3330/s | 0.902 | 🏆 **BEST BALANCED** |
-| digit_recognizer_v7.tflite | 0.797 | 56.0KB | 4151/s | 0.868 | ⚡ Fastest |
-| digit_recognizer_v4.tflite | 0.907 | 87.1KB | 3247/s | 0.797 | 🎯 Best Accuracy |
-| digit_recognizer_v17.tflite | 0.875 | 80.5KB | 2487/s | 0.756 | Alternative |
+| digit_recognizer_v3.tflite | 0.825 | 45.1KB | 3359/s | 0.890 | 🏆 **BEST BALANCED** |
+| digit_recognizer_v7.tflite | 0.797 | 56.0KB | 4159/s | 0.855 | ⚡ Fastest |
+| digit_recognizer_v4.tflite | 0.907 | 87.1KB | 3227/s | 0.781 | 🎯 Best Accuracy |
+| digit_recognizer_v17.tflite | 0.875 | 80.5KB | 2421/s | 0.738 | Alternative |
 
 #### 🔧 Alternative IoT Scenarios
 
@@ -57,7 +63,7 @@
 
 **For Speed-Critical IoT:**
 - **Choice**: digit_recognizer_v7.tflite
-- **Speed**: 4151 inf/s (fastest under 100KB)
+- **Speed**: 4159 inf/s (fastest under 100KB)
 - **Trade-off**: 0.797 accuracy
 
 **For Memory-Constrained IoT:**
