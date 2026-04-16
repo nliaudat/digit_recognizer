@@ -29,3 +29,4 @@ docker/requirements_v2.old
 docker/requirements_original.txt
 /datasets/static_augmentation
 datasets/tools/commands.txt
+/datasets/static_augmentation_mixup
