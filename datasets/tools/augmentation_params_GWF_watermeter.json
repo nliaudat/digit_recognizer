@@ -6,7 +6,7 @@
     "use_grayscale": false
   },
   "dataset_paths": {
-    "input_dataset_dir": "dataset",
+    "input_dataset_dir": "../GWF_watermeter/images",
     "augmented_data_dir": null
   },
   "augmentation_settings": {
@@ -36,7 +36,7 @@
     },
     "shear": {
       "enabled": true,
-      "probability": 0.2,
+      "probability": 0.3,
       "shear_range": 0.1
     },
     "brightness": {
@@ -57,17 +57,17 @@
     },
     "color_jitter": {
       "enabled": true,
-      "probability": 0.2,
-      "color_jitter_range": 0.05
+      "probability": 0.9,
+      "color_jitter_range": 0.2
     },
     "gaussian_noise": {
       "enabled": true,
-      "probability": 0.2,
+      "probability": 0.5,
       "gaussian_noise_std": 0.05
     },
     "random_erasing": {
       "enabled": false,
-      "probability": 0.1,
+      "probability": 0.2,
       "erasing_max_area": 0.1,
       "erasing_aspect_ratio": [
         0.3,
@@ -76,12 +76,12 @@
     },
     "random_crop": {
       "enabled": true,
-      "probability": 0.1,
+      "probability": 0.2,
       "crop_percent": 0.9
     },
     "perspective": {
       "enabled": true,
-      "probability": 0.1,
+      "probability": 0.3,
       "perspective_scale": 0.1
     },
     "flashlight": {

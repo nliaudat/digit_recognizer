@@ -720,6 +720,8 @@ TENSORBOARD_WRITE_GRAPHS = True
 # DATA AUGMENTATION
 # ==============================================================================
 
+## all augmentation is done in datasets/tools/generate_augmented_dataset.py for efficiency and caching
+
 USE_DATA_AUGMENTATION = False
 AUGMENTATION_ZOOM_RANGE = 0.1           # ±10% zoom
 AUGMENTATION_ROTATION_RANGE = 1.15      # ±1.15 degrees (converted from ±0.02 radians)

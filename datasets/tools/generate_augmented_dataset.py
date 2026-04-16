@@ -89,6 +89,15 @@ def generate_augmented_dataset():
     if temp_output.exists():
         shutil.rmtree(temp_output)
 
+    # 3.5 Deduplicate Images
+    print("\n🧹 Deduplicating Images...")
+    run_command([
+        sys.executable, 
+        str(tools_dir / "deduplicate.py"),
+        "--folder", str(output_images),
+        "--delete"
+    ])
+
     # 4. Generate Labels
     print("\n🏷️  Generating Labels...")
     
