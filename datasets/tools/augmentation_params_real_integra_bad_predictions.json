@@ -42,12 +42,18 @@
     "brightness": {
       "enabled": true,
       "probability": 0.3,
-      "brightness_range": [0.9, 1.1]
+      "brightness_range": [
+        0.9,
+        1.1
+      ]
     },
     "contrast": {
       "enabled": true,
       "probability": 0.3,
-      "contrast_range": [0.9, 1.1]
+      "contrast_range": [
+        0.9,
+        1.1
+      ]
     },
     "color_jitter": {
       "enabled": true,
@@ -63,7 +69,10 @@
       "enabled": false,
       "probability": 0.2,
       "erasing_max_area": 0.1,
-      "erasing_aspect_ratio": [0.3, 3.3]
+      "erasing_aspect_ratio": [
+        0.3,
+        3.3
+      ]
     },
     "random_crop": {
       "enabled": true,
@@ -79,10 +88,17 @@
       "enabled": true,
       "probability": 0.3,
       "flashlight_intensity": 0.8,
-      "flashlight_radius_range": [0.1, 0.3],
+      "flashlight_radius_range": [
+        0.1,
+        0.3
+      ],
       "flashlight_progressive": true,
       "flashlight_affected_area": 0.25,
       "flashlight_probability": 0.3
+    },
+    "polarity_inversion": {
+      "enabled": true,
+      "probability": 0.5
     }
   }
 }

@@ -10,8 +10,48 @@ import shutil
 import argparse
 import glob
 import json
+import os
 from pathlib import Path
 import sys
+
+# Force UTF-8 output on Windows to support emojis
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except (AttributeError, ValueError):
+        pass # Fallback for environments where reconfigure might fail
+
+# Set environment variables to avoid interactive prompts from parameters.py
+# when importing utils.augmentation (these defaults don't affect static augmentation)
+os.environ.setdefault("DIGIT_NB_CLASSES", "10")
+os.environ.setdefault("DIGIT_INPUT_CHANNELS", "3")
+
+# Add project root to sys.path to allow importing from utils
+project_root = str(Path(__file__).resolve().parent.parent.parent)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+try:
+    from utils.augmentation import POLARITY_INVERSION_DEFAULT
+except ImportError:
+    POLARITY_INVERSION_DEFAULT = True
+
+# ==============================================================================
+# AUGMENTATION SHORT CODES (Used for folder naming)
+# ==============================================================================
+# - rot : Rotation
+# - zm  : Zoom
+# - sh  : Shift (Translation)
+# - shr : Shear
+# - br  : Brightness
+# - ct  : Contrast
+# - cj  : Color Jitter
+# - gn  : Gaussian Noise
+# - re  : Random Erasing
+# - rc  : Random Crop
+# - pt  : Perspective Transform
+# - fl  : Flashlight Disturbance
+# ==============================================================================
 
 # ==============================================================================
 # CONFIGURATION MANAGEMENT
@@ -75,7 +115,8 @@ class AugmentationConfig:
                 "random_erasing": {"enabled": False, "probability": 0.1, "erasing_max_area": 0.1, "erasing_aspect_ratio": [0.3, 3.3]},
                 "random_crop": {"enabled": True, "probability": 0.1, "crop_percent": 0.9},
                 "perspective": {"enabled": True, "probability": 0.1, "perspective_scale": 0.1},
-                "flashlight": {"enabled": True, "probability": 0.3, "flashlight_intensity": 0.8, "flashlight_radius_range": [0.1, 0.3], "flashlight_progressive": True, "flashlight_affected_area": 0.25, "flashlight_probability": 0.3}
+                "flashlight": {"enabled": True, "probability": 0.3, "flashlight_intensity": 0.8, "flashlight_radius_range": [0.1, 0.3], "flashlight_progressive": True, "flashlight_affected_area": 0.25, "flashlight_probability": 0.3},
+                "polarity_inversion": {"enabled": True, "probability": 0.5}
             }
         }
     
@@ -175,6 +216,12 @@ class AugmentationConfig:
             globals()["AUG_FLASHLIGHT_PROGRESSIVE"] = flashlight["flashlight_progressive"]
             globals()["AUG_FLASHLIGHT_AFFECTED_AREA"] = flashlight["flashlight_affected_area"]
             globals()["AUG_FLASHLIGHT_PROBABILITY"] = flashlight["flashlight_probability"]
+        
+        # Polarity Inversion
+        if "polarity_inversion" in augmentations:
+            polarity_inversion = augmentations["polarity_inversion"]
+            globals()["AUG_POLARITY_INVERSION"] = polarity_inversion["enabled"]
+            globals()["AUG_POLARITY_INVERSION_PROB"] = polarity_inversion.get("probability", 0.5)
     
     def get_augmentation_probability(self, aug_name):
         """Get probability for a specific augmentation"""
@@ -222,7 +269,25 @@ AUGMENTATION_MAP = {
     'random_erasing': 'apply_random_erasing',
     'random_crop': 'apply_random_crop',
     'perspective': 'apply_perspective_transform',
-    'flashlight': 'apply_flashlight_disturbance'
+    'flashlight': 'apply_flashlight_disturbance',
+    'polarity_inversion': 'apply_polarity_inversion'
+}
+
+# Mapping for short codes
+AUGMENTATION_CODE_MAP = {
+    'rotation': 'rot',
+    'zoom': 'zm',
+    'shift': 'sh',
+    'shear': 'shr',
+    'brightness': 'br',
+    'contrast': 'ct',
+    'color_jitter': 'cj',
+    'gaussian_noise': 'gn',
+    'random_erasing': 're',
+    'random_crop': 'rc',
+    'perspective': 'pt',
+    'flashlight': 'fl',
+    'polarity_inversion': 'plr'
 }
 
 # Global variable to store selected augmentations
@@ -235,7 +300,7 @@ SELECTED_AUGMENTATIONS = None
 class SingleShotAugmentor:
     """Single-shot data augmentation that processes entire dataset folders"""
     
-    def __init__(self, input_dir=None, output_dir=None, selected_augmentations=None, config_path=None):
+    def __init__(self, input_dir=None, output_dir=None, selected_augmentations=None, config_path=None, overwrite=False, mirror_inversion=True):
         # Load configuration FIRST
         self.config = AugmentationConfig(config_path)
         
@@ -245,6 +310,8 @@ class SingleShotAugmentor:
         self.input_shape = INPUT_SHAPE
         self.use_grayscale = USE_GRAYSCALE
         self.selected_augmentations = selected_augmentations or SELECTED_AUGMENTATIONS
+        self.overwrite = overwrite
+        self.mirror_inversion = mirror_inversion
         
         # Validate input directory
         if not os.path.exists(self.input_dir):
@@ -272,13 +339,17 @@ class SingleShotAugmentor:
     def setup_directories(self):
         """Setup directory structure matching the original dataset"""
         if os.path.exists(self.output_dir):
-            print(f"⚠️  Output directory already exists: {self.output_dir}")
-            response = input("Continue and overwrite? (y/n): ").lower().strip()
-            if response != 'y':
-                print("Augmentation cancelled.")
-                exit(0)
-            else:
+            if self.overwrite:
+                print(f"⚠️  Output directory already exists: {self.output_dir}. Overwriting as requested.")
                 shutil.rmtree(self.output_dir)
+            else:
+                print(f"⚠️  Output directory already exists: {self.output_dir}")
+                response = input("Continue and overwrite? (y/n): ").lower().strip()
+                if response != 'y':
+                    print("Augmentation cancelled.")
+                    exit(0)
+                else:
+                    shutil.rmtree(self.output_dir)
         
         os.makedirs(self.output_dir)
         print(f"📁 Created output directory: {self.output_dir}")
@@ -699,6 +770,26 @@ class SingleShotAugmentor:
         
         return self.ensure_correct_shape(disturbed)
     
+    def apply_polarity_inversion(self, image):
+        """Apply 'Real' polarity inversion - stretches contrast then inverts (1.0 - x)"""
+        # Reset random seed for this function
+        random.seed()
+        np.random.seed()
+        
+        image = self.ensure_correct_shape(image)
+        
+        # Contrast Stretching: Map min to 0.0 and max to 1.0 before inverting
+        # This ensures "black gets white and white gets dark" even with noisy backgrounds
+        img_min = np.min(image)
+        img_max = np.max(image)
+        
+        if img_max > img_min:
+            image = (image - img_min) / (img_max - img_min)
+            
+        # Assuming pixel values are in [0, 1] range
+        inverted = 1.0 - image
+        return self.ensure_correct_shape(inverted)
+    
     def get_available_augmentations(self):
         """Get list of available augmentation functions based on selection and configuration"""
         if self.selected_augmentations:
@@ -729,7 +820,7 @@ class SingleShotAugmentor:
         
         return available_augs
     
-    def augment_single_image(self, image, label, original_path, augmentation_id):
+    def augment_single_image(self, image, label, original_path, augmentation_id, selected_augs=None):
         """Apply conservative augmentation to a single image"""
         # Initialize random seed for this specific augmentation
         random.seed()  # Use system time for true randomness
@@ -750,6 +841,8 @@ class SingleShotAugmentor:
         color_augmentations = [(func, prob, name) for func, prob, aug_type, name in all_augmentations if aug_type == 'color']
         other_augmentations = [(func, prob, name) for func, prob, aug_type, name in all_augmentations if aug_type == 'other']
         
+        applied_codes = []
+        
         # Apply spatial augmentations (at most 2)
         applied_spatial = 0
         random.shuffle(spatial_augmentations)
@@ -758,6 +851,7 @@ class SingleShotAugmentor:
                 try:
                     augmented = aug_func(augmented)
                     applied_spatial += 1
+                    applied_codes.append(AUGMENTATION_CODE_MAP.get(aug_name, aug_name[:3]))
                     # print(f"Applied spatial augmentation: {aug_name}")  # Debug
                 except Exception as e:
                     # print(f"Failed to apply {aug_name}: {e}")  # Debug
@@ -770,6 +864,7 @@ class SingleShotAugmentor:
                 if random.random() < probability:
                     try:
                         augmented = aug_func(augmented)
+                        applied_codes.append(AUGMENTATION_CODE_MAP.get(aug_name, aug_name[:3]))
                         # print(f"Applied color augmentation: {aug_name}")  # Debug
                         break  # Only apply one color augmentation
                     except Exception as e:
@@ -783,6 +878,7 @@ class SingleShotAugmentor:
             if random.random() < probability:
                 try:
                     augmented = aug_func(augmented)
+                    applied_codes.append(AUGMENTATION_CODE_MAP.get(aug_name, aug_name[:3]))
                     # print(f"Applied other augmentation: {aug_name}")  # Debug
                 except Exception as e:
                     # print(f"Failed to apply {aug_name}: {e}")  # Debug
@@ -793,20 +889,51 @@ class SingleShotAugmentor:
         
         # Save augmented image
         if SAVE_AUGMENTED_IMAGES:
-            self.save_augmented_image(augmented, label, original_path, augmentation_id)
+            # Sort codes for consistent folder naming
+            applied_codes.sort()
+            augmentation_type_short = "_".join(applied_codes) if applied_codes else ""
+            
+            # Skip if no augmentation was applied (to avoid duplicates of originals)
+            if not augmentation_type_short:
+                return augmented
+
+            # Save normal version
+            self.save_augmented_image(augmented, label, original_path, augmentation_id, augmentation_type_short, is_inverted=False)
+            
+            # Save mirrored real-inversion twin if enabled
+            if self.mirror_inversion:
+                inverted_augmented = self.apply_polarity_inversion(augmented)
+                self.save_augmented_image(inverted_augmented, label, original_path, augmentation_id, augmentation_type_short, is_inverted=True)
         
         return augmented
     
-    def save_augmented_image(self, image, label, original_path, augmentation_id):
-        """Save augmented image to disk preserving folder structure"""
+    def save_augmented_image(self, image, label, original_path, augmentation_id, augmentation_type_short, is_inverted=False):
+        """Save an augmented image with appropriate naming and directory structure"""
         # Get relative path from input directory
         relative_path = os.path.relpath(os.path.dirname(original_path), self.input_dir)
-        aug_dir = os.path.join(self.output_dir, relative_path)
+        
+        # Get original dataset name (basename of input_dir)
+        original_dataset = os.path.basename(os.path.normpath(self.input_dir))
+        
+        # Normal structure: dataset / codes / file (Keep flat as requested)
+        if augmentation_type_short:
+            aug_dir = os.path.join(self.output_dir, relative_path, original_dataset, augmentation_type_short)
+        else:
+            aug_dir = os.path.join(self.output_dir, relative_path, original_dataset)
+                
         os.makedirs(aug_dir, exist_ok=True)
         
-        # Create filename - use JPG
+        # Create filename
         original_filename = os.path.splitext(os.path.basename(original_path))[0]
-        filename = f"{original_filename}_{augmentation_id:03d}_aug.jpg"
+        suffix = f"_{augmentation_type_short}" if augmentation_type_short else ""
+        
+        if is_inverted:
+            # Suffix _inv and extension .jpeg for inverted twin
+            filename = f"{original_filename}_{augmentation_id:03d}_aug{suffix}_inv.jpeg"
+        else:
+            # Standard .jpg for normal version
+            filename = f"{original_filename}_{augmentation_id:03d}_aug{suffix}.jpg"
+            
         filepath = os.path.join(aug_dir, filename)
         
         # Convert from [0,1] float to [0,255] uint8
@@ -828,40 +955,31 @@ class SingleShotAugmentor:
         
         # Load dataset
         images, labels, paths = self.load_entire_dataset()
-        
-        # Run augmentation
         total_original = len(images)
-        total_augmented = total_original * AUGMENTATION_MULTIPLIER
         
         # Get enabled augmentations for display
         enabled_augs = self.selected_augmentations or self.config.get_enabled_augmentations()
         
         print(f"🔧 Augmentation settings:")
         print(f"   Multiplier: {AUGMENTATION_MULTIPLIER}x")
-        print(f"   Expected output: {total_augmented} images")
         print(f"   Threads: {AUGMENTATION_THREADS}")
         print(f"   Target shape: {INPUT_HEIGHT}x{INPUT_WIDTH}x{INPUT_CHANNELS}")
         print(f"   Configuration file: {self.config.config_path}")
         print(f"   Enabled augmentations: {', '.join(enabled_augs)}")
         
-        # Display augmentation probabilities
-        print(f"   Augmentation probabilities:")
-        for aug_name in enabled_augs:
-            prob = self.config.get_augmentation_probability(aug_name)
-            print(f"     - {aug_name}: {prob:.1%}")
-        
         # Use parallel processing
         with ThreadPoolExecutor(max_workers=AUGMENTATION_THREADS) as executor:
             futures = []
             
-            for i in range(len(images)):
-                for aug_id in range(AUGMENTATION_MULTIPLIER):
-                    futures.append(
-                        executor.submit(
-                            self.augment_single_image, 
-                            images[i], labels[i], paths[i], aug_id
-                        )
-                    )
+            # Main Augmentation Loop
+            for img, label, path in zip(images, labels, paths):
+                # 1. Save mirrored original twin if mirroring is enabled
+                if self.mirror_inversion:
+                    futures.append(executor.submit(self._save_inverted_original, img, label, path))
+
+                # 2. Perform multiplier iterations for each original image
+                for i in range(AUGMENTATION_MULTIPLIER):
+                    futures.append(executor.submit(self.augment_single_image, img, label, path, i, enabled_augs))
             
             # Process with progress bar
             completed = 0
@@ -875,9 +993,14 @@ class SingleShotAugmentor:
         
         print(f"✅ Single-shot augmentation completed!")
         print(f"   Original images: {total_original}")
-        print(f"   Augmented images: {completed}")
-        print(f"   Total images: {total_original + completed}")
+        print(f"   Total operations: {completed}")
         print(f"   Output directory: {self.output_dir}")
+
+    def _save_inverted_original(self, image, label, path):
+        """Helper for 1:1 original inversion"""
+        inverted = self.apply_polarity_inversion(image)
+        # Empty augmentation_type_short means it goes into the root
+        self.save_augmented_image(inverted, label, path, augmentation_id=0, augmentation_type_short="", is_inverted=True)
 
 
 def configure_augmentations(selected_augs):
@@ -916,6 +1039,8 @@ def main():
                        help='Path to JSON configuration file (default: augmentation_params.json)')
     parser.add_argument('--create-config', action='store_true',
                        help='Create a default configuration file and exit')
+    parser.add_argument('-y', '--yes', action='store_true',
+                       help='Bypass overwrite confirmation prompt')
     
     args = parser.parse_args()
     
@@ -952,7 +1077,9 @@ def main():
             input_dir=args.input, 
             output_dir=args.output, 
             selected_augmentations=selected_augs,
-            config_path=args.config
+            config_path=args.config,
+            overwrite=args.yes,
+            mirror_inversion=True # Always enabled by default now
         )
         
         # Override multiplier from command line if provided

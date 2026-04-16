@@ -6,12 +6,12 @@
     "use_grayscale": false
   },
   "dataset_paths": {
-    "input_dataset_dir": "../real_integra/images",
+    "input_dataset_dir": "../GWF_watermeter/images",
     "augmented_data_dir": null
   },
   "augmentation_settings": {
     "use_data_augmentation": true,
-    "augmentation_multiplier": 2,
+    "augmentation_multiplier": 1,
     "augmentation_threads": 4,
     "augmentation_batch_size": 32,
     "save_augmented_images": true,
