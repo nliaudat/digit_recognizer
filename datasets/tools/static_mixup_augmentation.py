@@ -45,8 +45,8 @@ DEFAULT_CONFIG = {
         "grayscale": False
     },
     "dataset": {
-        "input_dir": "../real_integra/images",
-        "output_dir": "../real_integra/static_augmentation_mixup",
+        "input_dir": "../Tenth-of-step-of-a-meter-digit/images",
+        "output_dir": "../Tenth-of-step-of-a-meter-digit/static_augmentation_mixup",
         "accuracy_csv": "per_class_accuracy.csv"  # Path to CSV with class accuracies
     },
     "mixup": {
@@ -61,9 +61,9 @@ DEFAULT_CONFIG = {
         "enabled": True,
         "base_variants_per_image": 1,
         "tiered_factors": {
-            "low": {"max_accuracy": 0.90, "factor": 10},
+            "low": {"max_accuracy": 0.90, "factor": 15},
             "medium": {"max_accuracy": 0.95, "factor": 5},
-            "high": {"factor": 1}
+            "high": {"factor": 0}
         }
     },
     "processing": {
