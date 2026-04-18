@@ -42,3 +42,5 @@ onnxruntime>=1.18.0
 onnx2tf==1.28.8
 onnx_graphsurgeon>=0.3.27
 sng4onnx>=1.0.1
+psutil>=5.9.0
+ai-edge-litert>=0.1.0
