@@ -193,7 +193,7 @@ def update_derived_parameters():
             'type': 'label_file', 
             'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
             'path': 'datasets/static_augmentation_mixup', 
-            'weight': 2.0,  # ~3.3k images (Small dataset, weighted for for mixup bad classes)
+            'weight': 0.8,  # ~3.3k images (Small dataset, weighted for for mixup bad classes)
             'not_in_bench': True, # Not in benchmark because it is generated data
         },
         {
@@ -253,19 +253,19 @@ update_derived_parameters()
    # Produces both .espdl (ESP32) and .tflite (if USE_TQT_FOR_TFLITE=True).
 
 # TFLite Conversion Parameters
-QUANTIZE_MODEL = False # Enable post-training quantization for the TFLite model
+QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
 # ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
 ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
                          # If False: quantize to uint8 range [0, 255] (default)
                          
 # Quantization Aware Training
-USE_QAT = False  # Enable Quantization Aware Training
-QAT_QUANTIZE_ALL = False  # Quantize all layers
+USE_QAT = True  # Enable Quantization Aware Training
+QAT_QUANTIZE_ALL = True  # Quantize all layers
 QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
 
 # TQT (ESP-DL) Trainable Quantization Thresholds Pipeline
-USE_TQT_PIPELINE = True       # Enable high-precision float-to-TQT export pipeline (RECOMMENDED)
-USE_TQT_FOR_TFLITE = True      # Generate TFLite metadata from TQT scales (higher accuracy than standard PTQ)
+USE_TQT_PIPELINE = False       # Enable high-precision float-to-TQT export pipeline (RECOMMENDED)
+USE_TQT_FOR_TFLITE = False      # Generate TFLite metadata from TQT scales (higher accuracy than standard PTQ)
 TQT_NUM_BITS = 8               # Quantization bit width (8-bit fixed point for ESP32/S3/P4)
 TQT_TARGET = 'esp32'           # Default target for single-model export ('esp32', 'esp32s3', 'esp32p4')
 TQT_EXPORT_ALL_TARGETS = True  # Generate artifacts for ALL targets in every run (Automatic batch export)
