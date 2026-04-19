@@ -221,51 +221,110 @@ update_derived_parameters()
 # QUANTIZATION PARAMETERS
 # ==============================================================================
 
-# QUANTIZATION MODES (9 possible combinations):
+# ==============================================================================
+# QUANTIZATION MODE - MASTER CONTROL
+# ==============================================================================
+# Options:
+#   - "none":        Float32 training & inference (Reference baseline)
+#   - "ptq":         Post-Training Quantization (standard TFLite UINT8/INT8)
+#   - "qat":         Quantization Aware Training (QAT with fake quantization)
+#   - "tqt":         Trainable Quantization Thresholds (ESP-DL pipeline, RECOMMENDED)
+#   - "auto":        Automatically select best based on model and hardware
+#
+# When QUANTIZATION_MODE is set, individual flags below are automatically configured.
+# To manually override individual flags, set QUANTIZATION_MODE = None.
+# ==============================================================================
 
-# 1. QUANTIZE_MODEL=False, USE_QAT=False, ESP_DL_QUANTIZE=False
-   # Float32 training & inference (Reference baseline)
+QUANTIZATION_MODE = "tqt"  # Options: "none", "ptq", "qat", "tqt", "auto"
 
-# 2. QUANTIZE_MODEL=False, USE_QAT=False, ESP_DL_QUANTIZE=True  
-   # INVALID (ESP-DL requires quantization enabled)
-
-# 3. QUANTIZE_MODEL=False, USE_QAT=True, ESP_DL_QUANTIZE=False
-   # QAT training, float32 inference (Fake-quantization only)
-
-# 4. QUANTIZE_MODEL=False, USE_QAT=True, ESP_DL_QUANTIZE=True
-   # INVALID (ESP-DL requires quantization enabled)
-
-# 5. QUANTIZE_MODEL=True, USE_QAT=False, ESP_DL_QUANTIZE=False
-   # Standard training -> TFLite UINT8 Post-Training Quantization (PTQ)
-
-# 6. QUANTIZE_MODEL=True, USE_QAT=False, ESP_DL_QUANTIZE=True
-   # Standard training -> TFLite INT8 Post-Training Quantization (ESP-DL compatible)
-
-# 7. QUANTIZE_MODEL=True, USE_QAT=True, ESP_DL_QUANTIZE=False  
-   # Quantization Aware Training (QAT) -> UINT8 Quantized Model
-
-# 8. QUANTIZE_MODEL=True, USE_QAT=True, ESP_DL_QUANTIZE=True
-   # Quantization Aware Training (QAT) -> INT8 Quantized Model (ESP-DL standard)
-
-# 9. USE_TQT_PIPELINE=True (RECOMMENDED)
-   # SOTA Trainable Quantization Thresholds (TQT) Pipeline via esp-ppq.
-   # Fine-tunes scales on calibration data. Best balance of speed/accuracy.
-   # Produces both .espdl (ESP32) and .tflite (if USE_TQT_FOR_TFLITE=True).
-
-# TFLite Conversion Parameters
-QUANTIZE_MODEL = True # Enable post-training quantization for the TFLite model
-# ESP-DL specific quantization (only applies if QUANTIZE_MODEL = True)
-ESP_DL_QUANTIZE = False  # Quantize to int8 range [-128, 127] for ESP-DL
-                         # If False: quantize to uint8 range [0, 255] (default)
-                         
-# Quantization Aware Training
-USE_QAT = True  # Enable Quantization Aware Training
-QAT_QUANTIZE_ALL = True  # Quantize all layers
-QAT_SCHEME = '8bit'  # Options: '8bit', 'float16'
+# Legacy individual flags (automatically overridden when QUANTIZATION_MODE is not None)
+# These are preserved for backward compatibility and manual fine-tuning
+QUANTIZE_MODEL = True        # Enable post-training quantization for the TFLite model
+ESP_DL_QUANTIZE = False      # Quantize to int8 range [-128, 127] for ESP-DL
+USE_QAT = True               # Enable Quantization Aware Training
+QAT_QUANTIZE_ALL = True      # Quantize all layers
+QAT_SCHEME = '8bit'          # Options: '8bit', 'float16'
 
 # TQT (ESP-DL) Trainable Quantization Thresholds Pipeline
-USE_TQT_PIPELINE = False       # Enable high-precision float-to-TQT export pipeline (RECOMMENDED)
-USE_TQT_FOR_TFLITE = False      # Generate TFLite metadata from TQT scales (higher accuracy than standard PTQ)
+USE_TQT_PIPELINE = False     # Enable high-precision float-to-TQT export pipeline
+
+# Apply quantization mode configuration
+def _configure_quantization_mode():
+    """Configure quantization flags based on QUANTIZATION_MODE"""
+    global QUANTIZE_MODEL, ESP_DL_QUANTIZE, USE_QAT, USE_TQT_PIPELINE
+    
+    if QUANTIZATION_MODE is None:
+        # Manual mode - preserve existing values
+        return
+    
+    mode = QUANTIZATION_MODE.lower()
+    
+    if mode == "none":
+        # Float32 only - no quantization
+        QUANTIZE_MODEL = False
+        ESP_DL_QUANTIZE = False
+        USE_QAT = False
+        USE_TQT_PIPELINE = False
+        print("🔧 QUANTIZATION_MODE='none': Float32 training & inference only")
+        
+    elif mode == "ptq":
+        # Post-Training Quantization only
+        QUANTIZE_MODEL = True
+        ESP_DL_QUANTIZE = False   # Default to UINT8, can be overridden
+        USE_QAT = False
+        USE_TQT_PIPELINE = False
+        print("🔧 QUANTIZATION_MODE='ptq': Post-Training Quantization (standard TFLite)")
+        
+    elif mode == "qat":
+        # Quantization Aware Training
+        QUANTIZE_MODEL = True
+        ESP_DL_QUANTIZE = False   # Default to UINT8, can be overridden
+        USE_QAT = True
+        USE_TQT_PIPELINE = False
+        print("🔧 QUANTIZATION_MODE='qat': Quantization Aware Training with fake quantization")
+        
+    elif mode == "tqt":
+        # Trainable Quantization Thresholds (ESP-DL pipeline)
+        QUANTIZE_MODEL = True
+        ESP_DL_QUANTIZE = True    # TQT uses INT8 for ESP-DL
+        USE_QAT = False           # TQT replaces QAT
+        USE_TQT_PIPELINE = True
+        print("🔧 QUANTIZATION_MODE='tqt': Trainable Quantization Thresholds (ESP-DL pipeline, RECOMMENDED)")
+        
+    elif mode == "auto":
+        # Auto-select based on model and hardware
+        _auto_configure_quantization()
+        
+    else:
+        raise ValueError(f"❌ Invalid QUANTIZATION_MODE: {QUANTIZATION_MODE}. "
+                        f"Must be one of: 'none', 'ptq', 'qat', 'tqt', 'auto'")
+
+def _auto_configure_quantization():
+    """Automatically select quantization mode based on model and target hardware"""
+    global QUANTIZE_MODEL, ESP_DL_QUANTIZE, USE_QAT, USE_TQT_PIPELINE
+    
+    # Check if model is ESP32-compatible
+    esp_compatible_models = [m for m in AVAILABLE_MODELS if not m.endswith("_teacher")]
+    
+    if MODEL_ARCHITECTURE in esp_compatible_models:
+        # For ESP32 deployment, use TQT (best accuracy)
+        QUANTIZE_MODEL = True
+        ESP_DL_QUANTIZE = True
+        USE_QAT = False
+        USE_TQT_PIPELINE = True
+        print("🔧 QUANTIZATION_MODE='auto': Selected TQT for ESP32 deployment")
+    else:
+        # For PC-only models, use float32
+        QUANTIZE_MODEL = False
+        ESP_DL_QUANTIZE = False
+        USE_QAT = False
+        USE_TQT_PIPELINE = False
+        print("🔧 QUANTIZATION_MODE='auto': Selected float32 for PC-only model")
+
+# Apply configuration
+_configure_quantization_mode()
+
+# TQT Parameters (only relevant when USE_TQT_PIPELINE=True)
 TQT_NUM_BITS = 8               # Quantization bit width (8-bit fixed point for ESP32/S3/P4)
 TQT_TARGET = 'esp32'           # Default target for single-model export ('esp32', 'esp32s3', 'esp32p4')
 TQT_EXPORT_ALL_TARGETS = True  # Generate artifacts for ALL targets in every run (Automatic batch export)
@@ -326,12 +385,8 @@ TQT_COLLECTING_DEVICE   = _tqt_cfg["TQT_COLLECTING_DEVICE"]
 TQT_CALIB_STEPS         = _tqt_cfg["TQT_CALIB_STEPS"]
 TQT_CALIB_BATCH_SIZE    = _tqt_cfg["TQT_CALIB_BATCH_SIZE"]
 
-# Automatically disable quantization flags for PC-only validator models
-# PC_ONLY_MODELS = {"high_accuracy_validator", "super_high_accuracy_validator"}
-# if MODEL_ARCHITECTURE in PC_ONLY_MODELS:
-#     QUANTIZE_MODEL = False
-#     ESP_DL_QUANTIZE = False
-#     USE_QAT = False
+# For TQT pipeline with TFLite export
+USE_TQT_FOR_TFLITE = False      # Generate TFLite metadata from TQT scales (higher accuracy than standard PTQ)
 
 # Dataset disk cache directory
 DATASET_CACHE_DIR = os.environ.get("DATASET_CACHE_DIR", ".dataset_cache")
@@ -903,6 +958,11 @@ def validate_hyperparameters():
     if LEARNING_RATE <= 0:
         raise ValueError(f"❌ Invalid LEARNING_RATE: {LEARNING_RATE}. Must be positive")
     
+    # Quantization mode validation
+    valid_modes = ["none", "ptq", "qat", "tqt", "auto", None]
+    if QUANTIZATION_MODE not in valid_modes:
+        raise ValueError(f"❌ Invalid QUANTIZATION_MODE: {QUANTIZATION_MODE}. Must be one of {valid_modes}")
+    
     print("✅ All hyperparameters validated successfully!")
 
 def validate_quantization_parameters():
@@ -914,20 +974,12 @@ def validate_quantization_parameters():
         'QUANTIZE_MODEL': QUANTIZE_MODEL,
         'USE_QAT': USE_QAT, 
         'ESP_DL_QUANTIZE': ESP_DL_QUANTIZE,
-        'USE_TQT_PIPELINE': USE_TQT_PIPELINE
+        'USE_TQT_PIPELINE': USE_TQT_PIPELINE,
+        'QUANTIZATION_MODE': QUANTIZATION_MODE
     }
     
     corrected_params = original_params.copy()
     messages = []
-    
-    # Rule 0: high_accuracy_validator does not support quantization
-    # if MODEL_ARCHITECTURE == "high_accuracy_validator":
-    #     if QUANTIZE_MODEL or USE_QAT or ESP_DL_QUANTIZE:
-    #         messages.append("❌ 'high_accuracy_validator' selected: Disabling all quantization flags (QUANTIZE_MODEL, USE_QAT, ESP_DL_QUANTIZE)")
-    #         corrected_params['QUANTIZE_MODEL'] = False
-    #         corrected_params['USE_QAT'] = False
-    #         corrected_params['ESP_DL_QUANTIZE'] = False
-    #         messages.append("✅ Auto-corrected: Set all quantization flags to False for 'high_accuracy_validator'")
     
     # Rule 1: ESP_DL_QUANTIZE requires QUANTIZE_MODEL
     if ESP_DL_QUANTIZE and not QUANTIZE_MODEL:
@@ -943,31 +995,45 @@ def validate_quantization_parameters():
             corrected_params['QUANTIZE_MODEL'] = True
             messages.append("✅ Auto-corrected: Set QUANTIZE_MODEL=True")
     
-    # Rule 3: QAT + ESP-DL is valid but needs special handling
-    if USE_QAT and ESP_DL_QUANTIZE:
-        messages.append("💡 Using QAT + ESP-DL quantization (INT8)")
+    # Rule 3: QAT and TQT are mutually exclusive
+    if USE_QAT and USE_TQT_PIPELINE:
+        messages.append("⚠️  Both USE_QAT and USE_TQT_PIPELINE are True. TQT takes precedence.")
+        corrected_params['USE_QAT'] = False
+        messages.append("✅ Auto-corrected: Set USE_QAT=False")
+    
+    # Rule 4: TQT requires ESP_DL_QUANTIZE=True
+    if USE_TQT_PIPELINE and not ESP_DL_QUANTIZE:
+        messages.append("⚠️  TQT pipeline requires ESP_DL_QUANTIZE=True")
+        corrected_params['ESP_DL_QUANTIZE'] = True
+        messages.append("✅ Auto-corrected: Set ESP_DL_QUANTIZE=True")
+    
+    # Rule 5: TQT requires QUANTIZE_MODEL=True
+    if USE_TQT_PIPELINE and not QUANTIZE_MODEL:
+        messages.append("⚠️  TQT pipeline requires QUANTIZE_MODEL=True")
+        corrected_params['QUANTIZE_MODEL'] = True
+        messages.append("✅ Auto-corrected: Set QUANTIZE_MODEL=True")
     
     # Determine the final mode
-    if not corrected_params['QUANTIZE_MODEL'] and not corrected_params['USE_TQT_PIPELINE']:
-        mode = "Float32 training & inference"
-    elif corrected_params['USE_TQT_PIPELINE']:
-        mode = "Float training with TQT (ESP-DL) export pipeline"
-    else:
-        if corrected_params['USE_QAT']:
-            if corrected_params['ESP_DL_QUANTIZE']:
-                mode = "QAT + INT8 quantization for ESP-DL"
-            else:
-                mode = "QAT + UINT8 quantization"
+    if USE_TQT_PIPELINE:
+        mode = "TQT Pipeline (Trainable Quantization Thresholds)"
+    elif USE_QAT:
+        if ESP_DL_QUANTIZE:
+            mode = "QAT + INT8 quantization for ESP-DL"
         else:
-            if corrected_params['ESP_DL_QUANTIZE']:
-                mode = "Standard training + INT8 post-quantization (ESP-DL)"
-            else:
-                mode = "Standard training + UINT8 post-quantization"
+            mode = "QAT + UINT8 quantization"
+    elif QUANTIZE_MODEL:
+        if ESP_DL_QUANTIZE:
+            mode = "Standard training + INT8 post-quantization (ESP-DL)"
+        else:
+            mode = "Standard training + UINT8 post-quantization"
+    else:
+        mode = "Float32 training & inference"
     
     messages.append(f"✅ Final mode: {mode}")
     
     # Check if any corrections were made
-    needs_correction = any(original_params[k] != corrected_params[k] for k in original_params)
+    needs_correction = any(original_params[k] != corrected_params[k] for k in original_params 
+                          if k != 'QUANTIZATION_MODE')  # QUANTIZATION_MODE is master control
     
     return not needs_correction, corrected_params, "\n".join(messages)
 
@@ -1011,6 +1077,7 @@ def get_hyperparameter_summary():
             'sources': [source['name'] for source in DATA_SOURCES],
         },
         'quantization': {
+            'mode': QUANTIZATION_MODE,
             'qat': USE_QAT,
             'post_training': QUANTIZE_MODEL,
             'esp_dl': ESP_DL_QUANTIZE,
@@ -1086,6 +1153,49 @@ def get_hyperparameter_summary_text():
                 lines.append(f"  {key}: {value}")
     
     return "\n".join(lines)
+
+# ==============================================================================
+# HELPER FUNCTIONS FOR QUANTIZATION MODE
+# ==============================================================================
+
+def get_quantization_mode_info():
+    """Return detailed information about current quantization mode"""
+    mode_info = {
+        'mode': QUANTIZATION_MODE,
+        'description': '',
+        'flags': {
+            'QUANTIZE_MODEL': QUANTIZE_MODEL,
+            'USE_QAT': USE_QAT,
+            'ESP_DL_QUANTIZE': ESP_DL_QUANTIZE,
+            'USE_TQT_PIPELINE': USE_TQT_PIPELINE,
+        }
+    }
+    
+    if QUANTIZATION_MODE == 'none':
+        mode_info['description'] = 'Float32 only - no quantization. Best for debugging and baseline comparison.'
+    elif QUANTIZATION_MODE == 'ptq':
+        mode_info['description'] = 'Post-Training Quantization - Standard TFLite quantization after training. Fast but may lose some accuracy.'
+    elif QUANTIZATION_MODE == 'qat':
+        mode_info['description'] = 'Quantization Aware Training - Simulates quantization during training. Better accuracy than PTQ.'
+    elif QUANTIZATION_MODE == 'tqt':
+        mode_info['description'] = 'Trainable Quantization Thresholds - State-of-the-art quantization for ESP-DL. Best accuracy for ESP32 deployment.'
+    elif QUANTIZATION_MODE == 'auto':
+        mode_info['description'] = 'Auto-selection - Automatically chooses best mode based on model and target hardware.'
+    
+    return mode_info
+
+def set_quantization_mode(mode):
+    """Programmatically set quantization mode (useful for scripts)"""
+    global QUANTIZATION_MODE
+    valid_modes = ['none', 'ptq', 'qat', 'tqt', 'auto']
+    if mode not in valid_modes:
+        raise ValueError(f"Invalid mode: {mode}. Must be one of {valid_modes}")
+    
+    QUANTIZATION_MODE = mode
+    _configure_quantization_mode()
+    print(f"✅ Quantization mode set to: {mode}")
+    return get_quantization_mode_info()
+
 # ==============================================================================
 # INITIALIZATION
 # ==============================================================================
