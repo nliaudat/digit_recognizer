@@ -547,8 +547,10 @@ def main():
 
     if args.classes is not None:
         params.NB_CLASSES = args.classes
+        os.environ["DIGIT_NB_CLASSES"] = str(args.classes)
     if args.color is not None:
         params.INPUT_CHANNELS = 1 if args.color == "gray" else 3
+        os.environ["DIGIT_INPUT_CHANNELS"] = str(params.INPUT_CHANNELS)
     
     # Update derived parameters after potential CLI overrides
     if args.classes is not None or args.color is not None:
