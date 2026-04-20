@@ -265,6 +265,7 @@ def _configure_quantization_mode():
         ESP_DL_QUANTIZE = False
         USE_QAT = False
         USE_TQT_PIPELINE = False
+        USE_TQT_FOR_TFLITE = False   
         print("🔧 QUANTIZATION_MODE='none': Float32 training & inference only")
         
     elif mode == "ptq":
@@ -273,6 +274,7 @@ def _configure_quantization_mode():
         ESP_DL_QUANTIZE = False   # Default to UINT8, can be overridden
         USE_QAT = False
         USE_TQT_PIPELINE = False
+        USE_TQT_FOR_TFLITE = False   
         print("🔧 QUANTIZATION_MODE='ptq': Post-Training Quantization (standard TFLite)")
         
     elif mode == "qat":
@@ -281,6 +283,7 @@ def _configure_quantization_mode():
         ESP_DL_QUANTIZE = False   # Default to UINT8, can be overridden
         USE_QAT = True
         USE_TQT_PIPELINE = False
+        USE_TQT_FOR_TFLITE = False   
         print("🔧 QUANTIZATION_MODE='qat': Quantization Aware Training with fake quantization")
         
     elif mode == "tqt":
@@ -289,6 +292,7 @@ def _configure_quantization_mode():
         ESP_DL_QUANTIZE = True    # TQT uses INT8 for ESP-DL
         USE_QAT = False           # TQT replaces QAT
         USE_TQT_PIPELINE = True
+        USE_TQT_FOR_TFLITE = True   
         print("🔧 QUANTIZATION_MODE='tqt': Trainable Quantization Thresholds (ESP-DL pipeline, RECOMMENDED)")
         
     elif mode == "auto":
@@ -386,7 +390,7 @@ TQT_CALIB_STEPS         = _tqt_cfg["TQT_CALIB_STEPS"]
 TQT_CALIB_BATCH_SIZE    = _tqt_cfg["TQT_CALIB_BATCH_SIZE"]
 
 # For TQT pipeline with TFLite export
-USE_TQT_FOR_TFLITE = False      # Generate TFLite metadata from TQT scales (higher accuracy than standard PTQ)
+USE_TQT_FOR_TFLITE = True       # Generate TFLite metadata from TQT scales (higher accuracy than standard PTQ)
 
 # Dataset disk cache directory
 DATASET_CACHE_DIR = os.environ.get("DATASET_CACHE_DIR", ".dataset_cache")
