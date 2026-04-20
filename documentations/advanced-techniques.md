@@ -158,9 +158,34 @@ python diagnose_training.py --model digit_recognizer_v4 --track-weights
 
 ---
 
-## 3. Quantization-Aware Training (QAT)
+## 3. Quantization Strategies: QAT vs. TQT
 
-### Theory
+Choosing the right quantization strategy depends on your hardware target and where in the model lifecycle you currently are.
+
+### A. Core Strategies Compared
+
+| Strategy | Type | Timing | Main Use Case |
+| :--- | :--- | :--- | :--- |
+| **QAT** | Quantization Aware Training | **During training** | Highest accuracy for generic TFLite Micro. |
+| **TQT** | Trainable Quantization Thresholds | **Post-training** | **✅ Recommended for ESP32 (ESP-DL)**. |
+| **PTQ** | Post-Training Quantization | Post-training | Standard fast quantization. |
+
+### B. Master Configuration in `parameters.py`
+The master control for quantization is the `QUANTIZATION_MODE` parameter. It simplifies the configuration of several lower-level flags:
+
+```python
+# parameters.py
+QUANTIZATION_MODE = "tqt"  # Options: "none", "ptq", "qat", "tqt", "auto"
+```
+
+> [!IMPORTANT]
+> **QAT must be configured BEFORE running `train.py`.** If you have already trained a model in "none" or "tqt" mode, you cannot retroactively apply QAT without a full retraining.
+
+---
+
+### C. Theory & Workflow
+
+#### Quantization-Aware Training (QAT)
 QAT simulates quantization noise during training, allowing the model to adapt weights to better handle the precision loss in 8-bit integer formats. This bridges the accuracy gap between floating-point training and integer-only inference.
 
 | Method | Size Reduction | Accuracy Impact | Training Required |
@@ -168,8 +193,9 @@ QAT simulates quantization noise during training, allowing the model to adapt we
 | FP32 | 0% | Baseline | Full training |
 | Post-training Quantization | 75% | 2-5% loss | None |
 | **QAT** | 75% | 0.5-2% loss | Fine-tuning (10-20 epochs) |
+| **TQT** | 75% | 0.2-1% loss | Refinement (minutes) |
 
-### QAT Workflow
+**QAT Workflow:**
 ```text
 1. Train high-accuracy FP32 model (≥95% accuracy)
    ↓
@@ -182,7 +208,18 @@ QAT simulates quantization noise during training, allowing the model to adapt we
 5. Deploy to edge device
 ```
 
-### Hyperparameter Tuning
+#### Trainable Quantization Thresholds (TQT)
+TQT is a specialized refinement pipeline designed specifically for the **ESP-DL** library. It doesn't retrain the whole model; instead, it quickly tunes the "thresholds" (bit-shift scales) to match the ESP32 hardware precisely.
+
+**TQT Workflow:**
+1.  **Train**: Run `python train.py` with `QUANTIZATION_MODE = "tqt"` or `"none"`.
+2.  **Refine**: Run `python quantize_espdl.py --keras path/to/model.keras`.
+3.  **Result**: Produces an optimized `.espdl` file and a suite of TFLite variants.
+
+---
+
+### D. Hyperparameter Tuning
+
 #### Quantization Bits
 | Bits | Use Case | Memory Savings |
 | :--- | :--- | :--- |
@@ -202,19 +239,31 @@ QUANTIZATION_SCHEME = "esp_dl"  # Options: "tf_lite", "esp_dl"
 | **tf_lite** | TensorFlow Lite, generic edge | Broad support |
 | **esp_dl** | ESP32, ESP-DL library | Optimized for ESP32 |
 
-#### Fine-tuning Configuration
+#### QAT Fine-tuning Configuration
+*Note: These apply specifically when `QUANTIZATION_MODE = "qat"`.*
 ```python
 QAT_FINE_TUNING_EPOCHS = 10      # Number of fine-tuning epochs
 QAT_LEARNING_RATE = 1e-5         # 1/10 of initial training LR
 QAT_WARMUP_EPOCHS = 2            # Gradually introduce quantization
 ```
 
-### Hardware-Specific Considerations
+#### TQT Refinement Configuration
+*Note: These are passed as arguments to `quantize_espdl.py`.*
+```bash
+python quantize_espdl.py --steps 300 --lr 1e-6
+```
+
+---
+
+### E. Hardware-Specific Considerations
 | Hardware | Recommendation |
 | :--- | :--- |
-| **ESP32 / ESP32-S3** | Use `QUANTIZATION_SCHEME = "esp_dl"`, grayscale inputs, model < 200KB |
-| **Raspberry Pi / Linux** | Use `QUANTIZATION_SCHEME = "tf_lite"`, RGB acceptable |
-| **Cortex-M4/M7** | 8-bit quantization, grayscale, model < 150KB |
+| **ESP32 / ESP32-S3 / ESP32-P4** | Use **TQT** pipeline, `QUANTIZATION_SCHEME = "esp_dl"`, grayscale inputs, model < 200KB |
+| **Raspberry Pi / Linux** | Use **QAT** or **PTQ**, `QUANTIZATION_SCHEME = "tf_lite"`, RGB acceptable |
+| **Cortex-M4/M7** | 8-bit quantization (QAT), grayscale, model < 150KB |
+
+---
+
 
 ---
 
