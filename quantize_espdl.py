@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import shutil
 import subprocess
+import time
 import io
 import gc
 import onnx
@@ -92,6 +93,52 @@ def parse_args():
     
     return parser.parse_args()
 
+def verify_calibration_data(calib_data, expected_shape):
+    """Verify calibration data is valid before TQT."""
+    print("🔍 Verifying calibration data...")
+    issues = []
+    
+    for i, sample in enumerate(calib_data[:5]):  # Check first 5
+        if torch.isnan(sample).any():
+            issues.append(f"Sample {i} contains NaN")
+        if torch.isinf(sample).any():
+            issues.append(f"Sample {i} contains Inf")
+        if sample.shape != expected_shape:
+            issues.append(f"Sample {i} shape {sample.shape} != {expected_shape}")
+    
+    if issues:
+        print("❌ Calibration data issues found:")
+        for issue in issues:
+            print(f"   - {issue}")
+        return False
+    
+    print(f"✅ Calibration data verified: {len(calib_data)} samples, shape {expected_shape}")
+    return True
+
+def validate_model_for_tqt(onnx_path):
+    """Check if model is compatible with TQT quantization."""
+    model = onnx.load(onnx_path)
+    
+    # Check for unsupported ops
+    unsupported_ops = {'Reshape', 'Transpose', 'Gather'}  # TQT has issues with these
+    found_unsupported = []
+    
+    for node in model.graph.node:
+        if node.op_type in unsupported_ops:
+            found_unsupported.append(node.op_type)
+    
+    if found_unsupported:
+        print(f"⚠️ TQT may have issues with ops: {set(found_unsupported)}")
+        print("   Consider simplifying the model or using standard PTQ")
+        return False
+    
+    return True
+
+def get_progressive_calibration_data(x_train, steps, batch_size=32):
+    """Generate calibration data with uniform sampling."""
+    indices = np.random.choice(len(x_train), steps, replace=False)
+    return x_train[indices]
+
 def resolve_paths(args):
     model_name = args.model or params.MODEL_ARCHITECTURE
     
@@ -118,11 +165,15 @@ def resolve_paths(args):
     return keras_path, onnx_path, espdl_path
 
 def main():
-    check_threading_safety()
     args = parse_args()
     
     os.environ["DIGIT_NB_CLASSES"] = str(args.classes)
     os.environ["DIGIT_INPUT_CHANNELS"] = "1" if args.color == "gray" else "3"
+    
+    # Force update params in case they were already imported
+    params.NB_CLASSES = args.classes
+    params.INPUT_CHANNELS = 1 if args.color == "gray" else 3
+    params.update_derived_parameters()
 
     keras_path, onnx_path, espdl_path = resolve_paths(args)
 
@@ -133,8 +184,20 @@ def main():
     print(f"📦 Loading calibration data ({args.classes} classes, {args.color})...")
     (x_train, _), _, _ = get_data_splits()
     n = min(args.calib_steps, len(x_train))
-    x = preprocess_for_training(x_train[:n]).astype('float32')
+    x = get_progressive_calibration_data(x_train, n)
+    x = preprocess_for_training(x).astype('float32')
     calib_data = [torch.from_numpy(x[i].transpose(2, 0, 1)).unsqueeze(0) for i in range(n)]
+
+    color_channels = 1 if args.color == "gray" else 3
+    input_height   = params.INPUT_HEIGHT
+    input_width    = params.INPUT_WIDTH
+    
+    if not verify_calibration_data(calib_data, (1, color_channels, input_height, input_width)):
+        print("❌ Calibration verification failed. Exiting.")
+        sys.exit(1)
+
+    if not validate_model_for_tqt(onnx_path):
+        print("⚠️ Model may have issues with TQT, but continuing anyway.")
 
     target_backend = args.target 
     tqt_cfg = params._TQT_DEFAULTS.get(args.target, params._TQT_DEFAULTS.get("esp32"))
@@ -145,19 +208,51 @@ def main():
         np.save(calib_npy_path, calib_concat)
         
         worker_script = os.path.join(os.path.dirname(espdl_path), "_tqt_worker.py")
-        color_channels = 1 if args.color == "gray" else 3
         
         worker_script_content = f'''#!/usr/bin/env python3
 import sys
 import os
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
 import torch
 import numpy as np
+import onnx.helper
+import onnx.mapping
 from esp_ppq.api import espdl_quantize_onnx
 from esp_ppq import QuantizationSettingFactory
 import faulthandler
+
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
 faulthandler.enable()
+
+# Force UTF-8 output on Windows to support esp_ppq diagnostic tables
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
+# CRITICAL FIX for onnx >= 1.16.0
+class OnnxCompatibilityWrapper:
+    def __init__(self, func, mapping):
+        self.func = func
+        self.mapping = mapping
+    def __getitem__(self, key):
+        return self.mapping[key]
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+    def __iter__(self):
+        return iter(self.mapping)
+    def __len__(self):
+        return len(self.mapping)
+    def items(self):
+        return self.mapping.items()
+    def keys(self):
+        return self.mapping.keys()
+    def values(self):
+        return self.mapping.values()
+
+if callable(onnx.helper.tensor_dtype_to_np_dtype):
+    onnx.helper.tensor_dtype_to_np_dtype = OnnxCompatibilityWrapper(
+        onnx.helper.tensor_dtype_to_np_dtype, 
+        onnx.mapping.TENSOR_TYPE_TO_NP_TYPE
+    )
 
 torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
@@ -178,13 +273,13 @@ if quant_setting.tqt_optimization:
 calib_np = np.load(r"{os.path.abspath(calib_npy_path)}")
 calib_data = [torch.from_numpy(calib_np[i:i+1]) for i in range(calib_np.shape[0])]
 
-print("🚀 [Worker] Starting espdl_quantize_onnx...")
+print("[Worker] Starting espdl_quantize_onnx...")
 graph = espdl_quantize_onnx(
     onnx_import_file=r"{os.path.abspath(onnx_path)}",
     espdl_export_file=r"{os.path.abspath(espdl_path)}",
     calib_dataloader=calib_data,
     calib_steps={n},
-    input_shape=[1, {color_channels}, 32, 20],
+    input_shape=[1, {color_channels}, {input_height}, {input_width}],
     target="{target_backend}",
     num_of_bits={args.bits},
     setting=quant_setting,
@@ -194,9 +289,9 @@ graph = espdl_quantize_onnx(
 from esp_ppq.api.interface import export_ppq_graph
 from esp_ppq import TargetPlatform
 quant_onnx_path = r"{os.path.abspath(espdl_path)}".replace(".espdl", "_quantized.onnx")
-print(f"🔄 [Worker] Exporting Scale-Preserving ONNX -> {{quant_onnx_path}}")
+print(f"[Worker] Exporting Scale-Preserving ONNX -> {{quant_onnx_path}}")
 export_ppq_graph(graph, platform=TargetPlatform.ONNXRUNTIME, graph_save_to=quant_onnx_path)
-print("✅ [Worker] ESP-DL Quantization finished successfully!")
+print("[Worker] ESP-DL Quantization finished successfully!")
 '''
         with open(worker_script, 'w', encoding='utf-8') as f:
             f.write(worker_script_content)
@@ -204,7 +299,22 @@ print("✅ [Worker] ESP-DL Quantization finished successfully!")
         print("🔄 Spawning isolated TQT worker...")
         env = os.environ.copy()
         if args.device == "cpu": env["CUDA_VISIBLE_DEVICES"] = ""
-        subprocess.check_call([sys.executable, worker_script], env=env)
+
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                subprocess.check_call([sys.executable, worker_script], env=env, timeout=300) # 5 min timeout
+                break
+            except subprocess.TimeoutExpired:
+                print(f"⚠️ TQT worker timed out (attempt {attempt+1}/{max_retries})")
+            except subprocess.CalledProcessError as e:
+                print(f"⚠️ TQT worker failed (attempt {attempt+1}/{max_retries}): {e}")
+                if e.stdout:
+                    print(f"   Stdout:\n{e.stdout}")
+                if e.stderr:
+                    print(f"   Stderr:\n{e.stderr}")
+                if attempt == max_retries - 1: raise
+                time.sleep(2)
         
         if os.path.exists(calib_npy_path): os.remove(calib_npy_path)
         if os.path.exists(worker_script): os.remove(worker_script)
@@ -258,6 +368,7 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
                 custom_input_op_name_np_data_path=[["input", calib_npy_path, [0,0,0], [1,1,1]]],
                 not_use_onnxsim=True,
                 non_verbose=True,
+                overwrite_input_shape=["input", 1, params.INPUT_CHANNELS, params.INPUT_HEIGHT, params.INPUT_WIDTH],
                 **flags
             )
             
@@ -292,7 +403,7 @@ def organize_output_folder(output_dir):
     if not os.path.exists(full_models_dir): os.makedirs(full_models_dir)
     print(f"🧹 Organizing output folder: {output_dir}")
     
-    to_move_patterns = [".onnx", "_float32.tflite", "_float16.tflite", "_dynamic_range_quant.tflite", ".keras"]
+    to_move_patterns = ["_float32.tflite", "_float16.tflite", "_dynamic_range_quant.tflite"]
     
     for f in os.listdir(output_dir):
         src = os.path.join(output_dir, f)
@@ -309,8 +420,8 @@ def organize_output_folder(output_dir):
             if not is_main_esp32_quant:
                 move_needed = True
         
-        # ALSO: preserve espdl, info, json in root
-        if any(f.endswith(ext) for ext in [".espdl", ".info", ".json"]):
+        # ALSO: preserve espdl, keras, and onnx in root
+        if any(f.endswith(ext) for ext in [".espdl", ".keras", ".onnx"]):
             move_needed = False
             
         if move_needed:
