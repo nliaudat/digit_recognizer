@@ -61,6 +61,7 @@ from utils.train_analyse import (
 from utils.train_helpers import save_model_summary_to_file
 from utils.train_qat_helper import create_qat_model
 from utils.train_trainingmonitor import TrainingMonitor
+from quantize_espdl import validate_model_for_tqt
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -658,6 +659,22 @@ def run_distillation_pipeline(
     )
 
     student = distiller.get_student()
+    
+    # ── 3.5 Validate student model for TQT before further processing ─────
+    if use_tqt:
+        
+        temp_onnx = os.path.join(output_dir, f"{student_variant}_temp.onnx")
+        logger.info(f"🔍 Validating student model for TQT compatibility: {temp_onnx}")
+        if export_keras_to_onnx(student, temp_onnx, simplify=True):
+            if validate_model_for_tqt(temp_onnx):
+                logger.info("✅ Student model validated for TQT")
+            else:
+                logger.warning("⚠️ Student model may have TQT compatibility issues (e.g., unsupported ops)")
+        
+        # Cleanup temp artifacts if they exist
+        if os.path.exists(temp_onnx):
+            try: os.remove(temp_onnx)
+            except: pass
 
     # ── 4. Evaluate ───────────────────────────────────────────────────────
     student_metrics = evaluate_distilled_model(student, (x_test, y_test))

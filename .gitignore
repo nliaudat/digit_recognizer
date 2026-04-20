@@ -29,3 +29,4 @@ docker/requirements_v2.old
 docker/requirements_original.txt
 datasets/tools/commands.txt
 
+regenerate_TQT_tflite_output.py
