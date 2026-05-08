@@ -87,7 +87,7 @@ class TFLiteModelManager:
     # -----------------------------------------------------------------
     #  Enhanced Conversion Methods
     # -----------------------------------------------------------------
-    def _apply_xnnpack_fix(self, converter):
+    def _apply_xnnpack_fix(self, converter, quantize=False):
         """Apply XNNPACK delegate fix with validation.
         
         CORRECT USAGE — call this LAST, right before converter.convert():
@@ -95,17 +95,25 @@ class TFLiteModelManager:
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
             converter.representative_dataset = ...
             # ... all other settings ...
-            converter = self._apply_xnnpack_fix(converter)  # <-- LAST
-            assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+            converter = self._apply_xnnpack_fix(converter, quantize=True)  # <-- LAST
             tflite_model = converter.convert()
             self._validate_no_delegates(tflite_model, "my_model")
+        
+        Parameters
+        ----------
+        converter : tf.lite.TFLiteConverter
+            The converter instance to patch.
+        quantize : bool
+            Whether the conversion path is quantized.  When ``False`` the
+            ``TFLITE_BUILTINS_INT8`` restriction is **not** applied, so the
+            representative-dataset check is skipped.
         """
         
         original_ops = getattr(converter.target_spec, 'supported_ops', None)
         print(f"[DEBUG] Original supported_ops: {original_ops}")
         
         # Apply the fix
-        if getattr(params, 'USE_TFLITE_BUILTINS_INT8_ONLY', False):
+        if quantize and getattr(params, 'USE_TFLITE_BUILTINS_INT8_ONLY', False):
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
             print("[DEBUG] Set to TFLITE_BUILTINS_INT8 only")
             
@@ -208,7 +216,7 @@ class TFLiteModelManager:
             converter._experimental_disable_per_channel = False  # Enable per-channel quantization
 
             # CORRECT FLOW: Apply XNNPACK fix LAST, right before convert()
-            converter = self._apply_xnnpack_fix(converter)
+            converter = self._apply_xnnpack_fix(converter, quantize=True)
             assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
                 f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
             
@@ -313,7 +321,7 @@ class TFLiteModelManager:
                 converter.representative_dataset = representative_data
 
             # CORRECT FLOW: Apply XNNPACK fix LAST, right before convert()
-            converter = self._apply_xnnpack_fix(converter)
+            converter = self._apply_xnnpack_fix(converter, quantize=True)
             assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
                 f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
             
@@ -560,7 +568,7 @@ class TFLiteModelManager:
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
         # No representative dataset
-        converter = self._apply_xnnpack_fix(converter)
+        converter = self._apply_xnnpack_fix(converter, quantize=True)
         assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
             f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
         tflite_model = converter.convert()
@@ -572,7 +580,7 @@ class TFLiteModelManager:
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
         converter.target_spec.supported_types = [tf.float16]
-        converter = self._apply_xnnpack_fix(converter)
+        converter = self._apply_xnnpack_fix(converter, quantize=True)
         assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
             f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
         tflite_model = converter.convert()
@@ -627,7 +635,7 @@ class TFLiteModelManager:
                 converter.optimizations = [tf.lite.Optimize.DEFAULT]
                 # No representative dataset for simple conversion
             
-            converter = self._apply_xnnpack_fix(converter)
+            converter = self._apply_xnnpack_fix(converter, quantize=quantize)
             if quantize:
                 assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
                     f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
@@ -647,10 +655,10 @@ class TFLiteModelManager:
     def save_as_tflite_savedmodel(self, model, filename, quantize=False, representative_data=None):
         """Fallback conversion using SavedModel format"""
         try:
-            # Save model temporarily
+            # Save model temporarily using model.export() for Keras 3 compatibility
             temp_dir = os.path.join(self.output_dir, "temp_savedmodel")
             os.makedirs(temp_dir, exist_ok=True)
-            model.save(temp_dir)
+            model.export(temp_dir)
             
             # Convert from SavedModel
             converter = tf.lite.TFLiteConverter.from_saved_model(temp_dir)
@@ -660,7 +668,7 @@ class TFLiteModelManager:
                 if representative_data is not None:
                     converter.representative_dataset = representative_data
             
-            converter = self._apply_xnnpack_fix(converter)
+            converter = self._apply_xnnpack_fix(converter, quantize=quantize)
             if quantize:
                 assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
                     f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
@@ -706,7 +714,7 @@ class TFLiteModelManager:
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
 
         if not quantize:
-            converter = self._apply_xnnpack_fix(converter)
+            converter = self._apply_xnnpack_fix(converter, quantize=False)
             return converter
 
         # -------------------- Quantisation path --------------------
@@ -743,7 +751,7 @@ class TFLiteModelManager:
             converter.experimental_new_quantizer = True
 
         # CORRECT FLOW: Apply XNNPACK fix LAST, right before conversion
-        converter = self._apply_xnnpack_fix(converter)
+        converter = self._apply_xnnpack_fix(converter, quantize=True)
         assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
             f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
         return converter
@@ -864,7 +872,7 @@ class TFLiteModelManager:
                 print("🎯 Using dynamic range quantization with REAL data (Keras 3 safe)")
             
             # CORRECT FLOW: Apply XNNPACK fix LAST, right before conversion
-            converter = self._apply_xnnpack_fix(converter)
+            converter = self._apply_xnnpack_fix(converter, quantize=quantize)
             if quantize:
                 assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
                     f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
