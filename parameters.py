@@ -549,7 +549,7 @@ ADAMW_EPSILON = 1e-07
 #       ❌ Do not use with other models (label format mismatch).
 LOSS_TYPE = "IntelligentFocalLossController"
 if NB_CLASSES <= 10:
-    LABEL_SMOOTHING = 0.02  # mild smoothing — 10cls rarely overconfident
+    LABEL_SMOOTHING = 0.01  # reduced: at >0.999 ceiling, 0.02 caps final accuracy
 else:  # 100 classes
     LABEL_SMOOTHING = 0.05  # stronger smoothing — 100cls softmax easily collapses
 
@@ -568,25 +568,31 @@ else:  # 100 classes
 
 # Intelligent Focal Loss Controller Settings
 if NB_CLASSES <= 10:
-    # --- 10-class: delay until SCCE natural ceiling ---
-    # (ep13 analysis: controller fired at val_acc=0.9656, causing a −0.006 dip)
-    FOCAL_ACCURACY_THRESHOLDS = [0.96, 0.975, 0.988]  # was [0.95, 0.97, 0.985]
+    # --- 10-class: delay focal until model is genuinely stuck near ceiling ---
+    # Previous [0.96, 0.975, 0.988]: fired at ep3 (0.9518) — too early, γ ramp
+    # dragged on while model was still climbing naturally. New thresholds allow
+    # the model to climb freely under SCCE until it actually plateaus.
+    FOCAL_ACCURACY_THRESHOLDS = [0.985, 0.991, 0.995]  # was [0.96, 0.975, 0.988]
 else:  # 100 classes or more
     # --- 100-class: wait longer; model needs to learn easy examples first ---
     # (ep38 analysis: γ fired at val_acc≈0.786, too early for 100-class task)
     FOCAL_ACCURACY_THRESHOLDS = [0.88, 0.93, 0.97]   # was [0.85, 0.92, 0.96]
 
 if NB_CLASSES <= 10:
-    FOCAL_GAMMA_VALUES = [1.5, 3.0, 4.5]   # unchanged for 10cls (already proven)
+    # Gentler γ ramp: at 0.985+ the model only needs a soft push, not heavy focus
+    FOCAL_GAMMA_VALUES = [1.0, 2.0, 3.5]   # was [1.5, 3.0, 4.5] — less aggressive near ceiling
 else:
     FOCAL_GAMMA_VALUES = [1.2, 2.0, 3.5]   # gentler ramp for 100cls (was [1.5, 3.0, 4.5])
 
 # Smooth γ transition: ramp linearly over N epochs instead of an instant step.
 # Set to 0 to keep the original hard-switch behaviour.
-FOCAL_GAMMA_RAMP_EPOCHS = 5             # NEW — eliminates the γ-activation accuracy dip
+# Reduced 5→3: thresholds now fire only near ceiling, so a long ramp wastes epochs.
+FOCAL_GAMMA_RAMP_EPOCHS = 3             # was 5 — shorter ramp at high-accuracy thresholds
 
-FOCAL_PLATEAU_PATIENCE = 5
-FOCAL_PLATEAU_MIN_DELTA = 0.001
+# Raised patience 5→8: at 0.985+ the noise floor is small; need more epochs to
+# confirm a real plateau before triggering expensive α recompute.
+FOCAL_PLATEAU_PATIENCE = 8              # was 5
+FOCAL_PLATEAU_MIN_DELTA = 0.0005        # was 0.001 — tighter at high-accuracy ceiling
 
 # Advanced Training Options (defaulting to True as requested in prev sessions)
 USE_EARLY_STOPPING = True
@@ -629,7 +635,9 @@ FINETUNE_UNFREEZE_LAST_N = 0                                      # 0 = unfreeze
 # ==============================================================================
 
 # Basic Training Parameters
-BATCH_SIZE = 32      # Robust default for cold-start (use 128 only after initial 50-80% accuracy)
+# Raised 32→64: model converges past 0.95 by ep3, so larger batches give smoother
+# gradients for the final 0.990→0.9994 squeeze without cold-start risk.
+BATCH_SIZE = 64      # was 32 — 64 better for high-accuracy refinement on 10cls
 EPOCHS = 250
 LEARNING_RATE = 0.001 # Robust default for cold-start
 # BATCH_SIZE = 128      # (Optimized for v17 fine-tuning speed)
@@ -678,9 +686,11 @@ LR_SCHEDULER_TYPE = "reduce_on_plateau"  # best for 100cls per training analysis
 # LR_SCHEDULER_TYPE = "onecycle"         # ← restore to roll back
 
 # ReduceLROnPlateau Parameters
-LR_SCHEDULER_PATIENCE = 3
+# Raised patience 3→5: with γ ramp now delayed to 0.985+, early LR reductions
+# at ep3-6 were double-braking the model during its fastest climb phase.
+LR_SCHEDULER_PATIENCE = 5              # was 3 — avoid premature LR cuts during fast climb
 LR_SCHEDULER_MIN_LR = 1e-7
-# Nudged from 0.5 →0.4: slightly faster decay avoids 20-epoch plateau-creep
+# Nudged from 0.5→0.4: slightly faster decay avoids 20-epoch plateau-creep
 # (both 10cls and 100cls runs showed ~15-25 wasted epochs at near-identical val_acc)
 LR_SCHEDULER_FACTOR = 0.4
 LR_SCHEDULER_MONITOR = 'val_loss'
@@ -714,7 +724,10 @@ USE_DYNAMIC_SCHEDULER = True    # enabled: switches scheduler at val_acc thresho
 # val_accuracy thresholds that trigger a phase switch.
 # Must have exactly len(LR_SCHEDULER_SEQUENCE) - 1 values.
 if NB_CLASSES <= 10:
-    LR_SCHEDULER_THRESHOLDS = [0.95, 0.975]   # 10cls: switch near the accuracy ceiling
+    # Raised 0.95→0.990: cosine was firing at ep3 (0.9518≥0.95), way before
+    # ReduceLROnPlateau had any chance to do its job. Cosine now only kicks in
+    # when the model is genuinely near its ceiling and needs escape kicks.
+    LR_SCHEDULER_THRESHOLDS = [0.990, 0.995]  # was [0.95, 0.975]
 else:
     LR_SCHEDULER_THRESHOLDS = [0.75, 0.82]    # 100cls: switch at mid-plateau and ceiling
 
