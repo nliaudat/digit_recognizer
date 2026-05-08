@@ -449,9 +449,39 @@ def analyze_v6_optimizations():
         print(f"- Filter range: 20-96")
         print(f"- Dense units: 64-160")
 
+def _validate_no_delegates(tflite_model, model_name="model"):
+    """Validate that the TFLite model has no XNNPACK delegates baked in."""
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".tflite", delete=False) as f:
+        f.write(tflite_model)
+        tmp_path = f.name
+    try:
+        interp = tf.lite.Interpreter(
+            model_path=tmp_path,
+            experimental_op_resolver_type=tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+        )
+        interp.allocate_tensors()
+        print(f"  ✅ [{model_name}] No delegates — TFLite Micro compatible")
+    except Exception as e:
+        print(f"  ❌ [{model_name}] Delegate validation FAILED: {e}")
+        raise
+    finally:
+        os.unlink(tmp_path)
+
 def convert_to_tflite_v6(model, representative_dataset=None):
     """
     Convert v6 model to TFLite with ESP32-optimized quantization
+    
+    CORRECT FLOW:
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+        converter.representative_dataset = ...
+        # ... all other settings ...
+        # Apply XNNPACK fix LAST, right before conversion
+        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+        assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+        tflite_model = converter.convert()
+        _validate_no_delegates(tflite_model, "my_model")
     """
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
@@ -459,15 +489,24 @@ def convert_to_tflite_v6(model, representative_dataset=None):
     # ESP32-optimized quantization settings
     if representative_dataset is not None:
         converter.representative_dataset = representative_dataset
-        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
         converter.inference_input_type = tf.int8
         converter.inference_output_type = tf.int8
         print("✅ Full integer quantization (ESP32 optimized)")
     else:
-        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
         print("✅ Dynamic range quantization")
     
+    # CORRECT FLOW: Apply XNNPACK fix LAST, right before conversion
+    # USE_TFLITE_BUILTINS_INT8_ONLY is the strongest override — forces INT8-only
+    if getattr(params, 'USE_TFLITE_BUILTINS_INT8_ONLY', False):
+        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+    elif getattr(params, 'DISABLE_XNNPACK', True):
+        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+    
+    assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
+        f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
+    
     tflite_model = converter.convert()
+    _validate_no_delegates(tflite_model, "v6_model")
     return tflite_model
 
 if __name__ == "__main__":

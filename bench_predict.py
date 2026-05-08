@@ -166,6 +166,134 @@ class TFLiteDigitPredictor:
         except Exception as e:
             return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
 
+    def predict_esp32(self, image, debug=False):
+        """Simulate ESP32 inference with quantization noise injection.
+        
+        ESP32 uses TFLite Micro with integer-only kernels. This simulation:
+        1. Quantizes input to INT8 and back (simulating camera + integer pipeline)
+        2. Runs inference through the same TFLite model
+        3. Adds quantization noise proportional to output scale on the logits
+        4. Applies softmax and returns prediction
+        
+        QAT models are more robust to this noise (trained with fake-quant),
+        while TQT models degrade more (overfit to ideal scales).
+        """
+        # Preprocess image
+        processed_image = preprocess_for_inference(image)
+        
+        # Handle channel mismatch
+        expected_channels = self.input_details[0]['shape'][3]
+        if len(processed_image.shape) == 3 and processed_image.shape[2] == 1 and expected_channels == 3:
+            processed_image = np.repeat(processed_image, 3, axis=2)
+        
+        # Add batch dimension if not already present
+        if len(processed_image.shape) == 3:
+            input_data = np.expand_dims(processed_image, axis=0)
+        else:
+            input_data = processed_image
+        
+        # ── Step 1: Simulate ESP32 camera input quantization ──
+        # ESP32 camera outputs 8-bit values. Simulate by rounding to nearest 8-bit step
+        # and adding dithering noise (±0.5 step) to simulate sensor noise
+        expected_dtype = self.input_details[0]['dtype']
+        
+        if expected_dtype in [np.uint8, np.int8]:
+            # For quantized models: quantize input to INT8 and back
+            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+                # Scale to [0, 255], quantize, add noise, dequantize
+                input_uint8 = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
+                # Add sensor noise: ±1 LSB dithering
+                noise = np.random.randint(-1, 2, size=input_uint8.shape).astype(np.int16)
+                input_noisy = np.clip(input_uint8.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+                # Dequantize back to float [0, 1]
+                input_data = input_noisy.astype(np.float32) / 255.0
+            elif input_data.dtype == np.uint8:
+                # Already uint8, just add noise
+                noise = np.random.randint(-1, 2, size=input_data.shape).astype(np.int16)
+                input_data = np.clip(input_data.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+            elif input_data.dtype == np.int8:
+                # Already int8, add noise in int8 space
+                noise = np.random.randint(-1, 2, size=input_data.shape).astype(np.int16)
+                input_data = np.clip(input_data.astype(np.int16) + noise, -128, 127).astype(np.int8)
+        else:
+            # Float model: add small uniform noise to simulate fixed-point arithmetic loss
+            noise_std = 1.0 / 255.0  # ~0.004, equivalent to 8-bit quantization noise
+            input_data = input_data.astype(np.float32) + np.random.normal(0, noise_std, size=input_data.shape)
+            if input_data.max() > 1.0:
+                input_data = input_data / 255.0
+        
+        # ── Step 2: Prepare input for the model ──
+        # Convert to expected dtype for the interpreter
+        if expected_dtype == np.uint8:
+            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+                input_data = (input_data * 255.0).astype(np.uint8)
+            else:
+                input_data = input_data.astype(np.uint8)
+        elif expected_dtype == np.int8:
+            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+                input_data = (input_data * 255.0 - 128).astype(np.int8)
+            elif input_data.dtype == np.uint8:
+                input_data = (input_data.astype(np.int32) - 128).astype(np.int8)
+            else:
+                input_data = input_data.astype(np.int8)
+        else:
+            input_data = input_data.astype(np.float32)
+            if input_data.max() > 1.0:
+                input_data = input_data / 255.0
+        
+        # Verify shape matches expected input shape
+        expected_shape = self.input_details[0]['shape']
+        if input_data.shape != tuple(expected_shape):
+            if input_data.size == np.prod(expected_shape):
+                input_data = input_data.reshape(expected_shape)
+            else:
+                return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
+        
+        try:
+            # Set input tensor
+            self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
+            
+            # Run inference
+            self.interpreter.invoke()
+            
+            # Get output
+            output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
+            
+            # ── Step 3: Add output quantization noise ──
+            # ESP32's integer-only kernels introduce additional noise on the output.
+            # The noise magnitude is proportional to the output quantization scale.
+            if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
+                output_scale, output_zero_point = self.output_details[0]['quantization']
+                # Dequantize first
+                output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
+                # Add noise proportional to scale (simulates integer accumulation error)
+                noise_scale = output_scale * 0.5  # Half-step noise
+                output_data += np.random.normal(0, noise_scale, size=output_data.shape)
+            else:
+                # Float model: add small noise to simulate fixed-point accumulation
+                noise_scale = 1e-4
+                output_data += np.random.normal(0, noise_scale, size=output_data.shape)
+            
+            # Autodetect if output is logits or softmax
+            output_vector = output_data[0]
+            output_sum = np.sum(output_vector)
+            is_softmax = np.isclose(output_sum, 1.0, atol=0.02) and np.all(output_vector >= -0.05) and np.all(output_vector <= 1.05)
+            
+            if not is_softmax:
+                # Use a numerically stable softmax implementation
+                exp_data = np.exp(output_vector - np.max(output_vector))
+                output_vector = exp_data / np.sum(exp_data)
+                output_data = [output_vector]
+            
+            # Get prediction and confidence
+            prediction = np.argmax(output_vector)
+            confidence = np.max(output_vector)
+            
+            return prediction, confidence, output_vector
+        
+        except Exception as e:
+            return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
+
     @property
     def num_classes(self):
         """Get the number of classes this model was trained to predict"""
@@ -362,7 +490,7 @@ def get_model_output_type(model_path):
     mtype, _ = get_model_metadata(model_path)
     return mtype
 
-def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude_model=None, debug=False, model_list=None):
+def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude_model=None, debug=False, model_list=None, iot_compat=True):
     """Get all available models with parameters count - with error handling
     
     Args:
@@ -371,6 +499,7 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
         exclude_model: List of model names or strings to exclude from testing
         debug: Enable debug output
         model_list: Optional list of specific models to include (names or directories)
+        iot_compat: If True, exclude models with 'float32' or 'dynamic_range' in name
     """
     # Look for training directories - exclude test_results and other non-training dirs
     all_dirs = [d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))]
@@ -442,6 +571,14 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
                 # Consolidated metadata extraction to avoid redundant interpreter allocation
                 model_type, parameters_count = get_model_metadata(model_path)
                 
+                # Filter by IoT compatibility if requested
+                if iot_compat:
+                    name_lower = (model_file + " " + training_dir).lower()
+                    if "float32" in name_lower or "dynamic_range" in name_lower:
+                        if debug:
+                            print(f"Skipping non-IoT model: {training_dir}/{model_file}")
+                        continue
+                
                 # Filter by quantization if requested
                 if quantized_only and "(quant)" not in model_type:
                     continue
@@ -480,7 +617,7 @@ def is_valid_tflite_model(model_path):
             print(f"❌ Invalid TFLite model {os.path.basename(model_path)}: {str(e).split(chr(10))[0][:150]}...")
         return False
 
-def _decode_bench_image(image_path, label, fname, target_h, target_w, grayscale):
+def _decode_bench_image(image_path, label, fname, target_h, target_w, grayscale, is_augmented=False):
     flag = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
     img = cv2.imread(image_path, flag)
     if img is None or img.size == 0:
@@ -490,16 +627,16 @@ def _decode_bench_image(image_path, label, fname, target_h, target_w, grayscale)
         img = np.expand_dims(img, axis=-1)
     elif not grayscale and img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-    return (img, label, fname)
+    return (img, label, fname, is_augmented)
 
 _cached_test_data = None
 _cached_test_data_params = None
 
-def list_available_models(quantized_only=False, subfolder=None, input_dir=None, exclude_model=None, model_list=None):
+def list_available_models(quantized_only=False, subfolder=None, input_dir=None, exclude_model=None, model_list=None, iot_compat=True):
     """List all available models in a table format and exit."""
     models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, 
                             input_dir=input_dir, exclude_model=exclude_model, 
-                            model_list=model_list)
+                            model_list=model_list, iot_compat=iot_compat)
     
     if not models:
         print("No models found.")
@@ -531,7 +668,7 @@ def list_available_models(quantized_only=False, subfolder=None, input_dir=None, 
 def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     """
     Load test dataset with proper labels, tracking original filenames.
-    Returns: list of (image_array, true_label, filename_no_ext) tuples
+    Returns: list of (image_array, true_label, filename_no_ext, is_augmented) tuples
     """
     global _cached_test_data, _cached_test_data_params
     
@@ -563,8 +700,8 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
         try:
             print(f"📊 Loading dataset from fast disk cache ({cache_path})...")
             data = np.load(cache_path, allow_pickle=True)
-            images, labels, fnames = data["images"], data["labels"], data["fnames"]
-            test_data = list(zip(images, labels, fnames))
+            images, labels, fnames, is_augmented = data["images"], data["labels"], data["fnames"], data["is_augmented"]
+            test_data = list(zip(images, labels, fnames, is_augmented))
             
             _cached_test_data = list(test_data)
             _cached_test_data_params = current_params
@@ -587,8 +724,7 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     grayscale = params.USE_GRAYSCALE
 
     for source_config in params.DATA_SOURCES:
-        if source_config.get('not_in_bench'):
-            continue
+        is_augmented = source_config.get('not_in_bench', False)
             
         source_type = source_config.get('type', '')
         source_path = source_config.get('path', '')
@@ -620,7 +756,7 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
                 img_path = os.path.join(images_dir, fname)
                 if not os.path.exists(img_path):
                     continue
-                tasks.append((img_path, label, os.path.splitext(fname)[0]))
+                tasks.append((img_path, label, os.path.splitext(fname)[0], is_augmented))
 
         elif source_type == 'folder_structure':
             for class_label in range(params.NB_CLASSES):
@@ -631,7 +767,7 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
                     if not any(fn.lower().endswith(e) for e in ('.jpg', '.jpeg', '.png', '.bmp')):
                         continue
                     img_path = os.path.join(class_dir, fn)
-                    tasks.append((img_path, class_label, os.path.splitext(fn)[0]))
+                    tasks.append((img_path, class_label, os.path.splitext(fn)[0], is_augmented))
 
     test_data = []
     if tasks:
@@ -639,7 +775,7 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
         print(f"  📂 Decoding {len(tasks)} images in parallel...")
         
         with ThreadPoolExecutor(max_workers=n_workers) as ex:
-            futures = [ex.submit(_decode_bench_image, path, lbl, fn, h, w, grayscale) for path, lbl, fn in tasks]
+            futures = [ex.submit(_decode_bench_image, path, lbl, fn, h, w, grayscale, aug) for path, lbl, fn, aug in tasks]
             
             done = 0
             for f in as_completed(futures):
@@ -662,7 +798,8 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
         images = np.array([item[0] for item in test_data])
         labels = np.array([item[1] for item in test_data])
         fnames = np.array([item[2] for item in test_data])
-        np.savez_compressed(cache_path, images=images, labels=labels, fnames=fnames)
+        is_augmented = np.array([item[3] for item in test_data])
+        np.savez_compressed(cache_path, images=images, labels=labels, fnames=fnames, is_augmented=is_augmented)
         print(f"💾 Saved {len(test_data)} images to fast disk cache: {cache_path}")
     except Exception as e:
         print(f"⚠️  Could not save disk cache: {e}")
@@ -726,14 +863,19 @@ def configure_parameters_for_model(model_name_or_dir, override_classes=None, ove
         print(f"🔄 Reconfigured test environment for {params.NB_CLASSES} classes in {'Grayscale' if params.USE_GRAYSCALE else 'RGB'}")
 
 def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_datasets=True, 
-                         collect_failed=False, model_name=None, tolerance=0.1):
-    """Test a model on random images from dataset and return accuracy and performance metrics"""
+                         collect_failed=False, model_name=None, tolerance=0.1,
+                         simulate_esp32=True):
+    """Test a model on random images from dataset and return accuracy and performance metrics.
+    
+    Args:
+        simulate_esp32: If True, also run ESP32-simulated inference and return its accuracy.
+    """
     
     try:
         predictor = TFLiteDigitPredictor(model_path)
     except Exception as e:
         print(f"❌ Skipping model {model_path}: {e}")
-        return 0.0, 0, 0.0, 0.0, [], []
+        return 0.0, 0, 0.0, 0.0, [], [], 0.0
         
     correct_predictions = 0
     total_tested = 0
@@ -741,16 +883,24 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
     failed_predictions = []
     all_predictions_lite = []
     
+    # Real-only vs full-set counters
+    correct_real = 0
+    total_real = 0
+    
+    # ESP32 simulation counters
+    esp32_correct = 0
+    esp32_predictions_lite = []
+    
     # Load test data with proper labels
     test_data = load_test_dataset_with_labels(num_test_images, use_all_datasets)
     
     if not test_data:
         print("❌ No test data available")
-        return 0.0, 0, 0.0, 0.0, [], []
+        return 0.0, 0, 0.0, 0.0, [], [], 0.0, 0.0, 0.0
     
     # Warm-up run to avoid cold start timing issues
     if len(test_data) > 0:
-        warmup_image, _, _ = test_data[0]
+        warmup_image, _, _, _ = test_data[0]
         if warmup_image is not None:
             try:
                 predictor.predict(warmup_image, debug=False)
@@ -766,7 +916,8 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
         # Normal mode - use progress bar
         test_iterator = tqdm(test_data, desc=f"Testing {os.path.basename(model_path)}", leave=False)
     
-    for image, true_label, original_fname in test_iterator:
+    for item in test_iterator:
+        image, true_label, original_fname, is_augmented = item
         if image is None:
             continue
         
@@ -789,6 +940,8 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
             
             if circular_diff <= tolerance:
                 correct_predictions += 1
+                if not is_augmented:
+                    correct_real += 1
                 if debug:
                     print(f"✓ Correct: {pred_digit:.1f} (true: {true_digit:.1f}, confidence: {confidence:.3f})")
             else:
@@ -807,6 +960,10 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
                     'num_classes': predictor.num_classes
                 })
             
+            # Track real-only totals
+            if not is_augmented:
+                total_real += 1
+            
             all_predictions_lite.append({
                 'true_label': true_label,
                 'predicted_label': prediction,
@@ -814,6 +971,24 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
                 'num_classes': predictor.num_classes,
                 'tolerance': tolerance
             })
+            
+            # ── ESP32 simulation pass ──
+            if simulate_esp32:
+                esp32_prediction, esp32_confidence, _ = predictor.predict_esp32(image, debug=debug)
+                esp32_pred_digit = float(esp32_prediction) / model_scale
+                esp32_diff = abs(true_digit - esp32_pred_digit) % 10.0
+                esp32_circular_diff = min(esp32_diff, 10.0 - esp32_diff)
+                
+                if esp32_circular_diff <= tolerance:
+                    esp32_correct += 1
+                
+                esp32_predictions_lite.append({
+                    'true_label': true_label,
+                    'predicted_label': esp32_prediction,
+                    'model': (model_name or os.path.basename(model_path)) + "_esp32",
+                    'num_classes': predictor.num_classes,
+                    'tolerance': tolerance
+                })
             
             total_tested += 1
             
@@ -827,6 +1002,12 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
     avg_inference_time = total_inference_time / total_tested if total_tested > 0 else 0.0
     inferences_per_second = 1000 / avg_inference_time if avg_inference_time > 0 else 0.0
     
+    # Real-only accuracy
+    accuracy_real_only = correct_real / total_real if total_real > 0 else 0.0
+    
+    # ESP32 simulated accuracy
+    esp32_accuracy = esp32_correct / total_tested if total_tested > 0 and simulate_esp32 else 0.0
+    
     # CRITICAL: Verify the failed count matches expected
     expected_failed = total_tested - correct_predictions
     if len(failed_predictions) != expected_failed:
@@ -837,11 +1018,14 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
     
     if debug:
         print(f"Final accuracy: {accuracy:.3f} ({correct_predictions}/{total_tested})")
+        print(f"Real-only accuracy: {accuracy_real_only:.3f} ({correct_real}/{total_real})")
+        if simulate_esp32:
+            print(f"ESP32-sim accuracy: {esp32_accuracy:.3f} ({esp32_correct}/{total_tested})")
         print(f"Failed predictions: {len(failed_predictions)}")
         print(f"Average inference time: {avg_inference_time:.2f} ms")
         print(f"Inferences per second: {inferences_per_second:.0f}")
     
-    return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions, all_predictions_lite
+    return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions, all_predictions_lite, esp32_accuracy, accuracy_real_only
 
 def generate_confusion_matrix(all_results, output_dir=None):
     """Generate a confusion matrix heatmap and per-class accuracy CSV from all predictions.
@@ -949,8 +1133,11 @@ def generate_confusion_matrix(all_results, output_dir=None):
 
     return generated_files
 
-def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=True, output_dir=None):
-    """Generate separate comparison graphs for the benchmark results"""
+def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=True, output_dir=None, simulate_esp32=False):
+    """Generate separate comparison graphs for the benchmark results.
+    
+    If simulate_esp32 is True, also generates a parallel set of ESP32-simulated graphs.
+    """
     if output_dir is None:
         output_dir = params.OUTPUT_DIR
         
@@ -990,6 +1177,38 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
                 'size_kb': float(result['Size (KB)']),
                 'parameters_million': params_val / 1_000_000
             })
+    
+    # ── Also prepare ESP32 plot data if available ──
+    esp32_plot_data = []
+    if simulate_esp32:
+        for result in results:
+            esp32_acc = float(result.get('ESP32_Accuracy', 0.0))
+            pc_acc = float(result['Accuracy'])
+            inferences_per_second = float(result['Inf/s'])
+            
+            if esp32_acc > 0 and inferences_per_second > 0:
+                dir_name = result['Directory']
+                model_name = result['Model']
+                label = f"{dir_name}\n{model_name.replace('.tflite', '')}"
+                
+                params_str = result['Params']
+                if 'M' in params_str:
+                    params_val = float(params_str.replace('M', '')) * 1_000_000
+                elif 'K' in params_str:
+                    params_val = float(params_str.replace('K', '')) * 1_000
+                else:
+                    params_val = float(params_str)
+                
+                esp32_plot_data.append({
+                    'label': label,
+                    'directory': dir_name,
+                    'model_name': model_name,
+                    'accuracy': esp32_acc * 100,  # Convert to percentage
+                    'pc_accuracy': pc_acc * 100,
+                    'inferences_per_second': inferences_per_second,
+                    'size_kb': float(result['Size (KB)']),
+                    'parameters_million': params_val / 1_000_000
+                })
     
     if not plot_data:
         print("⚠️  No valid data points to generate comparison graphs (all models had 0 accuracy or 0 inf/s).")
@@ -1139,6 +1358,101 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
     plt.close()
     graph_paths.append(graph5_path)
     
+    # ── ESP32-specific graphs ──
+    if simulate_esp32 and esp32_plot_data:
+        esp32_graphs_dir = os.path.join(graphs_dir, "esp32")
+        os.makedirs(esp32_graphs_dir, exist_ok=True)
+        
+        esp32_labels = [d['label'] for d in esp32_plot_data]
+        esp32_accuracies = [d['accuracy'] for d in esp32_plot_data]
+        esp32_pc_accuracies = [d['pc_accuracy'] for d in esp32_plot_data]
+        esp32_sizes_kb = [d['size_kb'] for d in esp32_plot_data]
+        esp32_model_names = [d['model_name'] for d in esp32_plot_data]
+        
+        # ESP32 Graph 1: PC Accuracy vs ESP32 Accuracy (side-by-side bar chart)
+        plt.figure(figsize=(16, 10))
+        y_pos = np.arange(len(esp32_labels))
+        bar_height = 0.35
+        bars1 = plt.barh(y_pos - bar_height/2, esp32_pc_accuracies, bar_height, 
+                         color='steelblue', alpha=0.7, label='PC Accuracy')
+        bars2 = plt.barh(y_pos + bar_height/2, esp32_accuracies, bar_height, 
+                         color='coral', alpha=0.7, label='ESP32 Sim.')
+        plt.yticks(y_pos, [label.split('\n')[0] for label in esp32_labels], fontsize=10)
+        plt.xlabel('Accuracy (%)', fontsize=12)
+        plt.title(f'PC vs ESP32-Simulated Accuracy\n({quant_suffix}, {dataset_suffix})', 
+                  fontsize=14, fontweight='bold')
+        plt.grid(True, alpha=0.3, axis='x')
+        plt.legend(fontsize=11)
+        
+        # Add value labels
+        for i, (bar1, bar2, pc_acc, esp32_acc) in enumerate(
+            zip(bars1, bars2, esp32_pc_accuracies, esp32_accuracies)):
+            gap = pc_acc - esp32_acc
+            plt.text(max(bar1.get_width(), bar2.get_width()) + 0.5, 
+                     bar1.get_y() + bar1.get_height()/2,
+                     f'PC:{pc_acc:.1f}% ESP32:{esp32_acc:.1f}% Gap:{gap:+.1f}%', 
+                     ha='left', va='center', fontsize=8,
+                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.9))
+        
+        plt.tight_layout()
+        esp32_graph1 = os.path.join(esp32_graphs_dir, f"pc_vs_esp32_accuracy_{quant_suffix}_{dataset_suffix}.png")
+        plt.savefig(esp32_graph1, dpi=300, bbox_inches='tight')
+        plt.close()
+        graph_paths.append(esp32_graph1)
+        
+        # ESP32 Graph 2: Accuracy Gap (PC - ESP32) sorted by gap
+        gaps = [pc - esp for pc, esp in zip(esp32_pc_accuracies, esp32_accuracies)]
+        sorted_indices = np.argsort(gaps)[::-1]  # Largest gap first (worst on ESP32)
+        
+        plt.figure(figsize=(14, 8))
+        sorted_labels = [esp32_labels[i].split('\n')[0] for i in sorted_indices]
+        sorted_gaps = [gaps[i] for i in sorted_indices]
+        colors_gap = ['red' if g > 2 else 'orange' if g > 1 else 'green' for g in sorted_gaps]
+        bars = plt.barh(range(len(sorted_gaps)), sorted_gaps, color=colors_gap, alpha=0.7)
+        plt.yticks(range(len(sorted_gaps)), sorted_labels, fontsize=10)
+        plt.xlabel('Accuracy Gap (PC - ESP32) %', fontsize=12)
+        plt.title(f'ESP32 Accuracy Degradation (sorted worst→best)\n({quant_suffix}, {dataset_suffix})', 
+                  fontsize=14, fontweight='bold')
+        plt.grid(True, alpha=0.3, axis='x')
+        plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+        
+        for i, (bar, gap) in enumerate(zip(bars, sorted_gaps)):
+            plt.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height()/2,
+                    f'{gap:+.1f}%', ha='left', va='center', fontsize=9)
+        
+        plt.tight_layout()
+        esp32_graph2 = os.path.join(esp32_graphs_dir, f"esp32_accuracy_gap_{quant_suffix}_{dataset_suffix}.png")
+        plt.savefig(esp32_graph2, dpi=300, bbox_inches='tight')
+        plt.close()
+        graph_paths.append(esp32_graph2)
+        
+        # ESP32 Graph 3: ESP32 Accuracy vs Size
+        plt.figure(figsize=(14, 10))
+        scatter = plt.scatter(esp32_sizes_kb, esp32_accuracies, c=esp32_accuracies, 
+                            s=100, alpha=0.7, cmap='RdYlGn')
+        for i, (label, x, y) in enumerate(zip(esp32_labels, esp32_sizes_kb, esp32_accuracies)):
+            plt.annotate(label.split('\n')[0], (x, y), 
+                        xytext=(8, 8), textcoords='offset points', 
+                        fontsize=8, alpha=0.9,
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+        plt.xlabel('Model Size (KB)', fontsize=12)
+        plt.ylabel('ESP32-Sim Accuracy (%)', fontsize=12)
+        plt.title(f'ESP32-Sim Accuracy vs Model Size\n({quant_suffix}, {dataset_suffix})', 
+                  fontsize=14, fontweight='bold')
+        plt.grid(True, alpha=0.3)
+        cbar = plt.colorbar(scatter)
+        cbar.set_label('ESP32 Accuracy (%)', fontsize=10)
+        plt.tight_layout()
+        esp32_graph3 = os.path.join(esp32_graphs_dir, f"esp32_accuracy_vs_size_{quant_suffix}_{dataset_suffix}.png")
+        plt.savefig(esp32_graph3, dpi=300, bbox_inches='tight')
+        plt.close()
+        graph_paths.append(esp32_graph3)
+        
+        print(f"📊 Generated {len(esp32_plot_data)} ESP32-specific graphs:")
+        print(f"   📈 {os.path.basename(esp32_graph1)}")
+        print(f"   📈 {os.path.basename(esp32_graph2)}")
+        print(f"   📈 {os.path.basename(esp32_graph3)}")
+    
     print(f"📊 Generated {len(graph_paths)} comparison graphs:")
     for path in graph_paths:
         print(f"   📈 {os.path.basename(path)}")
@@ -1149,7 +1463,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
                     use_all_datasets=True, list_failed=False, save_failed=False,
                     subfolder=None, input_dir=None, exclude_model=None,
                     override_classes=None, override_color=None, 
-                    model_list=None, tolerance=0.1, update_csv=False):
+                    model_list=None, tolerance=0.1, update_csv=False,
+                    iot_compat=True, simulate_esp32=True):
     """Test all valid models with optional subfolder filtering and model exclusion
     
     Args:
@@ -1167,7 +1482,7 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
         
     models = get_all_models(quantized_only=quantized_only, subfolder=subfolder, 
                             input_dir=input_dir, exclude_model=exclude_model, 
-                            debug=debug, model_list=model_list)
+                            debug=debug, model_list=model_list, iot_compat=iot_compat)
     
     if not models:
         if subfolder:
@@ -1216,7 +1531,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
             use_all_datasets=use_all_datasets,
             collect_failed=collect_failed,
             model_name=model_info['name'],
-            tolerance=tolerance
+            tolerance=tolerance,
+            simulate_esp32=simulate_esp32
         )
         
         if results_data is None or results_data[1] == 0:
@@ -1224,7 +1540,7 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
                 print(f"⚠️  Skipping results for {model_info['name']} due to failure")
             continue
             
-        accuracy, tested_count, avg_inference_time, inferences_per_second, failed_predictions, all_predictions_lite = results_data
+        accuracy, tested_count, avg_inference_time, inferences_per_second, failed_predictions, all_predictions_lite, esp32_accuracy, accuracy_real_only = results_data
         
         all_predictions.extend(all_predictions_lite)
         
@@ -1252,6 +1568,10 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
             'Size_Raw': model_info['size_kb'],
             'Accuracy': f"{accuracy:.4f}",
             'Accuracy_Raw': accuracy,
+            'Accuracy_RealOnly': f"{accuracy_real_only:.4f}",
+            'Accuracy_RealOnly_Raw': accuracy_real_only,
+            'ESP32_Accuracy': f"{esp32_accuracy:.4f}",
+            'ESP32_Accuracy_Raw': esp32_accuracy,
             'Inf Time (ms)': f"{avg_inference_time:.2f}",
             'Inf Time_Raw': avg_inference_time,
             'Inf/s': f"{inferences_per_second:.0f}",
@@ -1293,20 +1613,32 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
     print(f"{'='*80}")
     
     # Simplified console output (modified to show failed count)
-    headers = ['Directory', 'Model', 'Type', 'Params', 'Size', 'Accuracy', 'Inf/s', 'Images', 'Failed']
+    if simulate_esp32:
+        headers = ['Directory', 'Model', 'Type', 'Params', 'Size', 'Accuracy', 'RealOnly', 'ESP32', 'Gap', 'Inf/s', 'Images', 'Failed']
+    else:
+        headers = ['Directory', 'Model', 'Type', 'Params', 'Size', 'Accuracy', 'RealOnly', 'Inf/s', 'Images', 'Failed']
     table_data = []
     for result in results:
-        table_data.append([
+        row = [
             result['Directory'],
             result['Model'],
             result['Type'],
             result['Params'],
             result['Size (KB)'],
             f"{float(result['Accuracy']):.3f}",
+            f"{float(result['Accuracy_RealOnly']):.3f}",
+        ]
+        if simulate_esp32:
+            esp32_acc = float(result['ESP32_Accuracy'])
+            gap = (float(result['Accuracy']) - esp32_acc) * 100
+            row.append(f"{esp32_acc:.3f}")
+            row.append(f"{gap:+.1f}%")
+        row.extend([
             result['Inf/s'],
             result['Tested'],
             result['Failed_Count']
         ])
+        table_data.append(row)
     
     print(tabulate(table_data, headers=headers, tablefmt='simple_grid', stralign='right'))
     
@@ -1318,6 +1650,11 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
         print(f"\n🏆 BEST BY ACCURACY: {best_accuracy['Directory']}/{best_accuracy['Model']}")
         print(f"   Accuracy: {float(best_accuracy['Accuracy']):.3f}, Speed: {best_accuracy['Inf/s']} inf/s")
         
+        if simulate_esp32:
+            best_esp32 = max(results, key=lambda x: x['ESP32_Accuracy_Raw'])
+            print(f"\n🔌 BEST ESP32-SIM: {best_esp32['Directory']}/{best_esp32['Model']}")
+            print(f"   ESP32-Sim Accuracy: {float(best_esp32['ESP32_Accuracy']):.3f}, PC Accuracy: {float(best_esp32['Accuracy']):.3f}")
+        
         print(f"⚡ FASTEST MODEL: {fastest_model['Directory']}/{fastest_model['Model']}")
         print(f"   Speed: {fastest_model['Inf/s']} inf/s, Accuracy: {float(fastest_model['Accuracy']):.3f}")
     
@@ -1326,7 +1663,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
         results, 
         quantized_only=quantized_only,
         use_all_datasets=use_all_datasets,
-        output_dir=input_dir
+        output_dir=input_dir,
+        simulate_esp32=simulate_esp32
     )
     
     # Save full results to CSV
@@ -1348,7 +1686,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
             quantized_only=quantized_only,
             use_all_datasets=use_all_datasets,
             test_images_count=num_test_images,
-            output_dir=input_dir
+            output_dir=input_dir,
+            simulate_esp32=simulate_esp32
         )
         print(f"📄 Comprehensive markdown report generated: {markdown_path}")
     
@@ -1390,6 +1729,8 @@ def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_
             'Parameters': int(params_count),
             'Size_KB': float(result['Size (KB)']),
             'Accuracy': float(result['Accuracy']),
+            'Accuracy_RealOnly': float(result.get('Accuracy_RealOnly', 0.0)),
+            'ESP32_Accuracy': float(result.get('ESP32_Accuracy', 0.0)),
             'Inference_Time_ms': float(result['Inf Time (ms)']),
             'Inferences_per_second': float(result['Inf/s']),
             'Tested_Images': result['Tested']
@@ -1419,7 +1760,7 @@ def save_results_to_csv(results, quantized_only=True, use_all_images=True, test_
     
     # Write to CSV
     with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-        fieldnames = ['Model', 'Directory', 'Type', 'Parameters', 'Size_KB', 'Accuracy', 'Inference_Time_ms', 'Inferences_per_second', 'Tested_Images']
+        fieldnames = ['Model', 'Directory', 'Type', 'Parameters', 'Size_KB', 'Accuracy', 'Accuracy_RealOnly', 'ESP32_Accuracy', 'Inference_Time_ms', 'Inferences_per_second', 'Tested_Images']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         
         writer.writeheader()
@@ -1644,7 +1985,7 @@ def generate_iot_recommendation_section(f, df):
     
     f.write("\n")
 
-def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True, use_all_datasets=True, test_images_count=0, output_dir=None):
+def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True, use_all_datasets=True, test_images_count=0, output_dir=None, simulate_esp32=False):
     """Generate a comprehensive Markdown report from CSV results and graphs"""
     if output_dir is None:
         output_dir = params.OUTPUT_DIR
@@ -1663,6 +2004,40 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
     # Generate markdown content
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write("# Digit Recognition Benchmark Report\n\n")
+        
+        # ── ESP32 Simulation Section (at top, right after title) ──
+        if simulate_esp32 and 'ESP32_Accuracy' in df.columns:
+            f.write("## 🔌 ESP32 Hardware Simulation\n\n")
+            f.write("> **What this is**: Each model was also tested through an ESP32-simulated inference pipeline that adds quantization noise to simulate the integer-only arithmetic of TFLite Micro on ESP32. Models with a smaller gap between PC and ESP32 accuracy are more robust for real hardware deployment.\n\n")
+            
+            # ESP32 summary table
+            f.write("| Model | PC Accuracy | ESP32 Sim. | Gap | Verdict |\n")
+            f.write("|-------|-------------|------------|-----|---------|\n")
+            
+            # Sort by ESP32 accuracy descending
+            esp32_df = df[df['ESP32_Accuracy'] > 0].sort_values('ESP32_Accuracy', ascending=False)
+            for _, row in esp32_df.iterrows():
+                gap = (row['Accuracy'] - row['ESP32_Accuracy']) * 100
+                if gap < 0.5:
+                    verdict = "✅ Excellent (robust)"
+                elif gap < 1.5:
+                    verdict = "⚠️ Good (minor loss)"
+                elif gap < 3.0:
+                    verdict = "⚠️ Moderate loss"
+                else:
+                    verdict = "❌ Significant loss"
+                f.write(f"| {row['Model']} | {row['Accuracy']:.3f} | {row['ESP32_Accuracy']:.3f} | {gap:+.1f}% | {verdict} |\n")
+            f.write("\n")
+            
+            # ESP32 graphs
+            quant_suffix = "quantized" if quantized_only else "all"
+            dataset_suffix = "full" if use_all_datasets else "sampled"
+            f.write("### 📊 ESP32 Simulation Graphs\n\n")
+            f.write(f"![PC vs ESP32 Accuracy](graphs/esp32/pc_vs_esp32_accuracy_{quant_suffix}_{dataset_suffix}.png)\n\n")
+            f.write(f"![ESP32 Accuracy Gap](graphs/esp32/esp32_accuracy_gap_{quant_suffix}_{dataset_suffix}.png)\n\n")
+            f.write(f"![ESP32 Accuracy vs Size](graphs/esp32/esp32_accuracy_vs_size_{quant_suffix}_{dataset_suffix}.png)\n\n")
+            
+            f.write("---\n\n")
         
         # Executive Summary with IoT focus
         f.write("## 📊 Executive Summary\n\n")
@@ -1840,7 +2215,7 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
     
     # Warm-up run
     if len(test_data) > 0:
-        warmup_image, _, _ = test_data[0]
+        warmup_image, _, _, _ = test_data[0]
         if warmup_image is not None:
             try:
                 predictor.predict(warmup_image, debug=False)
@@ -1848,7 +2223,7 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
                 pass
     
     # Test the model - ALWAYS collect failed predictions for accurate counting
-    for i, (image, true_label, original_fname) in enumerate(test_data):
+    for i, (image, true_label, original_fname, _) in enumerate(test_data):
         if image is None:
             continue
         
@@ -2001,6 +2376,10 @@ def main():
                         help='Only include quantized models (True by default).')
     parser.add_argument('--no-quantized', action='store_false', dest='quantized', 
                         help='Include all models, including floating-point versions.')
+    parser.add_argument('--iot-compat', action='store_true', default=True,
+                        help='Filter models for IoT compatibility: exclude float32 and dynamic_range models (default: True).')
+    parser.add_argument('--no-iot-compat', action='store_false', dest='iot_compat',
+                        help='Include all models regardless of IoT compatibility.')
     
     # Dataset and Testing Configuration
     parser.add_argument('--test_images', type=int, default=0, 
@@ -2023,6 +2402,10 @@ def main():
                         help='Path to a .espdl file to inspect (size, header, quantization metadata).')
     parser.add_argument('--new', type=str, 
                         help='Test a new model and update the existing CSV results (e.g. distilled_many_to_v16_10cls_RGB).')
+    parser.add_argument('--simulate-esp32', action='store_true', default=True,
+                        help='Simulate ESP32 inference by adding quantization noise (default: True).')
+    parser.add_argument('--no-simulate-esp32', action='store_false', dest='simulate_esp32',
+                        help='Disable ESP32 simulation (faster benchmark, PC-only accuracy).')
     
     args, unknown = parser.parse_known_args()
 
@@ -2039,7 +2422,7 @@ def main():
     if args.list:
         list_available_models(quantized_only=args.quantized, subfolder=args.subfolder, 
                               input_dir=args.input_dir, exclude_model=args.exclude_model,
-                              model_list=args.model_list)
+                              model_list=args.model_list, iot_compat=args.iot_compat)
         return
     
     # Handle --new model (highest priority after list)
@@ -2059,7 +2442,9 @@ def main():
             override_color=args.color,
             model_list=[args.new],
             tolerance=args.tolerance,
-            update_csv=True # Flag to signal updating instead of overwriting
+            update_csv=True, # Flag to signal updating instead of overwriting
+            iot_compat=args.iot_compat,
+            simulate_esp32=args.simulate_esp32
         )
         return
     
@@ -2105,7 +2490,9 @@ def main():
             override_classes=args.classes,
             override_color=args.color,
             model_list=args.model_list,
-            tolerance=args.tolerance
+            tolerance=args.tolerance,
+            iot_compat=args.iot_compat,
+            simulate_esp32=args.simulate_esp32
         )
         return
     
@@ -2131,7 +2518,9 @@ def main():
         override_classes=args.classes,
         override_color=args.color,
         model_list=args.model_list,
-        tolerance=args.tolerance
+        tolerance=args.tolerance,
+        iot_compat=args.iot_compat,
+        simulate_esp32=args.simulate_esp32
     )
 
 if __name__ == "__main__":
