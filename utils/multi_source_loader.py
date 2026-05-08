@@ -109,13 +109,26 @@ class MultiSourceDataLoader:
                 log_print(f"  No data loaded from {source_name}, skipping...", level=1)
                 continue
             
-            # Apply sampling weight (undersample if weight < 1.0)
-            if source_weight < 1.0 and len(images) > 0:
+            # Apply sampling weight:
+            #   weight < 1.0 → downsample (undersample)
+            #   weight > 1.0 → upsample (repeat with replacement)
+            #   weight = 1.0 → no change
+            if source_weight != 1.0 and len(images) > 0:
                 sample_size = int(len(images) * source_weight)
-                indices = np.random.choice(len(images), sample_size, replace=False)
-                images = images[indices]
-                labels = labels[indices]
-                log_print(f"  Sampled {sample_size} images (weight: {source_weight})", level=2)
+                if sample_size < len(images):
+                    # Downsample
+                    indices = np.random.choice(len(images), sample_size, replace=False)
+                    images = images[indices]
+                    labels = labels[indices]
+                    log_print(f"  Downsampled to {sample_size} images (weight: {source_weight})", level=2)
+                elif sample_size > len(images):
+                    # Upsample with replacement
+                    indices = np.random.choice(len(images), sample_size, replace=True)
+                    images = images[indices]
+                    labels = labels[indices]
+                    log_print(f"  Upsampled to {sample_size} images (weight: {source_weight})", level=2)
+                else:
+                    log_print(f"  Weight {source_weight} results in same count {sample_size}, no change", level=2)
             
             # Store source statistics
             self.source_stats[source_name] = {
