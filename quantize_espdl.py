@@ -342,6 +342,12 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
     output_dir = os.path.dirname(espdl_path)
     model_base_name = os.path.basename(espdl_path).replace(".espdl", "")
     
+    # Disable XNNPACK delegate for TFLite Micro compatibility
+    # onnx2tf doesn't expose the converter API, so we use the env var approach
+    if getattr(params, 'DISABLE_XNNPACK', True):
+        os.environ["TF_ENABLE_XNNPACK"] = "0"
+        print("   🔧 XNNPACK delegate disabled for TFLite Micro compatibility")
+    
     calib_npy_path = os.path.join(output_dir, "onnx2tf_calib_temp.npy")
     onnx2tf_calib = []
     for i in range(min(len(calib_data), 100)):

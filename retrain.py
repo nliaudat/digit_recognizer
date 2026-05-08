@@ -43,6 +43,25 @@ from utils.train_qat_helper import (
 )
 from utils.train_trainingmonitor import TrainingMonitor
 
+def _validate_no_delegates(tflite_model, model_name="model"):
+    """Validate that the TFLite model has no XNNPACK delegates baked in."""
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".tflite", delete=False) as f:
+        f.write(tflite_model)
+        tmp_path = f.name
+    try:
+        interp = tf.lite.Interpreter(
+            model_path=tmp_path,
+            experimental_op_resolver_type=tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+        )
+        interp.allocate_tensors()
+        print(f"  ✅ [{model_name}] No delegates — TFLite Micro compatible")
+    except Exception as e:
+        print(f"  ❌ [{model_name}] Delegate validation FAILED: {e}")
+        raise
+    finally:
+        os.unlink(tmp_path)
+
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune an existing model on bad predictions.")
     parser.add_argument("--model_path", type=str, required=True, help="Path to the trained .keras model to fine-tune")
@@ -237,7 +256,14 @@ def main():
             yield [img]
             
     converter.representative_dataset = representative_dataset_gen
-    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+    # Prevent XNNPACK delegate from being baked into the model (not supported in TFLite Micro)
+    # USE_TFLITE_BUILTINS_INT8_ONLY is the strongest override — forces INT8-only
+    if getattr(params, 'USE_TFLITE_BUILTINS_INT8_ONLY', False):
+        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+    elif getattr(params, 'DISABLE_XNNPACK', True):
+        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+    else:
+        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
     if params.ESP_DL_QUANTIZE:
         print("INFO: Using INT8 quantization scheme for ESP-DL.")
         converter.inference_input_type = tf.int8
@@ -247,8 +273,13 @@ def main():
         converter.inference_input_type = tf.uint8
         converter.inference_output_type = tf.uint8
     
+    assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
+        f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
+    
     try:
         tflite_model = converter.convert()
+        # Validate no delegates baked in
+        _validate_no_delegates(tflite_model, f"retrained_{params.MODEL_ARCHITECTURE}_ptq")
         tflite_path = os.path.join(export_dir, f"retrained_{params.MODEL_ARCHITECTURE}_ptq.tflite")
         with open(tflite_path, "wb") as f:
             f.write(tflite_model)

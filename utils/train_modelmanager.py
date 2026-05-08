@@ -87,6 +87,69 @@ class TFLiteModelManager:
     # -----------------------------------------------------------------
     #  Enhanced Conversion Methods
     # -----------------------------------------------------------------
+    def _apply_xnnpack_fix(self, converter):
+        """Apply XNNPACK delegate fix with validation.
+        
+        CORRECT USAGE — call this LAST, right before converter.convert():
+            converter = tf.lite.TFLiteConverter.from_keras_model(model)
+            converter.optimizations = [tf.lite.Optimize.DEFAULT]
+            converter.representative_dataset = ...
+            # ... all other settings ...
+            converter = self._apply_xnnpack_fix(converter)  # <-- LAST
+            assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+            tflite_model = converter.convert()
+            self._validate_no_delegates(tflite_model, "my_model")
+        """
+        
+        original_ops = getattr(converter.target_spec, 'supported_ops', None)
+        print(f"[DEBUG] Original supported_ops: {original_ops}")
+        
+        # Apply the fix
+        if getattr(params, 'USE_TFLITE_BUILTINS_INT8_ONLY', False):
+            converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+            print("[DEBUG] Set to TFLITE_BUILTINS_INT8 only")
+            
+            # CRITICAL: Verify quantization setup
+            if not hasattr(converter, 'representative_dataset') or converter.representative_dataset is None:
+                raise ValueError(
+                    "USE_TFLITE_BUILTINS_INT8_ONLY requires a representative_dataset! "
+                    "The converter will silently fail without one."
+                )
+            
+            # Force input/output types for full int8
+            converter.inference_input_type = tf.int8
+            converter.inference_output_type = tf.int8
+            
+        elif getattr(params, 'DISABLE_XNNPACK', True):
+            converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+            print("[DEBUG] Set to TFLITE_BUILTINS only")
+        
+        print(f"[DEBUG] Final supported_ops: {converter.target_spec.supported_ops}")
+        return converter
+
+    def _validate_no_delegates(self, tflite_model, model_name="model"):
+        """Validate that the TFLite model has no XNNPACK delegates baked in.
+        
+        Loads the model with BUILTIN_WITHOUT_DEFAULT_DELEGATES to verify
+        it works without any external delegates. Raises if loading fails.
+        """
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".tflite", delete=False) as f:
+            f.write(tflite_model)
+            tmp_path = f.name
+        try:
+            interp = tf.lite.Interpreter(
+                model_path=tmp_path,
+                experimental_op_resolver_type=tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+            )
+            interp.allocate_tensors()
+            print(f"✅ [{model_name}] No delegates — TFLite Micro compatible")
+        except Exception as e:
+            print(f"❌ [{model_name}] Delegate validation FAILED: {e}")
+            raise
+        finally:
+            os.unlink(tmp_path)
+
     def _convert_qat_model(self, model, filename, representative_data=None):
         """Convert QAT model to TFLite with proper representative dataset"""
         try:
@@ -140,27 +203,21 @@ class TFLiteModelManager:
             else:
                 converter.representative_dataset = representative_data
 
-            # QAT-specific conversion settings
-            if params.ESP_DL_QUANTIZE:
-                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-                converter.inference_input_type = tf.int8
-                converter.inference_output_type = tf.int8
-                if self.debug:
-                    print("🎯 ESP-DL INT8 quantization for QAT")
-            else:
-                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-                converter.inference_input_type = tf.uint8
-                converter.inference_output_type = tf.uint8
-                if self.debug:
-                    print("🎯 Standard UINT8 quantization for QAT")
-
-            # Additional QAT-specific settings
+            # Additional QAT-specific settings (BEFORE the XNNPACK fix)
             converter.experimental_new_quantizer = True  # Use new quantizer for better QAT support
             converter._experimental_disable_per_channel = False  # Enable per-channel quantization
+
+            # CORRECT FLOW: Apply XNNPACK fix LAST, right before convert()
+            converter = self._apply_xnnpack_fix(converter)
+            assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
+                f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
             
             # Convert with output suppression
             with suppress_all_output(self.debug):
                 tflite_model = converter.convert()
+            
+            # Validate no delegates baked in
+            self._validate_no_delegates(tflite_model, filename)
                 
             return self._save_tflite_file(tflite_model, filename, True)
             
@@ -254,24 +311,18 @@ class TFLiteModelManager:
                 converter.representative_dataset = default_representative_dataset
             else:
                 converter.representative_dataset = representative_data
-            
-            # Set quantization based on ESP-DL setting
-            if params.ESP_DL_QUANTIZE:
-                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-                converter.inference_input_type = tf.int8
-                converter.inference_output_type = tf.int8
-                if self.debug:
-                    print("🎯 ESP-DL INT8 quantization")
-            else:
-                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-                converter.inference_input_type = tf.uint8
-                converter.inference_output_type = tf.uint8
-                if self.debug:
-                    print("🎯 Standard UINT8 quantization")
+
+            # CORRECT FLOW: Apply XNNPACK fix LAST, right before convert()
+            converter = self._apply_xnnpack_fix(converter)
+            assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
+                f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
             
             # Convert with output suppression
             with suppress_all_output(self.debug):
                 tflite_model = converter.convert()
+            
+            # Validate no delegates baked in
+            self._validate_no_delegates(tflite_model, filename)
             
             return self._save_tflite_file(tflite_model, filename, True)
             
@@ -509,7 +560,11 @@ class TFLiteModelManager:
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
         # No representative dataset
+        converter = self._apply_xnnpack_fix(converter)
+        assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
+            f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
         tflite_model = converter.convert()
+        self._validate_no_delegates(tflite_model, filename)
         return self._save_tflite_file(tflite_model, filename, True)
 
     def _convert_float16(self, model, filename):
@@ -517,7 +572,11 @@ class TFLiteModelManager:
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
         converter.target_spec.supported_types = [tf.float16]
+        converter = self._apply_xnnpack_fix(converter)
+        assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
+            f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
         tflite_model = converter.convert()
+        self._validate_no_delegates(tflite_model, filename)
         return self._save_tflite_file(tflite_model, filename, True)
 
     # -----------------------------------------------------------------
@@ -568,8 +627,16 @@ class TFLiteModelManager:
                 converter.optimizations = [tf.lite.Optimize.DEFAULT]
                 # No representative dataset for simple conversion
             
+            converter = self._apply_xnnpack_fix(converter)
+            if quantize:
+                assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
+                    f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
+            
             with suppress_all_output(self.debug):
                 tflite_model = converter.convert()
+            
+            if quantize:
+                self._validate_no_delegates(tflite_model, filename)
             
             return self._save_tflite_file(tflite_model, filename, quantize)
                 
@@ -593,8 +660,16 @@ class TFLiteModelManager:
                 if representative_data is not None:
                     converter.representative_dataset = representative_data
             
+            converter = self._apply_xnnpack_fix(converter)
+            if quantize:
+                assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
+                    f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
+            
             with suppress_all_output(self.debug):
                 tflite_model = converter.convert()
+            
+            if quantize:
+                self._validate_no_delegates(tflite_model, filename)
             
             # Cleanup
             shutil.rmtree(temp_dir)
@@ -631,6 +706,7 @@ class TFLiteModelManager:
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
 
         if not quantize:
+            converter = self._apply_xnnpack_fix(converter)
             return converter
 
         # -------------------- Quantisation path --------------------
@@ -657,16 +733,19 @@ class TFLiteModelManager:
 
             # Choose the correct integer type for the target platform
             if params.ESP_DL_QUANTIZE:
-                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                 converter.inference_input_type = tf.int8
                 converter.inference_output_type = tf.int8
             else:
-                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
                 converter.inference_input_type = tf.uint8
                 converter.inference_output_type = tf.uint8
 
             # Enable the newer quantiser (helps QAT models)
             converter.experimental_new_quantizer = True
+
+        # CORRECT FLOW: Apply XNNPACK fix LAST, right before conversion
+        converter = self._apply_xnnpack_fix(converter)
+        assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
+            f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
         return converter
 
     # -----------------------------------------------------------------
@@ -784,9 +863,18 @@ class TFLiteModelManager:
                 
                 print("🎯 Using dynamic range quantization with REAL data (Keras 3 safe)")
             
+            # CORRECT FLOW: Apply XNNPACK fix LAST, right before conversion
+            converter = self._apply_xnnpack_fix(converter)
+            if quantize:
+                assert converter.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
+                    f"Expected TFLITE_BUILTINS_INT8, got {converter.target_spec.supported_ops}"
+            
             # Convert model
             with suppress_all_output(self.debug):
                 tflite_model = converter.convert()
+            
+            if quantize:
+                self._validate_no_delegates(tflite_model, filename)
             
             return self._save_tflite_file(tflite_model, filename, quantize)
                 

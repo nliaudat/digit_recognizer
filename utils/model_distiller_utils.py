@@ -135,9 +135,18 @@ def export_student_for_edge(
 
     def _build_converter(input_type=None, output_type=None, ops=None):
         conv = tf.lite.TFLiteConverter.from_keras_model(student)
+        # Prevent XNNPACK delegate from being baked into the model (not supported in TFLite Micro)
+        # USE_TFLITE_BUILTINS_INT8_ONLY is the strongest override — forces INT8-only
+        if getattr(params, 'USE_TFLITE_BUILTINS_INT8_ONLY', False):
+            conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+        elif getattr(params, 'DISABLE_XNNPACK', True):
+            if ops:
+                conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS] + list(ops)
+            else:
+                conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
         if quantize:
             conv.optimizations = [tf.lite.Optimize.DEFAULT]
-            if ops:
+            if ops and not getattr(params, 'DISABLE_XNNPACK', True) and not getattr(params, 'USE_TFLITE_BUILTINS_INT8_ONLY', False):
                 conv.target_spec.supported_ops = ops
             if input_type:
                 conv.inference_input_type = input_type
@@ -146,6 +155,25 @@ def export_student_for_edge(
             if rep_gen:
                 conv.representative_dataset = rep_gen
         return conv
+
+    def _validate_no_delegates(tflite_model, model_name="model"):
+        """Validate that the TFLite model has no XNNPACK delegates baked in."""
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".tflite", delete=False) as f:
+            f.write(tflite_model)
+            tmp_path = f.name
+        try:
+            interp = tf.lite.Interpreter(
+                model_path=tmp_path,
+                experimental_op_resolver_type=tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+            )
+            interp.allocate_tensors()
+            logger.info(f"✅ [{model_name}] No delegates — TFLite Micro compatible")
+        except Exception as e:
+            logger.error(f"❌ [{model_name}] Delegate validation FAILED: {e}")
+            raise
+        finally:
+            os.unlink(tmp_path)
 
     tflite_path = f"{export_path}.tflite"
 
@@ -161,10 +189,16 @@ def export_student_for_edge(
             input_type=input_type, output_type=output_type,
             ops=[tf.lite.OpsSet.TFLITE_BUILTINS_INT8, tf.lite.OpsSet.TFLITE_BUILTINS]
         )
+        assert conv.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
+            f"Expected TFLITE_BUILTINS_INT8, got {conv.target_spec.supported_ops}"
         tflite_model = conv.convert()
+        _validate_no_delegates(tflite_model, f"{os.path.basename(export_path)}_esp32")
     elif quantize:
         conv = _build_converter(ops=[tf.lite.OpsSet.TFLITE_BUILTINS_INT8])
+        assert conv.target_spec.supported_ops == [tf.lite.OpsSet.TFLITE_BUILTINS_INT8], \
+            f"Expected TFLITE_BUILTINS_INT8, got {conv.target_spec.supported_ops}"
         tflite_model = conv.convert()
+        _validate_no_delegates(tflite_model, os.path.basename(export_path))
     else:
         tflite_model = _build_converter().convert()
 
