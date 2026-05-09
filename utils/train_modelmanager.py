@@ -110,12 +110,12 @@ class TFLiteModelManager:
         """
         
         original_ops = getattr(converter.target_spec, 'supported_ops', None)
-        print(f"[DEBUG] Original supported_ops: {original_ops}")
+        # print(f"[DEBUG] Original supported_ops: {original_ops}")
         
         # Apply the fix
         if quantize and getattr(params, 'USE_TFLITE_BUILTINS_INT8_ONLY', False):
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-            print("[DEBUG] Set to TFLITE_BUILTINS_INT8 only")
+            # print("[DEBUG] Set to TFLITE_BUILTINS_INT8 only")
             
             # CRITICAL: Verify quantization setup
             if not hasattr(converter, 'representative_dataset') or converter.representative_dataset is None:
@@ -130,9 +130,9 @@ class TFLiteModelManager:
             
         elif getattr(params, 'DISABLE_XNNPACK', True):
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
-            print("[DEBUG] Set to TFLITE_BUILTINS only")
+            # print("[DEBUG] Set to TFLITE_BUILTINS only")
         
-        print(f"[DEBUG] Final supported_ops: {converter.target_spec.supported_ops}")
+        # print(f"[DEBUG] Final supported_ops: {converter.target_spec.supported_ops}")
         return converter
 
     def _validate_no_delegates(self, tflite_model, model_name="model"):
