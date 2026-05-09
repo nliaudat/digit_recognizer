@@ -406,7 +406,7 @@ USE_TQT_FOR_TFLITE = True       # Generate TFLite metadata from TQT scales (high
 DATASET_CACHE_DIR = os.environ.get("DATASET_CACHE_DIR", ".dataset_cache")
 
 # Data pipeline configuration
-USE_TF_DATA_PIPELINE = False
+USE_TF_DATA_PIPELINE = True
 
 try:
     TF_DATA_PARALLEL_CALLS = tf.data.AUTOTUNE
@@ -1240,3 +1240,17 @@ try:
     validate_hyperparameters()
 except Exception as e:
     print(f"❌ Parameter validation failed: {e}")
+
+# --------------------------------------------------------------------------- #
+#  Deprecation warning — prefer `from config import ...` over `import parameters`
+# --------------------------------------------------------------------------- #
+# Emit a PendingDeprecationWarning when someone imports parameters.py directly
+# instead of using the new config/ package.  This is non-fatal and only shows
+# once per interpreter session.
+import warnings as _warnings
+_warnings.warn(
+    "parameters.py is deprecated. Use `from config import ...` instead. "
+    "See ENHANCEMENT_PLAN.md for migration details.",
+    PendingDeprecationWarning,
+    stacklevel=2,
+)
