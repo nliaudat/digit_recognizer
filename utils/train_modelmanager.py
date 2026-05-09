@@ -185,15 +185,9 @@ class TFLiteModelManager:
                     # CRITICAL FIX: Use the SAME preprocessing as during QAT training
                     calibration_processed = preprocess_for_training(calibration_data)  # CHANGED: for_training=True
                     
-                    # Ensure proper data type and range for QAT
-                    if calibration_processed.dtype != np.float32:
-                        calibration_processed = calibration_processed.astype(np.float32)
-                    
-                    # For QAT, data should be in the same range as during training
-                    # QAT training uses [0, 1] range, so calibration should too
-                    if calibration_processed.max() > 1.0:
-                        calibration_processed = calibration_processed / 255.0
-                    
+                    # preprocess_for_training() already returns float32 [0,1]
+                    # Do NOT apply /255.0 again — that would corrupt data to [0, ~0.004]
+                    # and produce wildly incorrect quantization scale factors.
                     if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                         print(f"🔧 QAT Calibration: {len(calibration_processed)} samples, "
                               f"dtype: {calibration_processed.dtype}, "
@@ -202,6 +196,9 @@ class TFLiteModelManager:
                     # Verify data matches QAT training expectations
                     if calibration_processed.dtype != np.float32:
                         raise ValueError(f"QAT calibration data must be float32, got {calibration_processed.dtype}")
+                    if calibration_processed.max() > 1.0 or calibration_processed.min() < 0.0:
+                        raise ValueError(f"QAT calibration data must be in [0,1] range, "
+                                         f"got [{calibration_processed.min():.3f}, {calibration_processed.max():.3f}]")
                     
                     # Yield data in the correct format
                     for i in range(len(calibration_processed)):
