@@ -79,7 +79,7 @@ if NB_CLASSES <= 10:
     BATCH_SIZE = 64
 else:
     # 100-class: smaller batches help with class imbalance and gradient diversity
-    BATCH_SIZE = 64
+    BATCH_SIZE = 32
 
 EPOCHS = 250
 LEARNING_RATE = 0.001  # Robust default for cold-start

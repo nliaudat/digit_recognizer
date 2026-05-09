@@ -104,12 +104,8 @@ def get_model_metadata(model_path):
         input_dtype = input_details['dtype']
         output_dtype = output_details['dtype']
 
-        # Estimate parameter count from model file size
         file_size_bytes = os.path.getsize(model_path)
-        # Rough estimate: most params are 1-byte (int8) or 4-byte (float32)
         is_quantized = output_dtype in [np.uint8, np.int8]
-        bytes_per_param = 1 if is_quantized else 4
-        estimated_params = file_size_bytes // bytes_per_param
 
         return {
             'input_shape': input_shape,
@@ -117,7 +113,6 @@ def get_model_metadata(model_path):
             'input_dtype': input_dtype,
             'output_dtype': output_dtype,
             'quantization': input_details.get('quantization'),
-            'estimated_params': estimated_params,
             'is_quantized': is_quantized,
             'file_size_bytes': file_size_bytes,
         }

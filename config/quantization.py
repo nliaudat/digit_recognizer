@@ -33,11 +33,12 @@ QAT_SCHEME = '8bit'
 
 # TQT (ESP-DL) Trainable Quantization Thresholds Pipeline
 USE_TQT_PIPELINE = False
+USE_TQT_FOR_TFLITE = False
 
 # Apply quantization mode configuration
 def _configure_quantization_mode():
     """Configure quantization flags based on QUANTIZATION_MODE"""
-    global QUANTIZE_MODEL, ESP_DL_QUANTIZE, USE_QAT, USE_TQT_PIPELINE
+    global QUANTIZE_MODEL, ESP_DL_QUANTIZE, USE_QAT, USE_TQT_PIPELINE, USE_TQT_FOR_TFLITE
     
     if QUANTIZATION_MODE is None:
         return
@@ -81,7 +82,7 @@ def _configure_quantization_mode():
 
 def _auto_configure_quantization():
     """Automatically select quantization mode based on model and target hardware"""
-    global QUANTIZE_MODEL, ESP_DL_QUANTIZE, USE_QAT, USE_TQT_PIPELINE
+    global QUANTIZE_MODEL, ESP_DL_QUANTIZE, USE_QAT, USE_TQT_PIPELINE, USE_TQT_FOR_TFLITE
     from config import AVAILABLE_MODELS, MODEL_ARCHITECTURE
     
     esp_compatible_models = [m for m in AVAILABLE_MODELS if not m.endswith("_teacher")]
@@ -91,11 +92,13 @@ def _auto_configure_quantization():
         ESP_DL_QUANTIZE = True
         USE_QAT = False
         USE_TQT_PIPELINE = True
+        USE_TQT_FOR_TFLITE = True
     else:
         QUANTIZE_MODEL = False
         ESP_DL_QUANTIZE = False
         USE_QAT = False
         USE_TQT_PIPELINE = False
+        USE_TQT_FOR_TFLITE = False
 
 # Apply configuration
 _configure_quantization_mode()
@@ -163,8 +166,6 @@ TQT_IS_WEIGHT_TRAINABLE = _tqt_cfg["TQT_IS_WEIGHT_TRAINABLE"]
 TQT_COLLECTING_DEVICE   = _tqt_cfg["TQT_COLLECTING_DEVICE"]
 TQT_CALIB_STEPS         = _tqt_cfg["TQT_CALIB_STEPS"]
 TQT_CALIB_BATCH_SIZE    = _tqt_cfg["TQT_CALIB_BATCH_SIZE"]
-
-USE_TQT_FOR_TFLITE = True
 
 # Dataset disk cache directory
 DATASET_CACHE_DIR = os.environ.get("DATASET_CACHE_DIR", ".dataset_cache")

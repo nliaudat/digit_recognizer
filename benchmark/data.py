@@ -188,7 +188,7 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
     if os.path.exists(cache_path):
         try:
             logger.info(f"📊 Loading dataset from fast disk cache ({cache_path})...")
-            data = np.load(cache_path, allow_pickle=True)
+            data = np.load(cache_path, allow_pickle=False)
             images = data["images"]
             labels = data["labels"]
             fnames = data["fnames"]

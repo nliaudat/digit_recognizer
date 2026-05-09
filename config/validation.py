@@ -56,35 +56,34 @@ def _check_label_file(label_path: str, expected_classes: int) -> List[str]:
         errors.append(f"❌ Label file not found: {label_path}")
         return errors
 
-    try:
-        with open(label_path, "r") as f:
-            lines = f.readlines()
-    except Exception as exc:
-        errors.append(f"❌ Cannot read label file {label_path}: {exc}")
-        return errors
-
-    if not lines:
+    if os.path.getsize(label_path) == 0:
         errors.append(f"⚠️  Label file is empty: {label_path}")
         return errors
 
-    # Check first few lines are valid integers in [0, expected_classes)
     checked = 0
-    for line in lines[:100]:
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.split()
-        # Label is the LAST token (format: "filename\\tlabel")
-        try:
-            val = int(parts[-1])
-        except (ValueError, IndexError):
-            errors.append(f"❌ Invalid label entry in {label_path}: '{line}'")
-            continue
-        if val < 0 or val >= expected_classes:
-            errors.append(
-                f"❌ Label {val} out of range [0, {expected_classes}) in {label_path}"
-            )
-        checked += 1
+    try:
+        with open(label_path, "r") as f:
+            for line in f:
+                if checked >= 100:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                # Label is the LAST token (format: "filename\\tlabel")
+                try:
+                    val = int(parts[-1])
+                except (ValueError, IndexError):
+                    errors.append(f"❌ Invalid label entry in {label_path}: '{line}'")
+                    continue
+                if val < 0 or val >= expected_classes:
+                    errors.append(
+                        f"❌ Label {val} out of range [0, {expected_classes}) in {label_path}"
+                    )
+                checked += 1
+    except Exception as exc:
+        errors.append(f"❌ Cannot read label file {label_path}: {exc}")
+        return errors
 
     if checked == 0:
         errors.append(f"⚠️  No parseable labels found in {label_path}")

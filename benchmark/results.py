@@ -12,6 +12,7 @@ import logging
 import os
 from collections import Counter
 from datetime import datetime
+import time
 
 import cv2
 
@@ -50,8 +51,7 @@ except ImportError:
 
 def test_model_on_dataset(model_path, num_test_images=0, debug=False,
                           use_all_datasets=True, collect_failed=False,
-                          model_name=None, tolerance=0.1,
-                          simulate_esp32=False, max_esp32_images=100):
+                          model_name=None):
     """
     Test a single TFLite model on the test dataset.
 
@@ -75,7 +75,6 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False,
     inference_times = []
 
     for image, true_label, fname, is_augmented in tqdm(test_data, desc=f"Testing {model_name or os.path.basename(model_path)}"):
-        import time
         t0 = time.time()
         output = predictor.predict(image, debug=debug)
         elapsed = time.time() - t0
@@ -154,7 +153,6 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
             use_all_datasets=use_all_datasets,
             collect_failed=(list_failed or save_failed),
             model_name=model_info['name'],
-            simulate_esp32=simulate_esp32,
         )
         result['model_info'] = model_info
         results.append(result)
@@ -313,7 +311,6 @@ def save_results_to_csv(results, quantized_only=True, use_all_images=True,
             'Input Dtype': str(model_info.get('input_dtype', '')),
             'Output Dtype': str(model_info.get('output_dtype', '')),
             'Is Quantized': model_info.get('is_quantized', False),
-            'Estimated Params': model_info.get('estimated_params', 0),
         }
         rows.append(row)
 
@@ -374,7 +371,7 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
         if results:
             df = pd.DataFrame(results)
             f.write("\n## IoT Recommendation\n\n")
-            f.write(generate_iot_recommendation_section(f, df))
+            f.write(generate_iot_recommendation_section(df))
 
     logger.info(f"Report saved to: {report_path}")
     return report_path
@@ -407,7 +404,7 @@ def calculate_best_iot_model(df, accuracy_weight=0.5, size_weight=0.3,
     return df.iloc[best_idx] if not df.empty else None
 
 
-def generate_iot_recommendation_section(f, df):
+def generate_iot_recommendation_section(df):
     """Generate IoT recommendation section text."""
     best = calculate_best_iot_model(df)
     if best is None:
@@ -439,7 +436,7 @@ def generate_iot_recommendation_section(f, df):
     ranked_indices = np.argsort(scores)[::-1]
     for rank, idx in enumerate(ranked_indices, 1):
         row = df.iloc[idx]
-        f.write(f"| {rank} | {row['model_name'][:40]} | {scores[idx]:.3f} | "
+        text.append(f"| {rank} | {row['model_name'][:40]} | {scores[idx]:.3f} | "
                 f"{row['accuracy']:.4f} | "
                 f"{row['avg_inference_time'] * 1000:.1f} | "
                 f"{row.get('model_info', {}).get('file_size_bytes', 0) / 1024:.0f} |\n")
@@ -499,7 +496,6 @@ def test_single_model(model_path, num_test_images=0, debug=False,
         use_all_datasets=use_all_datasets,
         collect_failed=(list_failed or save_failed),
         model_name=model_name,
-        simulate_esp32=simulate_esp32,
     )
 
     print(f"\nResults for {result['model_name']}:")
