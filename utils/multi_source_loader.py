@@ -1,8 +1,6 @@
 # multi_source_loader.py
 import os
 import cv2
-import hashlib
-import json
 import time
 import numpy as np
 import tensorflow as tf
@@ -10,61 +8,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.model_selection import train_test_split
 
 import parameters as params
+from utils.cache import (
+    get_cached_in_memory, set_cached_in_memory, clear_cache,
+    load_disk_cache, save_disk_cache, dataset_cache_path,
+)
 from utils.custom_logger import log_print
-
-# Global variable to cache loaded data (in-memory, single process)
-_loaded_data = None
-
-# ---------------------------------------------------------------------------
-# Disk-level NPZ cache helpers
-# ---------------------------------------------------------------------------
-
-def _cache_key(source_configs: list) -> str:
-    """Deterministic cache key from source paths + label files + nb_classes."""
-    fingerprint = json.dumps(
-        [{k: v for k, v in s.items()} for s in source_configs],
-        sort_keys=True,
-    ) + f"|nb_classes={params.NB_CLASSES}|grayscale={params.USE_GRAYSCALE}"
-    return hashlib.md5(fingerprint.encode()).hexdigest()[:12]
-
-
-def _cache_path(source_configs: list) -> str:
-    """Return the .npz file path for this configuration."""
-    cache_dir = getattr(params, "DATASET_CACHE_DIR", ".dataset_cache")
-    os.makedirs(cache_dir, exist_ok=True)
-    return os.path.join(cache_dir, f"dataset_{_cache_key(source_configs)}.npz")
-
-
-def _load_cache(source_configs: list):
-    """Return (images, labels) from disk cache if valid, else None."""
-    path = _cache_path(source_configs)
-    if not os.path.exists(path):
-        print(f"ℹ️  No disk cache found at: {path} (Initial load required)")
-        return None
-    try:
-        data = np.load(path, allow_pickle=True)
-        images, labels = data["images"], data["labels"]
-        print(f"⚡ Loaded dataset from disk cache: {path} "
-              f"({len(images)} images, {os.path.getsize(path) / 1e6:.1f} MB)")
-        return images, labels
-    except Exception as e:
-        print(f"⚠️  Disk cache exists but could not be loaded ({e}), rebuilding…")
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-        return None
-
-
-def _save_cache(source_configs: list, images: np.ndarray, labels: np.ndarray):
-    """Persist images + labels to disk as a compressed NPZ file."""
-    path = _cache_path(source_configs)
-    try:
-        np.savez_compressed(path, images=images, labels=labels)
-        print(f"💾 Dataset cached to disk: {path} "
-              f"({os.path.getsize(path) / 1e6:.1f} MB)")
-    except Exception as e:
-        print(f"⚠️  Could not save disk cache: {e}")
 
 class MultiSourceDataLoader:
     def __init__(self):
@@ -76,11 +24,11 @@ class MultiSourceDataLoader:
         """
         Load and combine all data sources
         """
-        global _loaded_data
         # Return cached data if available
-        if _loaded_data is not None:
+        cached = get_cached_in_memory()
+        if cached is not None:
             print("📊 Using cached dataset...")
-            return _loaded_data
+            return cached
         
         print("Loading multiple data sources...")
         print("=" * 50)
@@ -153,7 +101,7 @@ class MultiSourceDataLoader:
             labels = np.concatenate(self.all_labels, axis=0)
         
         # Cache the loaded data
-        _loaded_data = (images, labels)
+        set_cached_in_memory(images, labels)
         log_print(f"\nCombined dataset:", level=2)
         log_print(f"  Total images: {len(images)}", level=2)
         log_print(f"  Sources: {list(self.source_stats.keys())}", level=2)
@@ -369,20 +317,26 @@ def load_combined_dataset():
       2. Disk NPZ cache   (cross-run, survives Docker restarts)
       3. Full parallel decode from source files
     """
-    global _loaded_data
-    if _loaded_data is not None:
+    # 1. In-memory cache
+    cached = get_cached_in_memory()
+    if cached is not None:
         print("📊 Using cached dataset...")
-        return _loaded_data
+        return cached
 
-    # Try disk cache
-    cached = _load_cache(params.DATA_SOURCES)
+    # 2. Disk cache
+    cache_path = dataset_cache_path(
+        params.DATA_SOURCES, params.NB_CLASSES,
+        params.INPUT_CHANNELS, params.INPUT_WIDTH, params.INPUT_HEIGHT,
+        prefix="dataset",
+    )
+    cached = load_disk_cache(cache_path)
     if cached is not None:
         images, labels = cached
         images, labels = shuffle_dataset(images, labels)
-        _loaded_data = (images, labels)
+        set_cached_in_memory(images, labels)
         return images, labels
 
-    # Full load
+    # 3. Full load
     t0 = time.time()
     loader = MultiSourceDataLoader()
     images, labels = loader.load_all_sources()
@@ -390,8 +344,8 @@ def load_combined_dataset():
     print(f"⏱  Total source-load time: {time.time() - t0:.1f}s")
 
     images, labels = shuffle_dataset(images, labels)
-    _save_cache(params.DATA_SOURCES, images, labels)
-    _loaded_data = (images, labels)
+    save_disk_cache(cache_path, images, labels)
+    set_cached_in_memory(images, labels)
     return images, labels
 
 def get_data_splits():
@@ -448,8 +402,4 @@ def get_data_splits():
     
     return (x_train, y_train), (x_val, y_val), (x_test, y_test)
 
-def clear_cache():
-    """Clear the cached dataset"""
-    global _loaded_data
-    _loaded_data = None
-    print("🧹 Cleared dataset cache")
+# clear_cache is imported from utils.cache — kept here for backward compatibility

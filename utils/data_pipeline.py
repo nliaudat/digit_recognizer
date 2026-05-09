@@ -15,8 +15,12 @@ def create_tf_dataset_from_arrays(x_data, y_data, training=True, batch_size=None
     # NO ADDITIONAL PREPROCESSING - data is already normalized to correct range
     # Just ensure correct data types
     def ensure_correct_format(image, label):
-        # Ensure proper data type
-        image = tf.cast(image, tf.float32)
+        # Preserve uint8 [0,255] data by normalizing to float32 [0,1]
+        # Avoids silent corruption: tf.cast(uint8, float32) gives [0,255] not [0,1]
+        if image.dtype == tf.uint8:
+            image = tf.cast(image, tf.float32) / 255.0
+        elif image.dtype != tf.float32:
+            image = tf.cast(image, tf.float32)
         return image, label
     
     dataset = dataset.map(ensure_correct_format, num_parallel_calls=tf.data.AUTOTUNE)

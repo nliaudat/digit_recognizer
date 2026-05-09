@@ -45,34 +45,7 @@ try:
 except ImportError:
     pass  # Not used directly in v27; SoftContrastNormalization replaces it
 
-try:
-    from utils.augmentation import PolarityInversionAugmentation
-except ImportError:
-    # Fallback when models/ is not on sys.path (e.g. standalone run)
-    class PolarityInversionAugmentation(tf.keras.layers.Layer):
-        """Fallback inline definition — prefer utils.augmentation version."""
-        def __init__(self, probability=0.5, **kwargs):
-            super().__init__(**kwargs)
-            self.probability = probability
-
-        def call(self, inputs, training=None):
-            if not training:
-                return inputs
-            input_rank = inputs.shape.rank
-            if input_rank == 3:
-                flip = tf.cast(tf.random.uniform(()) < self.probability, tf.float32)
-                return (1.0 - flip) * inputs + flip * (1.0 - inputs)
-            batch_size = tf.shape(inputs)[0]
-            mask = tf.cast(
-                tf.random.uniform([batch_size, 1, 1, 1]) < self.probability,
-                tf.float32
-            )
-            return (1.0 - mask) * inputs + mask * (1.0 - inputs)
-
-        def get_config(self):
-            config = super().get_config()
-            config.update({'probability': self.probability})
-            return config
+from utils.augmentation import PolarityInversionAugmentation
 
 
 # ============================================================================

@@ -12,6 +12,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import parameters as params
+from config.validation import validate_full_config
 from utils.multi_source_loader import load_combined_dataset
 from utils.preprocess import preprocess_single_image
 
@@ -205,4 +206,5 @@ def main():
         print("3. 📊 Monitor training with: python train.py --debug")
 
 if __name__ == "__main__":
+    validate_full_config()
     main()

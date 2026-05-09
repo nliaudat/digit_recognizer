@@ -21,11 +21,10 @@ from datetime import datetime
 from pathlib import Path
 
 # ── Environment Setup ──
-# Set default environment variables strictly before importing parameters.py
-if "DIGIT_NB_CLASSES" not in os.environ:
-    os.environ["DIGIT_NB_CLASSES"] = "10"
-if "DIGIT_INPUT_CHANNELS" not in os.environ:
-    os.environ["DIGIT_INPUT_CHANNELS"] = "1"
+# NOTE: Do NOT set DIGIT_NB_CLASSES / DIGIT_INPUT_CHANNELS here.
+# config/__init__.py pre-parses --classes / --color from sys.argv and
+# sets these env vars before computing NB_CLASSES / INPUT_CHANNELS.
+# Setting them here would override the CLI args.
 
 import absl.logging
 import matplotlib.pyplot as plt
@@ -603,6 +602,12 @@ def main():
     #  REFRESH DERIVED PARAMETERS (Apply CLI overrides to paths/shapes)
     # -----------------------------------------------------------------
     params.update_derived_parameters()
+    
+    # -----------------------------------------------------------------
+    #  VALIDATE FULL CONFIGURATION (data sources, model, quantization)
+    # -----------------------------------------------------------------
+    from config.validation import validate_full_config
+    validate_full_config(raise_on_error=True)
     
     # -----------------------------------------------------------------
     #  PRINT FINAL CONFIGURATION SUMMARY

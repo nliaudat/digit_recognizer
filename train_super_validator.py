@@ -35,6 +35,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import parameters as params
+from config.validation import validate_full_config
 from models.super_high_accuracy_validator import (
     create_super_high_accuracy_validator
 )
@@ -634,6 +635,7 @@ def main():
 
 
 if __name__ == "__main__":
+    validate_full_config()
     main()
 
 # python train_super_validator.py --output-dir exported_models/100cls_RGB/super_high_accuracy_validator_100cls_RGB_v2 --focal-gamma 4

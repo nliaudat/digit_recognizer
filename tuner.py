@@ -19,6 +19,7 @@ except ImportError:
 
 # Project imports
 import parameters as params
+from config.validation import validate_full_config
 from models import compile_model, create_model
 from utils import get_data_splits, preprocess_for_training
 from utils.losses import (
@@ -766,6 +767,7 @@ def run_finetune_tuning(x_train, y_train, x_val, y_val,
 # ==============================================================================
 
 if __name__ == '__main__':
+    validate_full_config()
     os.environ.setdefault('DIGIT_NB_CLASSES', str(params.NB_CLASSES))
     os.environ.setdefault('DIGIT_INPUT_CHANNELS', str(params.INPUT_CHANNELS))
 

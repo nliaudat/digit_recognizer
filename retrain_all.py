@@ -28,8 +28,10 @@ from pathlib import Path
 # Optional project imports
 try:
     import parameters as p
+    from config.validation import validate_full_config
 except ImportError:
     p = None
+    validate_full_config = None
 
 # Ensure UTF-8 on Windows
 if hasattr(sys.stdout, 'reconfigure'):
@@ -407,6 +409,8 @@ def main():
 
 
 if __name__ == '__main__':
+    if validate_full_config:
+        validate_full_config()
     main()
 
 

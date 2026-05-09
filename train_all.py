@@ -15,6 +15,7 @@ if "DIGIT_INPUT_CHANNELS" not in os.environ:
     os.environ["DIGIT_INPUT_CHANNELS"] = "1"
 
 import parameters as params
+from config.validation import validate_full_config
 
 def main():
     parser = argparse.ArgumentParser(description="Launch training for all active models in parameters.py across all 4 combinations (10/100 classes, Grayscale/RGB) sequentially or concurrently.")
@@ -190,4 +191,5 @@ def main():
         print(f"{'='*80}\n")
 
 if __name__ == "__main__":
+    validate_full_config()
     main()
