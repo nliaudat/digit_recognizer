@@ -57,6 +57,7 @@ if _pre_args.color:
 
 # ── Project Imports ───────────────────────────────────────────────────────
 import parameters as params
+from config.validation import validate_full_config
 from utils.model_distiller_utils import create_tflite_interpreter
 from utils.multi_source_loader import clear_cache
 from utils.preprocess import preprocess_for_inference
@@ -2524,6 +2525,7 @@ def main():
     )
 
 if __name__ == "__main__":
+    validate_full_config()
     main()
     
 # py bench_predict.py --test_all
