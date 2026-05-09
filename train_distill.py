@@ -84,6 +84,7 @@ if "DIGIT_INPUT_CHANNELS" not in os.environ:
     os.environ["DIGIT_INPUT_CHANNELS"] = "1"
 
 import parameters as params
+from config.validation import validate_full_config
 from utils.train_distill_helper import (
     STUDENTS, TEACHERS, load_distillation_data, run_distillation_pipeline,
     train_teacher
@@ -542,4 +543,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    validate_full_config()
     main()

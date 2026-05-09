@@ -30,3 +30,6 @@ docker/requirements_original.txt
 datasets/tools/commands.txt
 
 regenerate_TQT_tflite_output.py
+/config/__pycache__
+/benchmark/__pycache__
+/exported_models

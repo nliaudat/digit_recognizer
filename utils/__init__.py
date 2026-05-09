@@ -56,34 +56,44 @@ def suppress_all_output(debug: bool = False):
     This is primarily used during the TFLite conversion step to hide the
     massive amount of TensorFlow logging that would otherwise clutter the
     console.
+
+    Uses low-level ``os.dup2`` to intercept C-level output from TensorFlow
+    kernels (XLA, CUDA, etc.) — ``contextlib.redirect_stdout`` alone would
+    only catch Python-level writes and miss TF's fd-level output.
     """
     if debug:
         yield
         return
 
     original_stdout, original_stderr = sys.stdout, sys.stderr
+    stdout_fd = None
+    stderr_fd = None
+
     with open(os.devnull, "w") as fnull:
         sys.stdout, sys.stderr = fnull, fnull
         try:
-            if hasattr(sys, "__stdout__"):
+            if hasattr(sys, "__stdout__") and sys.__stdout__ is not None:
                 stdout_fd = os.dup(sys.__stdout__.fileno())
                 stderr_fd = os.dup(sys.__stderr__.fileno())
                 devnull_fd = os.open(os.devnull, os.O_WRONLY)
                 os.dup2(devnull_fd, sys.__stdout__.fileno())
                 os.dup2(devnull_fd, sys.__stderr__.fileno())
                 os.close(devnull_fd)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Log failure but continue — Python-level redirect still works
+            print(f"⚠️  suppress_all_output fd-level redirect failed (non-fatal): {exc}",
+                  file=original_stderr if original_stderr else sys.stderr)
 
         try:
             yield
         finally:
             sys.stdout, sys.stderr = original_stdout, original_stderr
-            try:
-                if "stdout_fd" in locals() and "stderr_fd" in locals():
+            if stdout_fd is not None and stderr_fd is not None:
+                try:
                     os.dup2(stdout_fd, sys.__stdout__.fileno())
                     os.dup2(stderr_fd, sys.__stderr__.fileno())
                     os.close(stdout_fd)
                     os.close(stderr_fd)
-            except Exception:
-                pass
+                except Exception as exc:
+                    print(f"⚠️  suppress_all_output fd-restore failed (non-fatal): {exc}",
+                          file=original_stderr if original_stderr else sys.stderr)

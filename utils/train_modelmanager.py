@@ -110,12 +110,12 @@ class TFLiteModelManager:
         """
         
         original_ops = getattr(converter.target_spec, 'supported_ops', None)
-        print(f"[DEBUG] Original supported_ops: {original_ops}")
+        # print(f"[DEBUG] Original supported_ops: {original_ops}")
         
         # Apply the fix
         if quantize and getattr(params, 'USE_TFLITE_BUILTINS_INT8_ONLY', False):
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-            print("[DEBUG] Set to TFLITE_BUILTINS_INT8 only")
+            # print("[DEBUG] Set to TFLITE_BUILTINS_INT8 only")
             
             # CRITICAL: Verify quantization setup
             if not hasattr(converter, 'representative_dataset') or converter.representative_dataset is None:
@@ -130,9 +130,9 @@ class TFLiteModelManager:
             
         elif getattr(params, 'DISABLE_XNNPACK', True):
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
-            print("[DEBUG] Set to TFLITE_BUILTINS only")
+            # print("[DEBUG] Set to TFLITE_BUILTINS only")
         
-        print(f"[DEBUG] Final supported_ops: {converter.target_spec.supported_ops}")
+        # print(f"[DEBUG] Final supported_ops: {converter.target_spec.supported_ops}")
         return converter
 
     def _validate_no_delegates(self, tflite_model, model_name="model"):
@@ -185,15 +185,9 @@ class TFLiteModelManager:
                     # CRITICAL FIX: Use the SAME preprocessing as during QAT training
                     calibration_processed = preprocess_for_training(calibration_data)  # CHANGED: for_training=True
                     
-                    # Ensure proper data type and range for QAT
-                    if calibration_processed.dtype != np.float32:
-                        calibration_processed = calibration_processed.astype(np.float32)
-                    
-                    # For QAT, data should be in the same range as during training
-                    # QAT training uses [0, 1] range, so calibration should too
-                    if calibration_processed.max() > 1.0:
-                        calibration_processed = calibration_processed / 255.0
-                    
+                    # preprocess_for_training() already returns float32 [0,1]
+                    # Do NOT apply /255.0 again — that would corrupt data to [0, ~0.004]
+                    # and produce wildly incorrect quantization scale factors.
                     if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                         print(f"🔧 QAT Calibration: {len(calibration_processed)} samples, "
                               f"dtype: {calibration_processed.dtype}, "
@@ -202,6 +196,9 @@ class TFLiteModelManager:
                     # Verify data matches QAT training expectations
                     if calibration_processed.dtype != np.float32:
                         raise ValueError(f"QAT calibration data must be float32, got {calibration_processed.dtype}")
+                    if calibration_processed.max() > 1.0 or calibration_processed.min() < 0.0:
+                        raise ValueError(f"QAT calibration data must be in [0,1] range, "
+                                         f"got [{calibration_processed.min():.3f}, {calibration_processed.max():.3f}]")
                     
                     # Yield data in the correct format
                     for i in range(len(calibration_processed)):

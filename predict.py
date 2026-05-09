@@ -13,6 +13,7 @@ except ImportError:
     ort = None
 
 import parameters as params
+from config.validation import validate_full_config
 from utils.preprocess import preprocess_for_inference
 
 
@@ -511,4 +512,5 @@ def main():
         print("All probabilities: [Prediction failed]")
 
 if __name__ == "__main__":
+    validate_full_config()
     main()

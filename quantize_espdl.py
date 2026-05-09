@@ -21,6 +21,7 @@ from pathlib import Path
 
 # Project-specific imports
 import parameters as params
+from config.validation import validate_full_config
 from utils import get_data_splits
 from utils.preprocess import preprocess_for_training
 from utils.export_onnx import export_keras_to_onnx
@@ -435,4 +436,5 @@ def organize_output_folder(output_dir):
             except: pass
 
 if __name__ == "__main__":
+    validate_full_config()
     main()

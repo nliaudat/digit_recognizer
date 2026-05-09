@@ -12,6 +12,7 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
 import parameters as params
+from config.validation import validate_full_config
 
 def main():
     parser = argparse.ArgumentParser(description="Launch training for a specific model across all 4 combinations")
@@ -77,4 +78,5 @@ def main():
     print(f"{'='*80}\n")
 
 if __name__ == "__main__":
+    validate_full_config()
     main()

@@ -16,6 +16,7 @@ from tqdm.auto import tqdm
 
 # Project imports
 import parameters as params
+from config.validation import validate_full_config
 from models import create_model
 from train import (
     create_callbacks, create_representative_dataset, print_training_summary,
@@ -576,4 +577,5 @@ def main():
             traceback.print_exc()
 
 if __name__ == "__main__":
+    validate_full_config()
     main()

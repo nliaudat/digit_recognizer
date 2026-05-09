@@ -27,6 +27,7 @@ except ImportError:
 
 # ── Project imports ──
 import parameters as params
+from config.validation import validate_full_config
 from utils.augmentation import setup_augmentation_for_training
 from utils.export_onnx import export_keras_to_onnx
 from utils.losses import (
@@ -341,4 +342,5 @@ def main():
     print(f"Results located in: {export_dir}")
 
 if __name__ == "__main__":
+    validate_full_config()
     main()
