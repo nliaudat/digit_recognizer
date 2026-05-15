@@ -26,6 +26,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -54,7 +55,8 @@ from utils.losses import (
 )
 from utils.model_distiller_utils import (
     compare_teacher_student, evaluate_distilled_model, export_student_for_edge,
-    freeze_teacher_model, get_model_size_kb, save_distillation_results
+    freeze_teacher_model, get_model_size_kb, load_teacher_from_checkpoint,
+    save_distillation_results
 )
 from utils.train_analyse import (
     analyze_confusion_matrix, analyze_training_history, verify_tflite_full_qat
@@ -554,51 +556,12 @@ def run_distillation_pipeline(
         
         if t_checkpoint and os.path.exists(t_checkpoint):
             logger.info(f"Loading teacher {t_type} from: {t_checkpoint}")
-            # ── Subprocess conversion ──────────────────────────────────────
-            # Load the teacher in a *separate* TF process to avoid the
-            # ``free(): invalid pointer`` C++ memory corruption that occurs
-            # when loading multiple models with complex custom layers
-            # (v29's AdaptiveHybridBinarization, v28's AdaptiveMeanBinarization)
-            # in the same CUDA context.
-            import subprocess
-            import tempfile
-
-            with tempfile.TemporaryDirectory() as _tmpdir:
-                result = subprocess.run(
-                    [
-                        sys.executable,
-                        os.path.join(os.path.dirname(__file__), "convert_teacher_checkpoints.py"),
-                        t_type,
-                        t_checkpoint,
-                        _tmpdir,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=300,  # 5 min per teacher
-                )
-                if result.returncode != 0:
-                    logger.error(f"Teacher conversion FAILED for {t_type}:")
-                    logger.error(result.stderr)
-                    raise RuntimeError(
-                        f"Teacher conversion failed for {t_type}. "
-                        f"stderr: {result.stderr}"
-                    )
-
-                clean_path = result.stdout.strip()
-                if not clean_path or not os.path.isfile(clean_path):
-                    raise RuntimeError(
-                        f"Teacher conversion produced no output for {t_type}"
-                    )
-
-                logger.info(f"Teacher weights saved to {clean_path}")
-                # Reconstruct architecture from source code, then load weights
-                # (avoids TF version serialization conflicts with .keras format)
-                t_model = create_model_by_name(
-                    t_type,
-                    num_classes=num_classes,
-                    input_shape=(params.INPUT_HEIGHT, params.INPUT_WIDTH, teacher_channels),
-                )
-                t_model.load_weights(clean_path)
+            t_model = load_teacher_from_checkpoint(
+                model_name=t_type,
+                checkpoint_path=t_checkpoint,
+                num_classes=num_classes,
+                input_shape=teacher_input_shape,
+            )
         else:
             # CRITICAL FIX: Load proper data for teacher training
             logger.info(f"Training teacher {t_type} from scratch...")

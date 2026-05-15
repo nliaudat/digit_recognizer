@@ -3,14 +3,19 @@ Utility functions for model distillation.
 Includes helper functions for loading models, exporting, and evaluation.
 """
 
-import tensorflow as tf
-import numpy as np
-import os
 import json
 import logging
-import parameters as params
-from typing import Optional, Tuple, Dict, Any, Union, List, Callable
+import os
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+import numpy as np
+import tensorflow as tf
+
+import parameters as params
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -409,6 +414,80 @@ def create_temperature_schedule(
     
     else:
         raise ValueError(f"Unknown schedule type: {schedule_type}")
+
+
+def load_teacher_from_checkpoint(
+    model_name: str,
+    checkpoint_path: str,
+    num_classes: int,
+    input_shape: tuple,
+    timeout: int = 300,
+) -> tf.keras.Model:
+    """
+    Load a teacher model from a checkpoint by running
+    ``convert_teacher_checkpoints.py`` in a **separate** TF subprocess.
+
+    This avoids the ``free(): invalid pointer`` C++ memory corruption that
+    occurs when loading multiple models with complex custom layers
+    (v29's AdaptiveHybridBinarization, v28's AdaptiveMeanBinarization)
+    in the same CUDA context.
+
+    Args:
+        model_name: Teacher model name (e.g. ``"v28"``, ``"v29"``).
+        checkpoint_path: Path to the saved checkpoint.
+        num_classes: Number of output classes.
+        input_shape: Input shape tuple (height, width, channels).
+        timeout: Subprocess timeout in seconds (default 300).
+
+    Returns:
+        A Keras model with the teacher architecture and loaded weights.
+
+    Raises:
+        RuntimeError: If the subprocess fails or produces no output file.
+    """
+    from models.model_factory import create_model_by_name
+
+    with tempfile.TemporaryDirectory() as _tmpdir:
+        result = subprocess.run(
+            [
+                sys.executable,
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "convert_teacher_checkpoints.py",
+                ),
+                model_name,
+                checkpoint_path,
+                _tmpdir,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            logger.error(f"Teacher conversion FAILED for {model_name}:")
+            logger.error(result.stderr)
+            raise RuntimeError(
+                f"Teacher conversion failed for {model_name}. "
+                f"stderr: {result.stderr}"
+            )
+
+        clean_path = result.stdout.strip()
+        if not clean_path or not os.path.isfile(clean_path):
+            raise RuntimeError(
+                f"Teacher conversion produced no output for {model_name}"
+            )
+
+        logger.info(f"Teacher weights saved to {clean_path}")
+        # Reconstruct architecture from source code, then load weights
+        # (avoids TF version serialization conflicts with .keras format)
+        t_model = create_model_by_name(
+            model_name,
+            num_classes=num_classes,
+            input_shape=input_shape,
+        )
+        t_model.load_weights(clean_path)
+
+    return t_model
 
 
 def create_alpha_schedule(
