@@ -21,6 +21,13 @@ TUNER_BATCH_SIZES = [32, 64]
 TUNER_GAMMAS = [0.0, 1.2, 1.5, 2.0, 3.0, 3.5, 4.5]
 TUNER_ALPHAS = [0.25, 0.45]
 
+# Label Smoothing & Dropout Search Space
+TUNER_LABEL_SMOOTHINGS = [0.0, 0.01, 0.03, 0.05, 0.1]
+TUNER_DROPOUT_RATES = [0.0, 0.1, 0.25, 0.4, 0.5]
+
+# Checkpoint / Resume
+TUNER_CHECKPOINT_PATH = ""
+
 # Fine-Tune Tuner Search Space (used by: python tuner.py --finetune)
 TUNER_FINETUNE_EPOCHS = 15
 TUNER_FINETUNE_LRS = [5e-5, 1e-4, 3e-4, 5e-4]

@@ -45,6 +45,12 @@ def main():
     parser.add_argument("--no-random-erasing", action="store_true", default=False)
     parser.add_argument("--no-dynamic-weights", action="store_true", default=False)
     parser.add_argument("--no-mixed-precision", action="store_true", default=False)
+    
+    # Quantization flags (passed to train.py)
+    parser.add_argument("--qat", action="store_true", default=False, help="Enable Quantization Aware Training (QAT).")
+    parser.add_argument("--no-qat", action="store_true", default=False, help="Disable Quantization Aware Training (QAT).")
+    parser.add_argument("--tqt", action="store_true", default=False, help="Enable TQT/ESP-DL quantization pipeline.")
+    parser.add_argument("--no-tqt", action="store_true", default=False, help="Disable TQT/ESP-DL quantization pipeline.")
 
     args = parser.parse_args()
         
@@ -124,6 +130,11 @@ def main():
         if args.no_dynamic_weights: extra_args.append("--no-dynamic-weights")
         if args.no_mixed_precision: extra_args.append("--no-mixed-precision")
         
+        if args.qat: extra_args.append("--qat")
+        if args.no_qat: extra_args.append("--no-qat")
+        if args.tqt: extra_args.append("--tqt")
+        if args.no_tqt: extra_args.append("--no-tqt")
+        
         extra_args_str = " ".join(extra_args)
 
         # Launching everything concurrently (Caution: High Resource usage)
@@ -174,6 +185,10 @@ def main():
                 if args.no_random_erasing: cmd.append("--no-random-erasing")
                 if args.no_dynamic_weights: cmd.append("--no-dynamic-weights")
                 if args.no_mixed_precision: cmd.append("--no-mixed-precision")
+                if args.qat: cmd.append("--qat")
+                if args.no_qat: cmd.append("--no-qat")
+                if args.tqt: cmd.append("--tqt")
+                if args.no_tqt: cmd.append("--no-tqt")
                 
                 try:
                     # Run the process sequentially and pipe output to original console

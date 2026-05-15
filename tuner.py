@@ -33,12 +33,14 @@ if hasattr(sys.stdout, 'reconfigure'):
 class SimpleGuaranteedTuner:
     """Simple tuner that guarantees unique hyperparameter combinations"""
     
-    def __init__(self, hypermodel, objective, max_trials, directory, project_name):
+    def __init__(self, hypermodel, objective, max_trials, directory, project_name,
+                 checkpoint_path=None):
         self.hypermodel = hypermodel
         self.objective = objective
         self.max_trials = max_trials
         self.directory = directory
         self.project_name = project_name
+        self.checkpoint_path = checkpoint_path
         
         # Get search space parameters from params file
         self.tuner_optimizers = getattr(params, 'TUNER_OPTIMIZERS', ['adam', 'rmsprop', 'sgd', 'nadam', 'adamw'])
@@ -46,15 +48,19 @@ class SimpleGuaranteedTuner:
         self.tuner_batch_sizes = getattr(params, 'TUNER_BATCH_SIZES', [32, 64])
         self.tuner_gammas = getattr(params, 'TUNER_GAMMAS', [0.0, 2.0])
         self.tuner_alphas = getattr(params, 'TUNER_ALPHAS', [0.25, 0.45])
+        self.tuner_label_smoothings = getattr(params, 'TUNER_LABEL_SMOOTHINGS', [0.0, 0.03, 0.05])
+        self.tuner_dropout_rates = getattr(params, 'TUNER_DROPOUT_RATES', [0.0, 0.25, 0.5])
         
         # Generate all possible configurations
-        # Now including Gamma and Alpha for Focal Loss tuning
+        # Now including Gamma, Alpha, Label Smoothing, and Dropout Rate
         self.all_configs = list(product(
             self.tuner_optimizers, 
             self.tuner_learning_rates, 
             self.tuner_batch_sizes,
             self.tuner_gammas,
-            self.tuner_alphas
+            self.tuner_alphas,
+            self.tuner_label_smoothings,
+            self.tuner_dropout_rates,
         ))
         random.shuffle(self.all_configs)
         
@@ -66,19 +72,24 @@ class SimpleGuaranteedTuner:
         self.best_score = -float('inf')
         self.best_config = None
         
-        print(f"🔢 Generated {len(self.all_configs)} unique configurations (Opt x LR x BS x Gamma x Alpha)")
+        print(f"🔢 Generated {len(self.all_configs)} unique configurations "
+              f"(Opt x LR x BS x Gamma x Alpha x LS x Dropout)")
     
     def search(self, x_train, y_train, validation_data, epochs, verbose=0, callbacks=None):
         """Run the search"""
         x_val, y_val = validation_data
         
-        for i, (optimizer, lr, bs, gamma, alpha) in enumerate(self.all_configs):
+        for i, (optimizer, lr, bs, gamma, alpha, label_smoothing, dropout_rate) in enumerate(self.all_configs):
             gamma_str = f", Gamma: {gamma}" if gamma > 0 else ", Loss: SCCE"
-            print(f"\n🎯 Trial {i+1}/{len(self.all_configs)}: {optimizer}, LR: {lr}, BS: {bs}{gamma_str}")
+            print(f"\n🎯 Trial {i+1}/{len(self.all_configs)}: {optimizer}, LR: {lr}, BS: {bs}{gamma_str}, "
+                  f"LS: {label_smoothing}, Dropout: {dropout_rate}")
             
             try:
                 # Build model with current config
-                model = self._build_model_with_config(optimizer, lr, bs, gamma, alpha)
+                model = self._build_model_with_config(
+                    optimizer, lr, bs, gamma, alpha,
+                    label_smoothing=label_smoothing, dropout_rate=dropout_rate
+                )
                 
                 # Train model
                 history = model.fit(
@@ -101,6 +112,9 @@ class SimpleGuaranteedTuner:
                     'batch_size': bs,
                     'gamma': gamma,
                     'alpha': alpha,
+                    'label_smoothing': label_smoothing,
+                    'dropout_rate': dropout_rate,
+                    'checkpoint_path': self.checkpoint_path or '',
                     'val_accuracy': val_accuracy,
                     'status': 'COMPLETED',
                     'score': val_accuracy
@@ -124,6 +138,9 @@ class SimpleGuaranteedTuner:
                     'batch_size': bs,
                     'gamma': gamma,
                     'alpha': alpha,
+                    'label_smoothing': label_smoothing,
+                    'dropout_rate': dropout_rate,
+                    'checkpoint_path': self.checkpoint_path or '',
                     'val_accuracy': 0.0,
                     'status': 'FAILED',
                     'score': 0.0
@@ -133,12 +150,35 @@ class SimpleGuaranteedTuner:
             # Clean up
             tf.keras.backend.clear_session()
     
-    def _build_model_with_config(self, optimizer, learning_rate, batch_size, gamma=0.0, alpha=0.45):
-        """Build model with specific configuration including Focal Loss support"""
-        print(f"🏗️ Building model with: {optimizer}, LR: {learning_rate}, BS: {batch_size}, Gamma: {gamma}, Alpha: {alpha}")
+    def _build_model_with_config(self, optimizer, learning_rate, batch_size, gamma=0.0,
+                                  alpha=0.45, label_smoothing=0.0, dropout_rate=None):
+        """Build model with specific configuration including Focal Loss, label smoothing,
+        dropout rate, and optional checkpoint loading."""
+        print(f"🏗️ Building model with: {optimizer}, LR: {learning_rate}, BS: {batch_size}, "
+              f"Gamma: {gamma}, Alpha: {alpha}, LS: {label_smoothing}, Dropout: {dropout_rate}")
         
-        # Create model with current architecture
-        model = create_model()
+        # --- Apply dropout rate override ---
+        # Temporarily set params.DEFAULT_DROPOUT_RATE so models that read it
+        # (e.g. digit_recognizer_v6, v7, etc.) use the trial's dropout rate.
+        _orig_dropout = params.DEFAULT_DROPOUT_RATE
+        if dropout_rate is not None:
+            params.DEFAULT_DROPOUT_RATE = dropout_rate
+        
+        try:
+            # Create model with current architecture (may use params.DEFAULT_DROPOUT_RATE)
+            model = create_model()
+        finally:
+            # Restore original dropout rate
+            params.DEFAULT_DROPOUT_RATE = _orig_dropout
+        
+        # --- Load checkpoint weights if provided ---
+        if self.checkpoint_path and os.path.isfile(self.checkpoint_path):
+            try:
+                model.load_weights(self.checkpoint_path)
+                print(f"   ✅ Loaded checkpoint weights from: {self.checkpoint_path}")
+            except Exception as e:
+                print(f"   ⚠️  Failed to load checkpoint weights: {e}")
+                print(f"   Continuing with randomly initialized weights.")
         
         # Select optimizer
         if optimizer == 'adamw':
@@ -168,10 +208,22 @@ class SimpleGuaranteedTuner:
             else:
                 loss_fn = sparse_focal_loss(gamma=gamma, alpha=alpha)
                 print(f"   Using Sparse Focal Loss (γ={gamma}, α={alpha})")
+            if label_smoothing > 0:
+                print(f"   ℹ️  Label smoothing ({label_smoothing}) ignored — Focal Loss handles smoothing internally")
         else:
-            # Revert to standard CrossEntropy
-            loss_fn = 'categorical_crossentropy' if is_haverland else 'sparse_categorical_crossentropy'
-            print(f"   Using standard {'Categorical' if is_haverland else 'Sparse Categorical'} Crossentropy")
+            # Standard CrossEntropy with optional label smoothing
+            if is_haverland:
+                loss_fn = tf.keras.losses.CategoricalCrossentropy(
+                    label_smoothing=label_smoothing,
+                    from_logits=params.USE_LOGITS
+                )
+                print(f"   Using Categorical Crossentropy (LS={label_smoothing})")
+            else:
+                loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(
+                    label_smoothing=label_smoothing,
+                    from_logits=params.USE_LOGITS
+                )
+                print(f"   Using Sparse Categorical Crossentropy (LS={label_smoothing})")
         
         model.compile(
             optimizer=opt,
@@ -222,6 +274,9 @@ def save_tuning_results_csv(trials, output_dir, search_type="guaranteed_unique")
                 'batch_size': trial['batch_size'],
                 'gamma': trial.get('gamma', 0.0),
                 'alpha': trial.get('alpha', 0.45),
+                'label_smoothing': trial.get('label_smoothing', 0.0),
+                'dropout_rate': trial.get('dropout_rate', ''),
+                'checkpoint_path': trial.get('checkpoint_path', ''),
                 'val_accuracy': trial['val_accuracy'],
                 'status': trial['status'],
                 'score': trial['score'],
@@ -266,6 +321,9 @@ def save_best_hyperparameters_json(best_params, output_dir):
             "BEST_BATCH_SIZE": best_params['batch_size'],
             "BEST_FOCAL_GAMMA": best_params.get('gamma', 0.0),
             "BEST_FOCAL_ALPHA": best_params.get('alpha', 0.45),
+            "BEST_LABEL_SMOOTHING": best_params.get('label_smoothing', 0.0),
+            "BEST_DROPOUT_RATE": best_params.get('dropout_rate', ''),
+            "BEST_CHECKPOINT_PATH": best_params.get('checkpoint_path', ''),
             "BEST_VAL_ACCURACY": float(best_params['val_accuracy']),
             "TUNING_TIMESTAMP": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "MODEL_ARCHITECTURE": params.MODEL_ARCHITECTURE,
@@ -289,9 +347,13 @@ def save_best_hyperparameters_json(best_params, output_dir):
             f.write(f"BEST_BATCH_SIZE = {best_params['batch_size']}\n")
             f.write(f"FOCAL_GAMMA = {best_params.get('gamma', 0.0)}\n")
             f.write(f"FOCAL_ALPHA = {best_params.get('alpha', 0.45)}\n")
+            f.write(f"LABEL_SMOOTHING = {best_params.get('label_smoothing', 0.0)}\n")
+            f.write(f"DROPOUT_RATE = {best_params.get('dropout_rate', '')}\n")
             f.write(f"# Best validation accuracy: {best_params['val_accuracy']:.4f}\n")
             f.write(f"# Tuning completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"# Model architecture: {params.MODEL_ARCHITECTURE}\n")
+            if best_params.get('checkpoint_path'):
+                f.write(f"# Checkpoint: {best_params['checkpoint_path']}\n")
         
         print(f"🐍 Python version saved to: {py_path}")
         
@@ -321,6 +383,12 @@ def create_tuning_summary(trials, best_params, output_dir, search_type="guarante
             f.write(f"Optimizer: {best_params['optimizer']}\n")
             f.write(f"Learning Rate: {best_params['learning_rate']}\n")
             f.write(f"Batch Size: {best_params['batch_size']}\n")
+            f.write(f"Focal Gamma: {best_params.get('gamma', 0.0)}\n")
+            f.write(f"Focal Alpha: {best_params.get('alpha', 0.45)}\n")
+            f.write(f"Label Smoothing: {best_params.get('label_smoothing', 0.0)}\n")
+            f.write(f"Dropout Rate: {best_params.get('dropout_rate', '')}\n")
+            if best_params.get('checkpoint_path'):
+                f.write(f"Checkpoint: {best_params['checkpoint_path']}\n")
             f.write(f"Validation Accuracy: {best_params['val_accuracy']:.4f}\n\n")
             
             # Trial statistics
@@ -344,6 +412,9 @@ def create_tuning_summary(trials, best_params, output_dir, search_type="guarante
                     f.write(f"{i+1}. Optimizer: {trial['optimizer']}, "
                            f"LR: {trial['learning_rate']}, "
                            f"BS: {trial['batch_size']}, "
+                           f"Gamma: {trial.get('gamma', 0.0)}, "
+                           f"LS: {trial.get('label_smoothing', 0.0)}, "
+                           f"Dropout: {trial.get('dropout_rate', '')}, "
                            f"Accuracy: {trial['val_accuracy']:.4f}\n")
         
         print(f"📋 Tuning summary saved to: {summary_path}")
@@ -353,8 +424,14 @@ def create_tuning_summary(trials, best_params, output_dir, search_type="guarante
         print(f"❌ Error creating tuning summary: {e}")
         return None
 
-def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, debug=False):
-    """Tune hyperparameters using Simple Guaranteed Optimization"""
+def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, debug=False,
+                            checkpoint_path=None):
+    """Tune hyperparameters using Simple Guaranteed Optimization
+    
+    Args:
+        checkpoint_path: Optional path to a .keras or .h5 weights file.
+                         Each trial will load these weights before training.
+    """
     
     # Use parameters from config or override
     if num_trials is None:
@@ -368,9 +445,14 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
     tuner_batch_sizes = getattr(params, 'TUNER_BATCH_SIZES', [32, 64])
     tuner_gammas = getattr(params, 'TUNER_GAMMAS', [0.0, 1.5, 2.0, 3.0, 4.5])
     tuner_alphas = getattr(params, 'TUNER_ALPHAS', [0.25, 0.45])
+    tuner_label_smoothings = getattr(params, 'TUNER_LABEL_SMOOTHINGS', [0.0, 0.03, 0.05])
+    tuner_dropout_rates = getattr(params, 'TUNER_DROPOUT_RATES', [0.0, 0.25, 0.5])
     
-    # Calculate total possible combinations
-    total_combinations = len(tuner_optimizers) * len(tuner_learning_rates) * len(tuner_batch_sizes) * len(tuner_gammas) * len(tuner_alphas)
+    # Calculate total possible combinations (now 7D)
+    total_combinations = (len(tuner_optimizers) * len(tuner_learning_rates) 
+                          * len(tuner_batch_sizes) * len(tuner_gammas) 
+                          * len(tuner_alphas) * len(tuner_label_smoothings)
+                          * len(tuner_dropout_rates))
     
     # Don't allow more trials than possible combinations
     if num_trials > total_combinations:
@@ -389,6 +471,8 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
     print(f"📈 Epochs per trial: {tuner_epochs}")
     print(f"📁 Output directory: {output_dir}")
     print(f"🎯 Strategy: Guaranteed Unique Configurations")
+    if checkpoint_path:
+        print(f"💾 Checkpoint: {checkpoint_path} (loaded before each trial)")
     
     try:
         # Create our simple tuner
@@ -397,7 +481,8 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
             objective='val_accuracy',
             max_trials=num_trials,
             directory=output_dir,
-            project_name=f'guaranteed_tune_{params.MODEL_ARCHITECTURE}'
+            project_name=f'guaranteed_tune_{params.MODEL_ARCHITECTURE}',
+            checkpoint_path=checkpoint_path,
         )
         
         # Display search space
@@ -407,6 +492,8 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
         print(f"   Batch sizes: {tuner_batch_sizes}")
         print(f"   Gammas (Focal): {tuner_gammas}")
         print(f"   Alphas (Focal): {tuner_alphas}")
+        print(f"   Label Smoothings: {tuner_label_smoothings}")
+        print(f"   Dropout Rates: {tuner_dropout_rates}")
         print(f"   Architecture: FIXED ({params.MODEL_ARCHITECTURE})")
         print(f"   Total combinations: {total_combinations}")
         print(f"   Testing {num_trials} guaranteed unique combinations")
@@ -448,6 +535,9 @@ def run_architecture_tuning(x_train, y_train, x_val, y_val, num_trials=None, deb
             'batch_size': best_config['batch_size'],
             'gamma': best_config.get('gamma', 0.0),
             'alpha': best_config.get('alpha', 0.45),
+            'label_smoothing': best_config.get('label_smoothing', 0.0),
+            'dropout_rate': best_config.get('dropout_rate', ''),
+            'checkpoint_path': best_config.get('checkpoint_path', ''),
             'val_accuracy': best_config['val_accuracy'],
             'output_dir': output_dir,
             'search_strategy': 'guaranteed_unique'
@@ -792,6 +882,9 @@ if __name__ == '__main__':
                         help='Number of trials (overrides TUNER_MAX_TRIALS / auto-count)')
     parser.add_argument('--debug', action='store_true',
                         help='Verbose output during tuning')
+    parser.add_argument('--checkpoint', type=str, default=None,
+                        help='Path to a .keras or .h5 weights file. '
+                             'Each trial will load these weights before training.')
     args = parser.parse_args()
 
     print("📦 Loading dataset...")
@@ -824,6 +917,7 @@ if __name__ == '__main__':
             x_train, y_train, x_val, y_val,
             num_trials=args.trials,
             debug=args.debug,
+            checkpoint_path=args.checkpoint,
         )
 
 

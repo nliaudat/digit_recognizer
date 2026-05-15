@@ -25,10 +25,40 @@ del _config_mod
 # LOSS CONFIGURATION
 # ==============================================================================
 
+# ==============================================================================
+# --------------------------------------------------------------------------- #
+#  Training & Loss Configuration
+# --------------------------------------------------------------------------- #
+# Options:
+#   - "IntelligentFocalLossController":
+#       Adaptive Focal Loss that starts as CrossEntropy (γ=0) and gradually
+#       increases γ at val_acc thresholds (FOCAL_ACCURACY_THRESHOLDS).
+#       Also detects plateaus and adjusts α per-class when stuck.
+#       ✅ Best for most tasks — zero config needed, self-tuning.
+#       ⚠️  Adds ~15% training overhead (plateau detection / α recompute).
+#
+#   - "focal_loss":
+#       Standard Focal Loss with fixed γ=FOCAL_GAMMA and α=FOCAL_ALPHA.
+#       Down-weights well-classified examples so the model focuses on hard ones.
+#       ✅ Good when class imbalance is the main problem.
+#       ⚠️  Requires manual tuning of γ (start 1.0–2.0) and α (0.25–0.45).
+#       ⚠️  High γ (>3) can destabilize early training on 100-class tasks.
+#
+#   - "sparse_categorical_crossentropy":
+#       Standard CrossEntropy for integer labels (all models except haverland).
+#       Fast, stable, no hyperparameters.
+#       ✅ Best baseline; use to diagnose if focal/controller is hurting accuracy.
+#       ❌ No focus on hard examples; hits a ceiling earlier on complex tasks.
+#
+#   - "categorical_crossentropy":
+#       Standard CrossEntropy for one-hot labels.
+#       ✅ Required for original_haverland model (uses softmax + one-hot).
+#       ❌ Do not use with other models (label format mismatch).
+
 LOSS_TYPE = "IntelligentFocalLossController"
 
 if NB_CLASSES <= 10:
-    LABEL_SMOOTHING = 0.01  # reduced: at >0.999 ceiling, 0.02 caps final accuracy
+    LABEL_SMOOTHING = 0.01 #0.01  # reduced: at >0.999 ceiling, 0.02 caps final accuracy
 else:  # 100 classes
     LABEL_SMOOTHING = 0.05  # stronger smoothing — 100cls softmax easily collapses
 
@@ -47,14 +77,14 @@ else:  # 100 classes
 # Intelligent Focal Loss Controller Settings
 if NB_CLASSES <= 10:
     # --- 10-class: delay focal until model is genuinely stuck near ceiling ---
-    FOCAL_ACCURACY_THRESHOLDS = [0.985, 0.991, 0.995]
+    FOCAL_ACCURACY_THRESHOLDS = [0.992, 0.995, 0.997] #[0.985, 0.991, 0.995]
 else:  # 100 classes or more
     # --- 100-class: wait longer; model needs to learn easy examples first ---
     FOCAL_ACCURACY_THRESHOLDS = [0.88, 0.93, 0.97]
 
 if NB_CLASSES <= 10:
     # Gentler γ ramp: at 0.985+ the model only needs a soft push, not heavy focus
-    FOCAL_GAMMA_VALUES = [1.0, 2.0, 3.5]
+    FOCAL_GAMMA_VALUES = [0.5, 1.0, 2.0] #[1.0, 2.0, 3.5]
 else:
     FOCAL_GAMMA_VALUES = [1.2, 2.0, 3.5]   # gentler ramp for 100cls
 
@@ -76,7 +106,7 @@ DYNAMIC_WEIGHTS_EPOCHS = 5
 if NB_CLASSES <= 10:
     # 64 better for high-accuracy refinement on 10cls — smoother gradients
     # for the final 0.990→0.9994 squeeze without cold-start risk.
-    BATCH_SIZE = 64
+    BATCH_SIZE = 32
 else:
     # 100-class: smaller batches help with class imbalance and gradient diversity
     BATCH_SIZE = 32
@@ -89,6 +119,38 @@ VALIDATION_SPLIT = 0.2     # 20% of training for validation
 # ==============================================================================
 # LEARNING RATE SCHEDULING
 # ==============================================================================
+
+
+# Learning Rate Scheduler
+# Options:
+#   - "reduce_on_plateau":
+#       Halves LR each time val_loss stops improving (factor × current LR).
+#       ✅ Best proven for 100cls — stable, well-understood staircase decay.
+#       ✅ Best default for cold-start QAT models (safe, no epoch-count dependency).
+#       ⚠️  Eventually decays LR to the noise floor; model can get stranded 20–30 eps.
+#       → Use with USE_DYNAMIC_SCHEDULER=True + cosine phase to escape the ceiling.
+#
+#   - "onecycle":
+#       Linear LR warm-up (30% of epochs) → cosine decay to near-zero.
+#       ✅ Super-convergence: reaches high accuracy faster on well-trained small models.
+#       ❌ Cold-start QAT + 100cls: too aggressive — early stopping kills training at ep~6.
+#       → Safe for 10cls fine-tuning or as Phase-0 in DynamicSchedulerController.
+#
+#   - "cosine":
+#       CosineDecayRestarts: LR periodically resets (with shrinking peaks) to escape minima.
+#       ✅ Good escape mechanism after a plateau — avoids the noise-floor trap.
+#       ⚠️  Requires tuning of LR_WARMUP_EPOCHS (= first_decay_steps). Too short = chaotic.
+#       → Ideal as the final phase in LR_SCHEDULER_SEQUENCE (after reduce_on_plateau).
+#
+#   - "exponential":
+#       Smooth exponential decay: LR × EXPONENTIAL_DECAY_RATE every EXPONENTIAL_DECAY_STEPS.
+#       ✅ Predictable, no plateaus. Good when you know convergence speed in advance.
+#       ⚠️  Decays even when model is still improving (wastes capacity early on).
+#
+#   - "step":
+#       Drops LR by STEP_DECAY_GAMMA every STEP_DECAY_STEP_SIZE epochs.
+#       ✅ Simple and interpretable. Useful for manual LR design.
+#       ⚠️  Coarse — sudden drops can destabilize training if steps are too small.
 
 USE_LEARNING_RATE_SCHEDULER = True
 LR_SCHEDULER_TYPE = "reduce_on_plateau"  # best for 100cls per training analysis
@@ -119,7 +181,7 @@ STEP_DECAY_GAMMA = 0.1
 USE_DYNAMIC_SCHEDULER = True
 
 if NB_CLASSES <= 10:
-    LR_SCHEDULER_THRESHOLDS = [0.990, 0.995]
+    LR_SCHEDULER_THRESHOLDS = [0.985, 0.992] #[0.990, 0.995]
 else:
     LR_SCHEDULER_THRESHOLDS = [0.75, 0.82]
 
@@ -138,7 +200,7 @@ else:
 # ==============================================================================
 
 L1_REGULARIZATION = 0.0
-L2_REGULARIZATION = 0.0
+L2_REGULARIZATION = 1e-5 # was 0
 DEFAULT_DROPOUT_RATE = 0.5
 USE_BATCH_NORM = True
 BATCH_NORM_MOMENTUM = 0.99

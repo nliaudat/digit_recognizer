@@ -22,6 +22,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -59,6 +60,7 @@ from utils.train_analyse import (
     analyze_confusion_matrix, analyze_training_history, verify_tflite_full_qat
 )
 from utils.train_helpers import save_model_summary_to_file
+from utils.train_progressbar import TQDMProgressBar
 from utils.train_qat_helper import create_qat_model
 from utils.train_trainingmonitor import TrainingMonitor
 from quantize_espdl import validate_model_for_tqt
@@ -392,8 +394,10 @@ def train_student_distillation(
     )
     callbacks = [
         DistillationProgressCallback(),  # Sync current_epoch for schedules
+        # ReduceLROnPlateau monitors val_loss (smoother signal than val_accuracy
+        # at high accuracy, where accuracy is pure noise ±0.003).
         tf.keras.callbacks.ReduceLROnPlateau(
-            monitor="val_accuracy", factor=0.5, patience=5, min_lr=1e-6, verbose=1
+            monitor="val_loss", factor=0.5, patience=5, min_lr=1e-6, verbose=1
         ),
         tf.keras.callbacks.EarlyStopping(
             monitor="val_accuracy", patience=15, restore_best_weights=True, verbose=1
@@ -415,6 +419,9 @@ def train_student_distillation(
             monitor.on_epoch_end(epoch, logs)
             
     callbacks.append(TrainingMonitorCallbackWrapper())
+    
+    # Add tqdm progress bar (same as train.py)
+    callbacks.append(TQDMProgressBar(total_epochs=epochs, monitor=monitor))
 
     # ── Train ──────────────────────────────────────────────────────────────
     history = distiller.fit(
@@ -554,7 +561,14 @@ def run_distillation_pipeline(
                 "focal_loss": focal_loss
             }
             # Auto-inject any custom layers from the teacher's script
-            clean_name = t_type.replace('digit_recognizer_', '').replace('_teacher', '')
+            # Strip training-run suffixes (e.g. _10cls_RGB_TQT_SOFTMAX_0509_1842)
+            # to get the base model name for module import.
+            match = re.match(r'(digit_recognizer_\w+?)(?:_\d+cls_|$)', t_type)
+            if match:
+                clean_name = match.group(1).replace('digit_recognizer_', '').replace('_teacher', '')
+            else:
+                # Fall back to original logic for simple names like "v24"
+                clean_name = t_type.replace('digit_recognizer_', '').replace('_teacher', '')
             for prefix in ["models.", "models.digit_recognizer_", "models._tested_but_rejected.", "models._tested_but_rejected.digit_recognizer_"]:
                 try:
                     mod = importlib.import_module(f"{prefix}{clean_name}")
@@ -692,19 +706,25 @@ def run_distillation_pipeline(
     # Save student artifacts into the output_dir
     export_path = os.path.join(output_dir, student_variant)
     if export_quantized:
-        # Increase calibration data for PTQ
-        # (This is a fallback if QAT scales aren't present)
-        n_calib = min(1000, len(x_test))
-        tflite_path = export_student_for_edge(
-            student,
-            export_path,
-            quantize=True,
-            representative_dataset=x_test[:n_calib],
-            target_hardware=target_hardware,
-        )
-        logger.info(f"Student TFLite → {tflite_path}")
-
         # ── TQT / ESP-DL Quantitative Pipeline ──
+        # When TQT is active, it produces its own TFLite via onnx2tf.
+        # Skip the redundant PTQ export to avoid cluttering the output dir
+        # with two different TFLites (the PTQ one gets moved to full_models/
+        # by organize_output_folder(), causing confusion).
+        if use_tqt:
+            tflite_path = None
+        else:
+            # Standard PTQ export (no TQT)
+            n_calib = min(1000, len(x_test))
+            tflite_path = export_student_for_edge(
+                student,
+                export_path,
+                quantize=True,
+                representative_dataset=x_test[:n_calib],
+                target_hardware=target_hardware,
+            )
+            logger.info(f"Student TFLite → {tflite_path}")
+
         if use_tqt:
             # Loop through all targets if requested
             targets = getattr(params, 'TQT_ALL_TARGETS', [params.TQT_TARGET]) if getattr(params, 'TQT_EXPORT_ALL_TARGETS', False) else [params.TQT_TARGET]

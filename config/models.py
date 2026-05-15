@@ -58,6 +58,39 @@ USE_LOGITS = False # else softmax
 # OPTIMIZER CONFIGURATION
 # ==============================================================================
 
+# Optimizer Selection
+# Options:
+#   - "rmsprop":
+#       Adaptive per-parameter LR (rho=0.9). Handles noisy gradients well.
+#       ✅ Best proven for 100cls QAT — all successful runs used RMSprop.
+#       ✅ Robust to the gradient noise introduced by fake-quantization.
+#       ⚠️  No weight decay — can overfit on long runs (use L2_REGULARIZATION).
+#
+#   - "adam":
+#       Adaptive moment estimation (β1=0.9, β2=0.999). Fast, popular default.
+#       ✅ Good general baseline for most tasks.
+#       ⚠️  Weight decay in Adam is incorrect (decoupled in AdamW) — prefer AdamW.
+#       ⚠️  Slightly worse than RMSprop on 100cls historically — test with tuner.
+#
+#   - "adamw":
+#       Adam with proper decoupled weight decay. 2024-2026 standard for fine-tuning.
+#       ✅ Best for regularised fine-tuning and escaping the ceiling (Phase 2 switch).
+#       ⚠️  Cold-start QAT + 100cls: slower initial climb than RMSprop.
+#       → Best used as Phase 2 in OPTIMIZER_SEQUENCE after RMSprop climb.
+#
+#   - "nadam":
+#       Adam + Nesterov momentum. Often converges faster than plain Adam.
+#       ✅ Worth testing if Adam plateaus — lookahead corrects overshoot.
+#       ⚠️  Untested on this project's 100cls QAT — add to Group A config_runner run.
+#
+#   - "sgd":
+#       Classic stochastic gradient descent with momentum (momentum=0.9, Nesterov=True).
+#       ✅ Best final-layer fine-tuning convergence when combined with cosine annealing.
+#       ❌ Slow cold-start — needs many epochs to settle without a warm-up.
+#       → Never use alone for cold-start 100cls; pair with CosineDecayRestarts.
+
+
+
 OPTIMIZER_TYPE = "nadam"            # Best default for cold-start 100cls
 # OPTIMIZER_TYPE = "rmsprop"        # Best default for cold-start 100cls
 # OPTIMIZER_TYPE = "sgd"            # (Optimized for v17 fine-tuning)

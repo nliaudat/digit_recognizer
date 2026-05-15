@@ -132,6 +132,9 @@ for _mod in _submodules:
         if not _name.startswith('_'):
             globals()[_name] = getattr(_mod, _name)
 
+# Explicitly import private names needed for backward compatibility
+from .quantization import _TQT_DEFAULTS
+
 # Also re-export validation functions for backward compatibility
 from .validation import validate_hyperparameters, validate_quantization_parameters, validate_full_config
 

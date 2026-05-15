@@ -200,6 +200,14 @@ def _build_cmd(run: dict, args) -> list[str]:
         cmd.append('--no_cleanup')
     if args.debug:
         cmd.append('--debug')
+    if args.qat:
+        cmd.append('--qat')
+    if args.no_qat:
+        cmd.append('--no-qat')
+    if args.tqt:
+        cmd.append('--tqt')
+    if args.no_tqt:
+        cmd.append('--no-tqt')
     return cmd
 
 
@@ -246,6 +254,12 @@ def main():
         help='Convergence patience (epochs without improvement). Defaults to param value.')
     parser.add_argument('--debug', action='store_true',
         help='Enable debug logs.')
+    
+    # Quantization flags (passed to train.py)
+    parser.add_argument('--qat', action='store_true', default=False, help='Enable Quantization Aware Training (QAT).')
+    parser.add_argument('--no-qat', action='store_true', default=False, help='Disable Quantization Aware Training (QAT).')
+    parser.add_argument('--tqt', action='store_true', default=False, help='Enable TQT/ESP-DL quantization pipeline.')
+    parser.add_argument('--no-tqt', action='store_true', default=False, help='Disable TQT/ESP-DL quantization pipeline.')
 
     args = parser.parse_args()
 

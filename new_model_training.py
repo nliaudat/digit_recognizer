@@ -17,6 +17,13 @@ from config.validation import validate_full_config
 def main():
     parser = argparse.ArgumentParser(description="Launch training for a specific model across all 4 combinations")
     parser.add_argument("model_name", type=str, help="Name of the model architecture to train (e.g. digit_recognizer_v19)")
+    
+    # Quantization flags (passed to train.py)
+    parser.add_argument("--qat", action="store_true", default=False, help="Enable Quantization Aware Training (QAT).")
+    parser.add_argument("--no-qat", action="store_true", default=False, help="Disable Quantization Aware Training (QAT).")
+    parser.add_argument("--tqt", action="store_true", default=False, help="Enable TQT/ESP-DL quantization pipeline.")
+    parser.add_argument("--no-tqt", action="store_true", default=False, help="Disable TQT/ESP-DL quantization pipeline.")
+    
     args = parser.parse_args()
     
     model_name = args.model_name
@@ -43,6 +50,14 @@ def main():
         print(f"   Mode: Sequential (Foreground)")
     print(f"{'='*80}\n")
     
+    # Build quantization extra args
+    quant_args = []
+    if args.qat: quant_args.append("--qat")
+    if args.no_qat: quant_args.append("--no-qat")
+    if args.tqt: quant_args.append("--tqt")
+    if args.no_tqt: quant_args.append("--no-tqt")
+    quant_args_str = " ".join(quant_args)
+    
     for nb_classes, channels, desc in combinations:
         print(f"Preparing {desc}...")
         
@@ -55,14 +70,14 @@ def main():
             # On Windows, spawn new windows
             window_title = f"{model_name} - {desc}"
             # Use 'set' without spaces around '&&' to avoid trailing space issues
-            cmd_string = f'set DIGIT_NB_CLASSES={nb_classes}&&set DIGIT_INPUT_CHANNELS={channels}&&title {window_title}&&python train.py --train {model_name}'
+            cmd_string = f'set DIGIT_NB_CLASSES={nb_classes}&&set DIGIT_INPUT_CHANNELS={channels}&&title {window_title}&&python train.py --train {model_name} {quant_args_str}'
             subprocess.Popen(f'start "{window_title}" cmd /K "{cmd_string}"', shell=True)
         else:
             # On Linux/Docker, run sequentially in foreground
             print(f"   → Training {desc}...")
             try:
                 subprocess.run(
-                    [sys.executable, "train.py", "--train", model_name],
+                    [sys.executable, "train.py", "--train", model_name] + quant_args,
                     env=env,
                     check=True
                 )
