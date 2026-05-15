@@ -60,6 +60,7 @@ from utils.train_analyse import (
     analyze_confusion_matrix, analyze_training_history, verify_tflite_full_qat
 )
 from utils.train_helpers import save_model_summary_to_file
+from utils.train_progressbar import TQDMProgressBar
 from utils.train_qat_helper import create_qat_model
 from utils.train_trainingmonitor import TrainingMonitor
 from quantize_espdl import validate_model_for_tqt
@@ -418,6 +419,9 @@ def train_student_distillation(
             monitor.on_epoch_end(epoch, logs)
             
     callbacks.append(TrainingMonitorCallbackWrapper())
+    
+    # Add tqdm progress bar (same as train.py)
+    callbacks.append(TQDMProgressBar(total_epochs=epochs, monitor=monitor))
 
     # ── Train ──────────────────────────────────────────────────────────────
     history = distiller.fit(
