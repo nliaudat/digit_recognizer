@@ -393,8 +393,10 @@ def train_student_distillation(
     )
     callbacks = [
         DistillationProgressCallback(),  # Sync current_epoch for schedules
+        # ReduceLROnPlateau monitors val_loss (smoother signal than val_accuracy
+        # at high accuracy, where accuracy is pure noise ±0.003).
         tf.keras.callbacks.ReduceLROnPlateau(
-            monitor="val_accuracy", factor=0.5, patience=5, min_lr=1e-6, verbose=1
+            monitor="val_loss", factor=0.5, patience=5, min_lr=1e-6, verbose=1
         ),
         tf.keras.callbacks.EarlyStopping(
             monitor="val_accuracy", patience=15, restore_best_weights=True, verbose=1
