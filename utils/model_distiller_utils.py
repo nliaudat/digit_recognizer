@@ -448,21 +448,32 @@ def load_teacher_from_checkpoint(
     from models.model_factory import create_model_by_name
 
     with tempfile.TemporaryDirectory() as _tmpdir:
-        result = subprocess.run(
-            [
-                sys.executable,
-                os.path.join(
-                    os.path.dirname(__file__),
-                    "convert_teacher_checkpoints.py",
-                ),
-                model_name,
-                checkpoint_path,
-                _tmpdir,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    os.path.join(
+                        os.path.dirname(__file__),
+                        "convert_teacher_checkpoints.py",
+                    ),
+                    model_name,
+                    checkpoint_path,
+                    _tmpdir,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            logger.error(
+                f"Teacher conversion timed out for {model_name} "
+                f"(limit={timeout}s)"
+            )
+            raise RuntimeError(
+                f"Teacher conversion timed out for {model_name} "
+                f"(limit={timeout}s)"
+            )
+
         if result.returncode != 0:
             logger.error(f"Teacher conversion FAILED for {model_name}:")
             logger.error(result.stderr)

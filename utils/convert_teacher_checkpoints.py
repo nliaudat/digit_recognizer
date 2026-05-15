@@ -26,6 +26,7 @@ Output:
 """
 
 import os
+import shutil
 import sys
 import zipfile
 
@@ -59,11 +60,11 @@ def main():
             # Keras v3 stores weights at the root of the zip
             if "model.weights.h5" in zf.namelist():
                 with zf.open("model.weights.h5") as src, open(weights_path, "wb") as dst:
-                    dst.write(src.read())
+                    shutil.copyfileobj(src, dst)
             # Keras v2 stores weights in a subdirectory
             elif "model/model.weights.h5" in zf.namelist():
                 with zf.open("model/model.weights.h5") as src, open(weights_path, "wb") as dst:
-                    dst.write(src.read())
+                    shutil.copyfileobj(src, dst)
             else:
                 print(
                     f"ERROR: No model.weights.h5 found in {checkpoint_path}. "
