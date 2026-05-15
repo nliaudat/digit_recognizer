@@ -22,6 +22,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -554,7 +555,14 @@ def run_distillation_pipeline(
                 "focal_loss": focal_loss
             }
             # Auto-inject any custom layers from the teacher's script
-            clean_name = t_type.replace('digit_recognizer_', '').replace('_teacher', '')
+            # Strip training-run suffixes (e.g. _10cls_RGB_TQT_SOFTMAX_0509_1842)
+            # to get the base model name for module import.
+            match = re.match(r'(digit_recognizer_\w+?)(?:_\d+cls_|$)', t_type)
+            if match:
+                clean_name = match.group(1).replace('digit_recognizer_', '').replace('_teacher', '')
+            else:
+                # Fall back to original logic for simple names like "v24"
+                clean_name = t_type.replace('digit_recognizer_', '').replace('_teacher', '')
             for prefix in ["models.", "models.digit_recognizer_", "models._tested_but_rejected.", "models._tested_but_rejected.digit_recognizer_"]:
                 try:
                     mod = importlib.import_module(f"{prefix}{clean_name}")
