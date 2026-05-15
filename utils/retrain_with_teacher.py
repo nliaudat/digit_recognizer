@@ -544,26 +544,51 @@ def main():
 
         if actual_teacher_checkpoint and os.path.exists(actual_teacher_checkpoint):
             logger.info(f"Loading teacher {t_name} from {actual_teacher_checkpoint}")
-            # Pass custom objects for focal loss if needed
-            custom_objects = {
-                "DynamicSparseFocalLoss": DynamicSparseFocalLoss,
-                "DynamicFocalLoss": DynamicFocalLoss,
-                "sparse_focal_loss": sparse_focal_loss,
-                "focal_loss": focal_loss
-            }
-            # Auto-inject any custom layers from the teacher's script
-            clean_name = t_name.replace('digit_recognizer_', '').replace('_teacher', '')
-            for prefix in ["models.", "models.digit_recognizer_", "models._tested_but_rejected.", "models._tested_but_rejected.digit_recognizer_"]:
-                try:
-                    mod = importlib.import_module(f"{prefix}{clean_name}")
-                    for name, obj in inspect.getmembers(mod, inspect.isclass):
-                        if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
-                            custom_objects[name] = obj
-                    break # Success
-                except (ModuleNotFoundError, Exception):
-                    continue
-                
-            t_model = tf.keras.models.load_model(actual_teacher_checkpoint, custom_objects=custom_objects, safe_mode=False)
+            # ── Subprocess conversion ──────────────────────────────────────
+            # Load the teacher in a *separate* TF process to avoid the
+            # ``free(): invalid pointer`` C++ memory corruption that occurs
+            # when loading multiple models with complex custom layers
+            # (v29's AdaptiveHybridBinarization, v28's AdaptiveMeanBinarization)
+            # in the same CUDA context.
+            import subprocess
+            import tempfile
+
+            with tempfile.TemporaryDirectory() as _tmpdir:
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        os.path.join(os.path.dirname(__file__), "convert_teacher_checkpoints.py"),
+                        t_name,
+                        actual_teacher_checkpoint,
+                        _tmpdir,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,  # 5 min per teacher
+                )
+                if result.returncode != 0:
+                    logger.error(f"Teacher conversion FAILED for {t_name}:")
+                    logger.error(result.stderr)
+                    raise RuntimeError(
+                        f"Teacher conversion failed for {t_name}. "
+                        f"stderr: {result.stderr}"
+                    )
+
+                clean_path = result.stdout.strip()
+                if not clean_path or not os.path.isfile(clean_path):
+                    raise RuntimeError(
+                        f"Teacher conversion produced no output for {t_name}"
+                    )
+
+                logger.info(f"Teacher weights saved to {clean_path}")
+                # Reconstruct architecture from source code, then load weights
+                # (avoids TF version serialization conflicts with .keras format)
+                t_model = create_model_by_name(
+                    t_name,
+                    num_classes=args.classes,
+                    input_shape=teacher_input_shape,
+                )
+                t_model.load_weights(clean_path)
         else:
             logger.warning(f"No trained teacher found for {t_name}. Using random-weight teacher (not recommended!)")
             t_model = create_model_by_name(

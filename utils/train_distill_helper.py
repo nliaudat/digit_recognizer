@@ -554,32 +554,51 @@ def run_distillation_pipeline(
         
         if t_checkpoint and os.path.exists(t_checkpoint):
             logger.info(f"Loading teacher {t_type} from: {t_checkpoint}")
-            custom_objects = {
-                "DynamicSparseFocalLoss": DynamicSparseFocalLoss,
-                "DynamicFocalLoss": DynamicFocalLoss,
-                "sparse_focal_loss": sparse_focal_loss,
-                "focal_loss": focal_loss
-            }
-            # Auto-inject any custom layers from the teacher's script
-            # Strip training-run suffixes (e.g. _10cls_RGB_TQT_SOFTMAX_0509_1842)
-            # to get the base model name for module import.
-            match = re.match(r'(digit_recognizer_\w+?)(?:_\d+cls_|$)', t_type)
-            if match:
-                clean_name = match.group(1).replace('digit_recognizer_', '').replace('_teacher', '')
-            else:
-                # Fall back to original logic for simple names like "v24"
-                clean_name = t_type.replace('digit_recognizer_', '').replace('_teacher', '')
-            for prefix in ["models.", "models.digit_recognizer_", "models._tested_but_rejected.", "models._tested_but_rejected.digit_recognizer_"]:
-                try:
-                    mod = importlib.import_module(f"{prefix}{clean_name}")
-                    for name, obj in inspect.getmembers(mod, inspect.isclass):
-                        if issubclass(obj, tf.keras.layers.Layer) and obj is not tf.keras.layers.Layer:
-                            custom_objects[name] = obj
-                    break # Success
-                except (ModuleNotFoundError, Exception):
-                    continue
+            # ── Subprocess conversion ──────────────────────────────────────
+            # Load the teacher in a *separate* TF process to avoid the
+            # ``free(): invalid pointer`` C++ memory corruption that occurs
+            # when loading multiple models with complex custom layers
+            # (v29's AdaptiveHybridBinarization, v28's AdaptiveMeanBinarization)
+            # in the same CUDA context.
+            import subprocess
+            import tempfile
 
-            t_model = tf.keras.models.load_model(t_checkpoint, custom_objects=custom_objects, safe_mode=False)
+            with tempfile.TemporaryDirectory() as _tmpdir:
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        os.path.join(os.path.dirname(__file__), "convert_teacher_checkpoints.py"),
+                        t_type,
+                        t_checkpoint,
+                        _tmpdir,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,  # 5 min per teacher
+                )
+                if result.returncode != 0:
+                    logger.error(f"Teacher conversion FAILED for {t_type}:")
+                    logger.error(result.stderr)
+                    raise RuntimeError(
+                        f"Teacher conversion failed for {t_type}. "
+                        f"stderr: {result.stderr}"
+                    )
+
+                clean_path = result.stdout.strip()
+                if not clean_path or not os.path.isfile(clean_path):
+                    raise RuntimeError(
+                        f"Teacher conversion produced no output for {t_type}"
+                    )
+
+                logger.info(f"Teacher weights saved to {clean_path}")
+                # Reconstruct architecture from source code, then load weights
+                # (avoids TF version serialization conflicts with .keras format)
+                t_model = create_model_by_name(
+                    t_type,
+                    num_classes=num_classes,
+                    input_shape=(params.INPUT_HEIGHT, params.INPUT_WIDTH, teacher_channels),
+                )
+                t_model.load_weights(clean_path)
         else:
             # CRITICAL FIX: Load proper data for teacher training
             logger.info(f"Training teacher {t_type} from scratch...")
