@@ -374,7 +374,7 @@ def find_model_path(model_name=None, input_dir=None):
             
             # Check for exact model file matches
             tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
-            for model_file in tflite_files:
+        for model_file in tflite_files:
                 model_file_clean = model_file.replace('.tflite', '')
                 
                 # Exact match or partial match
@@ -537,8 +537,6 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
         tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
         
         for model_file in tflite_files:
-            model_path = os.path.join(training_path, model_file)
-            
             # Skip excluded models if specified
             if exclude_model:
                 # Handle both single string and list of strings for flexibility

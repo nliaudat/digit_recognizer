@@ -53,7 +53,7 @@ class SimpleGuaranteedTuner:
         
         # Generate all possible configurations
         # Now including Gamma, Alpha, Label Smoothing, and Dropout Rate
-        self.all_configs = list(product(
+        configs = list(product(
             self.tuner_optimizers, 
             self.tuner_learning_rates, 
             self.tuner_batch_sizes,
@@ -62,6 +62,17 @@ class SimpleGuaranteedTuner:
             self.tuner_label_smoothings,
             self.tuner_dropout_rates,
         ))
+        
+        # Filter redundant configurations to save compute:
+        # - label_smoothing is ignored when gamma > 0 (Focal Loss)
+        # - alpha is ignored when gamma == 0 (standard CrossEntropy)
+        unique_configs = set()
+        for opt, lr, bs, gamma, alpha, ls, dropout in configs:
+            effective_ls = 0.0 if gamma > 0 else ls
+            effective_alpha = 0.45 if gamma == 0 else alpha
+            unique_configs.add((opt, lr, bs, gamma, effective_alpha, effective_ls, dropout))
+        
+        self.all_configs = list(unique_configs)
         random.shuffle(self.all_configs)
         
         # Limit to max_trials
