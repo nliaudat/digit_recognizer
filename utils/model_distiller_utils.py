@@ -464,15 +464,17 @@ def load_teacher_from_checkpoint(
                 text=True,
                 timeout=timeout,
             )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             logger.error(
                 f"Teacher conversion timed out for {model_name} "
                 f"(limit={timeout}s)"
             )
+            if exc.stderr:
+                logger.error(f"Partial stderr: {exc.stderr}")
             raise RuntimeError(
                 f"Teacher conversion timed out for {model_name} "
                 f"(limit={timeout}s)"
-            )
+            ) from exc
 
         if result.returncode != 0:
             logger.error(f"Teacher conversion FAILED for {model_name}:")
