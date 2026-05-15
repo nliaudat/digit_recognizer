@@ -320,8 +320,9 @@ print("[Worker] ESP-DL Quantization finished successfully!")
         if os.path.exists(calib_npy_path): os.remove(calib_npy_path)
         if os.path.exists(worker_script): os.remove(worker_script)
 
-        # IMPORTANT: We use the ORIGINAL (full) onnx_path for TFLite conversion
-        # to ensure onnx2tf can always produce a full integer quantization.
+        # TFLite suite export: uses the TQT-quantized ONNX (*_quantized.onnx)
+        # for the full_integer_quant variant (preserves TQT scales), and the
+        # original FP32 ONNX for float variants (float32, float16, dynamic_range).
         if args.tflite:
             tflite_suite_export(onnx_path, calib_data, args, espdl_path)
 
@@ -339,9 +340,21 @@ print("[Worker] ESP-DL Quantization finished successfully!")
         sys.exit(1)
 
 def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
-    """Generates the full suite of TFLite variants using the FP32 ONNX model"""
+    """Generates the full suite of TFLite variants.
+    
+    For the full_integer_quant variant, uses the TQT-quantized ONNX 
+    (*_quantized.onnx) if available — this preserves the TQT-learned 
+    quantization scales. For float variants (float32, float16, 
+    dynamic_range), uses the original FP32 ONNX.
+    """
     output_dir = os.path.dirname(espdl_path)
     model_base_name = os.path.basename(espdl_path).replace(".espdl", "")
+    
+    # Detect TQT-quantized ONNX (produced by the TQT worker)
+    quantized_onnx_path = os.path.join(output_dir, f"{model_base_name}_quantized.onnx")
+    has_tqt_onnx = os.path.exists(quantized_onnx_path)
+    if has_tqt_onnx:
+        print(f"   🔍 Found TQT-quantized ONNX: {os.path.basename(quantized_onnx_path)}")
     
     # Disable XNNPACK delegate for TFLite Micro compatibility
     # onnx2tf doesn't expose the converter API, so we use the env var approach
@@ -368,9 +381,19 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
     for suffix, flags in variants:
         target_path = os.path.join(output_dir, f"{model_base_name}_quantized{suffix}.tflite")
         print(f"   🚀 Exporting: {os.path.basename(target_path)}")
+        
+        # For full_integer_quant, use the TQT-quantized ONNX if available.
+        # The quantized ONNX has Q/DQ nodes with TQT-learned scales baked in,
+        # which onnx2tf can convert to proper TFLite quantization parameters.
+        # For float variants, always use the original FP32 ONNX.
+        use_quantized_onnx = has_tqt_onnx and suffix == "_full_integer_quant"
+        input_onnx = quantized_onnx_path if use_quantized_onnx else onnx_path
+        if use_quantized_onnx:
+            print(f"      (using TQT-quantized ONNX for scale-preserved conversion)")
+        
         try:
             onnx2tf.convert(
-                input_onnx_file_path=onnx_path,
+                input_onnx_file_path=input_onnx,
                 output_folder_path=output_dir,
                 custom_input_op_name_np_data_path=[["input", calib_npy_path, [0,0,0], [1,1,1]]],
                 not_use_onnxsim=True,
@@ -421,7 +444,8 @@ def organize_output_folder(output_dir):
             if f.endswith(pattern):
                 move_needed = True; break
         
-        # USER RULE: Keep ONLY esp32 _full_integer_quant.tflite in root. All other TFLites go to full_models.
+        # USER RULE: Keep ONLY the TQT-produced esp32 _full_integer_quant.tflite 
+        # (which has TQT-learned scales) in root. All other TFLites go to full_models.
         if f.endswith(".tflite"):
             is_main_esp32_quant = "esp32_quantized_full_integer_quant.tflite" in f
             if not is_main_esp32_quant:

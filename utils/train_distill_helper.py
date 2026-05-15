@@ -706,19 +706,25 @@ def run_distillation_pipeline(
     # Save student artifacts into the output_dir
     export_path = os.path.join(output_dir, student_variant)
     if export_quantized:
-        # Increase calibration data for PTQ
-        # (This is a fallback if QAT scales aren't present)
-        n_calib = min(1000, len(x_test))
-        tflite_path = export_student_for_edge(
-            student,
-            export_path,
-            quantize=True,
-            representative_dataset=x_test[:n_calib],
-            target_hardware=target_hardware,
-        )
-        logger.info(f"Student TFLite → {tflite_path}")
-
         # ── TQT / ESP-DL Quantitative Pipeline ──
+        # When TQT is active, it produces its own TFLite via onnx2tf.
+        # Skip the redundant PTQ export to avoid cluttering the output dir
+        # with two different TFLites (the PTQ one gets moved to full_models/
+        # by organize_output_folder(), causing confusion).
+        if use_tqt:
+            tflite_path = None
+        else:
+            # Standard PTQ export (no TQT)
+            n_calib = min(1000, len(x_test))
+            tflite_path = export_student_for_edge(
+                student,
+                export_path,
+                quantize=True,
+                representative_dataset=x_test[:n_calib],
+                target_hardware=target_hardware,
+            )
+            logger.info(f"Student TFLite → {tflite_path}")
+
         if use_tqt:
             # Loop through all targets if requested
             targets = getattr(params, 'TQT_ALL_TARGETS', [params.TQT_TARGET]) if getattr(params, 'TQT_EXPORT_ALL_TARGETS', False) else [params.TQT_TARGET]
