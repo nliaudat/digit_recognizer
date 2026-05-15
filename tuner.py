@@ -69,7 +69,7 @@ class SimpleGuaranteedTuner:
         unique_configs = set()
         for opt, lr, bs, gamma, alpha, ls, dropout in configs:
             effective_ls = 0.0 if gamma > 0 else ls
-            effective_alpha = 0.45 if gamma == 0 else alpha
+            effective_alpha = self.tuner_alphas[0] if gamma == 0 else alpha
             unique_configs.add((opt, lr, bs, gamma, effective_alpha, effective_ls, dropout))
         
         self.all_configs = list(unique_configs)
