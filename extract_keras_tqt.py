@@ -435,6 +435,16 @@ def run_tqt_pipeline(
     
     # Write worker script
     worker_script = os.path.join(output_dir, "_tqt_worker.py")
+    # Use repr() for all interpolated values to safely handle special characters
+    # in file paths (e.g., backslashes, quotes, spaces)
+    _calib_npy_path = repr(os.path.abspath(calib_npy_path))
+    _onnx_path = repr(os.path.abspath(onnx_path))
+    _espdl_path = repr(os.path.abspath(espdl_path))
+    _device = repr(device)
+    _target = repr(target)
+    _int_lambda = tqt_cfg.get("TQT_INT_LAMBDA", 0.1)
+    _block_size = tqt_cfg.get("TQT_BLOCK_SIZE", 2)
+
     worker_script_content = f'''#!/usr/bin/env python3
 import sys, os, torch, numpy as np, onnx.helper, onnx.mapping
 from esp_ppq.api import espdl_quantize_onnx
@@ -479,32 +489,32 @@ if quant_setting.tqt_optimization:
     s = quant_setting.tqt_optimization_setting
     s.steps = {actual_tqt_steps}
     s.lr = {actual_tqt_lr}
-    s.collecting_device = "{device}"
-    s.int_lambda = {tqt_cfg.get("TQT_INT_LAMBDA", 0.1)}
-    s.block_size = {tqt_cfg.get("TQT_BLOCK_SIZE", 2)}
+    s.collecting_device = {_device}
+    s.int_lambda = {_int_lambda}
+    s.block_size = {_block_size}
     s.gamma = 0.01
     s.is_scale_trainable = True
     s.is_weight_trainable = False
 
-calib_np = np.load(r"{os.path.abspath(calib_npy_path)}")
+calib_np = np.load({_calib_npy_path})
 calib_data = [torch.from_numpy(calib_np[i:i+1]) for i in range(calib_np.shape[0])]
 
 print("[Worker] Starting espdl_quantize_onnx...")
 graph = espdl_quantize_onnx(
-    onnx_import_file=r"{os.path.abspath(onnx_path)}",
-    espdl_export_file=r"{os.path.abspath(espdl_path)}",
+    onnx_import_file={_onnx_path},
+    espdl_export_file={_espdl_path},
     calib_dataloader=calib_data,
     calib_steps={len(calib_data)},
     input_shape=[1, {color_channels}, {input_height}, {input_width}],
-    target="{target}",
+    target={_target},
     num_of_bits=8,
     setting=quant_setting,
-    device="{device}"
+    device={_device}
 )
 
 from esp_ppq.api.interface import export_ppq_graph
 from esp_ppq import TargetPlatform
-quant_onnx_path = r"{os.path.abspath(espdl_path)}".replace(".espdl", "_quantized.onnx")
+quant_onnx_path = {_espdl_path}.replace(".espdl", "_quantized.onnx")
 print(f"[Worker] Exporting Scale-Preserving ONNX -> {{quant_onnx_path}}")
 export_ppq_graph(graph, platform=TargetPlatform.ONNXRUNTIME, graph_save_to=quant_onnx_path)
 print("[Worker] ESP-DL Quantization finished successfully!")

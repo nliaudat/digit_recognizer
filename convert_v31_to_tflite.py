@@ -51,8 +51,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 MODEL_DIRS = [
-    r"exported_models\100cls_RGB\distilled_v31_100cls_RGB_TQT_SOFTMAX_0515_1859",
-    r"exported_models\100cls_RGB\distilled_v31_100cls_RGB_TQT_SOFTMAX_0515_2144",
+    os.path.join("exported_models", "100cls_RGB", "distilled_v31_100cls_RGB_TQT_SOFTMAX_0515_1859"),
+    os.path.join("exported_models", "100cls_RGB", "distilled_v31_100cls_RGB_TQT_SOFTMAX_0515_2144"),
 ]
 
 KERAS_FILENAME = "v31_extracted.keras"
