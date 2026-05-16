@@ -62,23 +62,23 @@ def convnext_block(
         kernel_size=7,
         padding="same",
         depthwise_initializer="he_normal",
-        name=f"{name}/dw_conv",
+        name=f"{name}_dw_conv",
     )(x)
 
     # 2. LayerNorm (after DW conv, before mixing)
-    x = layer_norm_2d(x, name=f"{name}/ln_1")
+    x = layer_norm_2d(x, name=f"{name}_ln_1")
 
     # 3. Inverted bottleneck: expand ×4
     x = tf.keras.layers.Dense(
         dim * 4,
-        name=f"{name}/fc1",
+        name=f"{name}_fc1",
     )(x)
-    x = tf.keras.layers.Activation("gelu", name=f"{name}/gelu")(x)
+    x = tf.keras.layers.Activation("gelu", name=f"{name}_gelu")(x)
 
     # 4. Project back to dim
     x = tf.keras.layers.Dense(
         dim,
-        name=f"{name}/fc2",
+        name=f"{name}_fc2",
     )(x)
 
     # 5. LayerScale (learnable per-channel scaling)
@@ -86,7 +86,7 @@ def convnext_block(
         gamma = tf.Variable(
             initial_value=tf.ones((dim,)) * layer_scale_init,
             trainable=True,
-            name=f"{name}/gamma",
+            name=f"{name}_gamma",
         )
         # Reshape gamma to (1, 1, 1, dim) for broadcasting
         x = x * tf.reshape(gamma, (1, 1, 1, dim))
@@ -94,7 +94,7 @@ def convnext_block(
     # 6. DropPath (stochastic depth)
     if drop_path_rate > 0:
         x = tf.keras.layers.Dropout(
-            rate=drop_path_rate, name=f"{name}/droppath"
+            rate=drop_path_rate, name=f"{name}_droppath"
         )(x)
 
     # 7. Residual
@@ -111,14 +111,14 @@ def convnext_downsample(
     ConvNeXt downsampling block:
       LayerNorm → Conv2D 2×2 stride 2
     """
-    x = layer_norm_2d(x, name=f"{name}/ln")
+    x = layer_norm_2d(x, name=f"{name}_ln")
     x = tf.keras.layers.Conv2D(
         out_dim,
         kernel_size=2,
         strides=2,
         padding="same",
         use_bias=True,
-        name=f"{name}/conv",
+        name=f"{name}_conv",
     )(x)
     return x
 
@@ -171,7 +171,7 @@ def create_digit_recognizer_v33_super_student_10(
         x = convnext_block(
             x, dim=96,
             drop_path_rate=0.0,
-            name=f"stage1/block{i}",
+            name=f"stage1_block{i}",
         )
 
     # ── Downsample 1: 96 → 192, 8×5 → 4×3 ───────────────────────────────
@@ -182,7 +182,7 @@ def create_digit_recognizer_v33_super_student_10(
         x = convnext_block(
             x, dim=192,
             drop_path_rate=0.1,
-            name=f"stage2/block{i}",
+            name=f"stage2_block{i}",
         )
 
     # ── Downsample 2: 192 → 384, 4×3 → 2×2 ──────────────────────────────
@@ -193,7 +193,7 @@ def create_digit_recognizer_v33_super_student_10(
         x = convnext_block(
             x, dim=384,
             drop_path_rate=0.2,
-            name=f"stage3/block{i}",
+            name=f"stage3_block{i}",
         )
 
     # ── Downsample 3: 384 → 768, 2×2 → 1×1 ──────────────────────────────
@@ -204,7 +204,7 @@ def create_digit_recognizer_v33_super_student_10(
         x = convnext_block(
             x, dim=768,
             drop_path_rate=0.3,
-            name=f"stage4/block{i}",
+            name=f"stage4_block{i}",
         )
 
     # ── Head ─────────────────────────────────────────────────────────────
