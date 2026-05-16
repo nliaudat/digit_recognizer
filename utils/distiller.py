@@ -124,7 +124,16 @@ class Distiller(tf.keras.Model):
             distillation_loss_fn: Loss for distillation (default: KLDivergence).
             temperature_schedule: Callable(epoch) → float, for dynamic temperature.
         """
-        super().compile(optimizer=optimizer, metrics=metrics or [], **kwargs)
+        # Ensure loss_tracker is initialized so Keras properly tracks val_loss
+        self.loss_tracker = tf.keras.metrics.Mean(name="loss")
+        self.loss_metric = self.loss_tracker
+        
+        super().compile(
+            optimizer=optimizer,
+            metrics=metrics or [],
+            loss=None,  # We handle loss manually in train_step/test_step
+            **kwargs
+        )
 
         # Configure loss based on global params.USE_LOGITS
         self.student_loss_fn = student_loss_fn or tf.keras.losses.SparseCategoricalCrossentropy(
@@ -175,11 +184,12 @@ class Distiller(tf.keras.Model):
 
         # 9. Update metrics
         self.compiled_metrics.update_state(y, student_probs)
+        self.loss_tracker.update_state(loss)
         
         # Return results including our custom losses
         results = {m.name: m.result() for m in self.metrics}
         results.update({
-            "loss": loss,
+            "loss": self.loss_tracker.result(),
             "student_loss": student_loss,
             "distill_loss": distill_loss,
         })
@@ -207,10 +217,11 @@ class Distiller(tf.keras.Model):
 
         # Update metrics
         self.compiled_metrics.update_state(y, student_probs)
+        self.loss_tracker.update_state(loss)
         
         results = {m.name: m.result() for m in self.metrics}
         results.update({
-            "loss": loss,
+            "loss": self.loss_tracker.result(),
             "student_loss": student_loss,
             "distill_loss": distill_loss,
         })
@@ -386,6 +397,8 @@ class ProgressiveDistiller(Distiller):
         final_alpha: float = 0.8,
         total_epochs: int = 50,
         mode: str = 'soft',
+        temperature: Optional[float] = None,  # Backward compat: overrides initial_temperature
+        alpha: Optional[float] = None,        # Backward compat: overrides initial_alpha
         **kwargs
     ):
         """
@@ -400,7 +413,19 @@ class ProgressiveDistiller(Distiller):
             final_alpha: Ending alpha
             total_epochs: Total training epochs
             mode: Distillation mode
+            temperature: Backward compat alias for initial_temperature
+            alpha: Backward compat alias for initial_alpha
         """
+        # Handle backward-compatible parameter names
+        if temperature is not None:
+            initial_temperature = temperature
+        if alpha is not None:
+            initial_alpha = alpha
+        
+        # Remove any conflicting kwargs that would be passed to Distiller
+        kwargs.pop('temperature', None)
+        kwargs.pop('alpha', None)
+        
         super().__init__(
             student=student,
             teacher=teacher,
@@ -417,7 +442,7 @@ class ProgressiveDistiller(Distiller):
         self.total_epochs = total_epochs
         
         # Estimate total steps if we want to switch to a step-based schedule later
-        self.total_steps = 0  
+        self.total_steps = 0
     
     def _update_schedule(self):
         """Update temperature and alpha based on progress."""
