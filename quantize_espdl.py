@@ -52,9 +52,13 @@ os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/tmp/pytorch_inductor_cache"
 os.makedirs("/tmp/pytorch_inductor_cache", exist_ok=True)
 os.environ["PYTORCH_MULTIPROCESSING_START_METHOD"] = "spawn"
 
-# Stability
-torch.set_num_threads(1)
-torch.set_num_interop_threads(1) 
+# Stability — wrap in try/except because regenerate_TQT_tflite_output.py
+# may have already called these before importing this module.
+try:
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+except RuntimeError:
+    pass
 
 def check_threading_safety():
     """Verify threading config for Docker safety"""
