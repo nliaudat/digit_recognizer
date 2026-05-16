@@ -429,8 +429,6 @@ def run_super_student_training(
         teacher=ensemble,
         temperature=8.0,
         alpha=0.3,
-        beta=0.2,
-        num_classes=num_classes,
         name="super_student_distiller",
     )
 
@@ -553,7 +551,7 @@ def parse_args() -> argparse.Namespace:
         help="Color mode (default: rgb)",
     )
     parser.add_argument(
-        "--epochs",
+        "--epochs", "--epoch",
         type=int,
         default=200,
         help="Max training epochs (default: 200)",

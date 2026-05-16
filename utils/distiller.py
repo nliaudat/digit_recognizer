@@ -386,6 +386,8 @@ class ProgressiveDistiller(Distiller):
         final_alpha: float = 0.8,
         total_epochs: int = 50,
         mode: str = 'soft',
+        temperature: Optional[float] = None,  # Backward compat: overrides initial_temperature
+        alpha: Optional[float] = None,        # Backward compat: overrides initial_alpha
         **kwargs
     ):
         """
@@ -400,7 +402,19 @@ class ProgressiveDistiller(Distiller):
             final_alpha: Ending alpha
             total_epochs: Total training epochs
             mode: Distillation mode
+            temperature: Backward compat alias for initial_temperature
+            alpha: Backward compat alias for initial_alpha
         """
+        # Handle backward-compatible parameter names
+        if temperature is not None:
+            initial_temperature = temperature
+        if alpha is not None:
+            initial_alpha = alpha
+        
+        # Remove any conflicting kwargs that would be passed to Distiller
+        kwargs.pop('temperature', None)
+        kwargs.pop('alpha', None)
+        
         super().__init__(
             student=student,
             teacher=teacher,
@@ -417,7 +431,7 @@ class ProgressiveDistiller(Distiller):
         self.total_epochs = total_epochs
         
         # Estimate total steps if we want to switch to a step-based schedule later
-        self.total_steps = 0  
+        self.total_steps = 0
     
     def _update_schedule(self):
         """Update temperature and alpha based on progress."""
