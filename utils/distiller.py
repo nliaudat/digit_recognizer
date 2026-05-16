@@ -124,7 +124,16 @@ class Distiller(tf.keras.Model):
             distillation_loss_fn: Loss for distillation (default: KLDivergence).
             temperature_schedule: Callable(epoch) → float, for dynamic temperature.
         """
-        super().compile(optimizer=optimizer, metrics=metrics or [], **kwargs)
+        # Ensure loss_tracker is initialized so Keras properly tracks val_loss
+        self.loss_tracker = tf.keras.metrics.Mean(name="loss")
+        self.loss_metric = self.loss_tracker
+        
+        super().compile(
+            optimizer=optimizer,
+            metrics=metrics or [],
+            loss=None,  # We handle loss manually in train_step/test_step
+            **kwargs
+        )
 
         # Configure loss based on global params.USE_LOGITS
         self.student_loss_fn = student_loss_fn or tf.keras.losses.SparseCategoricalCrossentropy(
@@ -175,11 +184,12 @@ class Distiller(tf.keras.Model):
 
         # 9. Update metrics
         self.compiled_metrics.update_state(y, student_probs)
+        self.loss_tracker.update_state(loss)
         
         # Return results including our custom losses
         results = {m.name: m.result() for m in self.metrics}
         results.update({
-            "loss": loss,
+            "loss": self.loss_tracker.result(),
             "student_loss": student_loss,
             "distill_loss": distill_loss,
         })
@@ -207,10 +217,11 @@ class Distiller(tf.keras.Model):
 
         # Update metrics
         self.compiled_metrics.update_state(y, student_probs)
+        self.loss_tracker.update_state(loss)
         
         results = {m.name: m.result() for m in self.metrics}
         results.update({
-            "loss": loss,
+            "loss": self.loss_tracker.result(),
             "student_loss": student_loss,
             "distill_loss": distill_loss,
         })
