@@ -257,39 +257,10 @@ def build_ensemble_teacher(
 #  Data loading with augmentation
 # ═══════════════════════════════════════════════════════════════════════════
 
-def augment_image(image: tf.Tensor, label: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
-    """
-    Strong augmentation for super student training.
-    """
-    # Random rotation ±15 degrees
-    angle = tf.random.uniform([], -0.26, 0.26)  # ~±15 degrees in radians
-    image = tf.image.rot90(image, k=tf.cast(tf.round(angle / (np.pi/2)), tf.int32) % 4)
-
-    # Random brightness
-    image = tf.image.random_brightness(image, max_delta=0.2)
-
-    # Random contrast
-    image = tf.image.random_contrast(image, lower=0.8, upper=1.2)
-
-    # Random saturation (only meaningful for RGB)
-    if image.shape[-1] == 3:
-        image = tf.image.random_saturation(image, lower=0.8, upper=1.2)
-
-    # Random hue (only for RGB)
-    if image.shape[-1] == 3:
-        image = tf.image.random_hue(image, max_delta=0.05)
-
-    # Ensure values stay in [0, 1]
-    image = tf.clip_by_value(image, 0.0, 1.0)
-
-    return image, label
-
-
 def load_data(
     num_classes: int,
     color_mode: str,
     batch_size: int,
-    use_augmentation: bool = True,
 ) -> Tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset, np.ndarray]:
     """
     Load and prepare datasets for super student training.
@@ -329,15 +300,6 @@ def load_data(
     train_ds = (
         tf.data.Dataset.from_tensor_slices((x_train, y_train))
         .shuffle(10000)
-    )
-
-    if use_augmentation:
-        train_ds = train_ds.map(
-            augment_image, num_parallel_calls=tf.data.AUTOTUNE
-        )
-
-    train_ds = (
-        train_ds
         .batch(batch_size)
         .prefetch(tf.data.AUTOTUNE)
     )
@@ -585,12 +547,6 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Show what would be done without actually training",
     )
-    parser.add_argument(
-        "--no-augmentation",
-        action="store_true",
-        help="Disable data augmentation",
-    )
-
     return parser.parse_args()
 
 
@@ -672,7 +628,6 @@ def main():
         num_classes=args.classes,
         color_mode=args.color,
         batch_size=args.batch_size,
-        use_augmentation=not args.no_augmentation,
     )
 
     # ── Summary ───────────────────────────────────────────────────────────
@@ -687,7 +642,6 @@ def main():
     logger.info(f"   Epochs:    {args.epochs}")
     logger.info(f"   LR:        {args.lr}")
     logger.info(f"   Batch:     {args.batch_size}")
-    logger.info(f"   Augment:   {'Yes' if not args.no_augmentation else 'No'}")
     logger.info(f"   Output:    {output_dir}")
     logger.info("=" * 60)
 

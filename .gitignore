@@ -28,9 +28,12 @@ docker/tensorflow_2.20.0-gpu_requirements.txt
 docker/requirements_v2.old
 docker/requirements_original.txt
 datasets/tools/commands.txt
-
+diagnose_tqt.py
 regenerate_TQT_tflite_output.py
 /config/__pycache__
 /benchmark/__pycache__
-/exported_models
+convert_v31_to_tflite.py
 /models/_tested_but_rejected/__pycache__
+extract_keras_tqt.py
+repair_int8.py
+repair_tflite_qat.py

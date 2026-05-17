@@ -83,13 +83,15 @@ def convnext_block(
     )(x)
 
     # 5. LayerScale (learnable per-channel scaling)
+    # Use 1x1 DepthwiseConv2D so weights are properly tracked by Keras
     if layer_scale_init > 0:
-        gamma = tf.Variable(
-            initial_value=tf.ones((dim,)) * layer_scale_init,
+        x = tf.keras.layers.DepthwiseConv2D(
+            kernel_size=1,
+            depthwise_initializer=tf.keras.initializers.Constant(layer_scale_init),
+            use_bias=False,
             trainable=True,
-            name=f"{name}_gamma",
-        )
-        x = x * tf.reshape(gamma, (1, 1, 1, dim))
+            name=f"{name}_layer_scale",
+        )(x)
 
     # 6. DropPath (stochastic depth)
     if drop_path_rate > 0:
