@@ -9,7 +9,6 @@
 /digit_recognizer_testing
 /config_runner_results
 config_runner.py
-repair_tflite_qat.py
 meter_reading.log
 generate_v17_report.py
 /exported_models/100cls_RGB/super_high_accuracy_validator_100cls_RGB
@@ -20,7 +19,6 @@ dropbox_ignore.ps
 .env
 /digit-recognizer-paper
 runned_command.log
-/exported_models
 /.continue
 docker/commands.txt
 docker/requirements_v2.txt
