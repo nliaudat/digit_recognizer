@@ -1,0 +1,36 @@
+HYPERPARAMETER TUNING SUMMARY
+============================================================
+
+Model Architecture: digit_recognizer_v16
+Search Type: guaranteed_unique
+Timestamp: 2026-05-09 14:53:51
+Input Shape: (32, 20, 3)
+Output Directory: exported_models/10cls_RGB/guaranteed_tune_digit_recognizer_v16_20260509_132652
+
+BEST HYPERPARAMETERS:
+----------------------------------------
+Optimizer: adamw
+Learning Rate: 0.0001
+Batch Size: 64
+Focal Gamma: 2.0
+Focal Alpha: 0.45
+Label Smoothing: 0.0
+Dropout Rate: 0.0
+Checkpoint: exported_models/10cls_RGB/checkpoint_epoch_065_acc_0.9879.keras
+Validation Accuracy: 0.9883
+
+TRIAL STATISTICS:
+----------------------------------------
+Total Trials: 28
+Best Accuracy: 0.9883
+Worst Accuracy: 0.9775
+Average Accuracy: 0.9857
+Standard Deviation: 0.0034
+
+TOP 5 CONFIGURATIONS:
+----------------------------------------
+1. Optimizer: adamw, LR: 0.0001, BS: 64, Gamma: 2.0, LS: 0.0, Dropout: 0.0, Accuracy: 0.9883
+2. Optimizer: adam, LR: 0.0002, BS: 64, Gamma: 1.2, LS: 0.0, Dropout: 0.0, Accuracy: 0.9883
+3. Optimizer: rmsprop, LR: 0.0005, BS: 32, Gamma: 2.0, LS: 0.03, Dropout: 0.0, Accuracy: 0.9883
+4. Optimizer: rmsprop, LR: 0.0001, BS: 64, Gamma: 2.0, LS: 0.03, Dropout: 0.5, Accuracy: 0.9882
+5. Optimizer: sgd, LR: 0.001, BS: 64, Gamma: 1.5, LS: 0.0, Dropout: 0.5, Accuracy: 0.9881

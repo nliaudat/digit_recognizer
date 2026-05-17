@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-05-10 18:42:06",
+  "training_duration": "1:01:32.772156",
+  "model_architecture": "digit_recognizer_v23",
+  "input_shape": [
+    32,
+    20,
+    3
+  ],
+  "num_classes": 10,
+  "epochs": 250,
+  "batch_size": 64,
+  "learning_rate": 0.001,
+  "quantization_enabled": true,
+  "qat_enabled": false,
+  "esp_dl_enabled": true,
+  "data_augmentation": false,
+  "grayscale": false,
+  "loss_type": "IntelligentFocalLossController",
+  "label_smoothing": 0.01,
+  "optimizer_type": "nadam",
+  "weight_decay": 0.0,
+  "l1_reg": 0.0,
+  "l2_reg": 0.0,
+  "dropout_rate": 0.5,
+  "use_batch_norm": true,
+  "lr_scheduler": "reduce_on_plateau",
+  "dynamic_weighting": true,
+  "best_validation_accuracy": 0.9809232354164124,
+  "test_accuracy_keras": 0.9808447360992432,
+  "test_accuracy_tflite": 0.9805620976605433,
+  "model_size_keras_kb": 663.2763671875,
+  "model_size_tflite_kb": 61.4765625,
+  "total_parameters": 50866,
+  "focal_gamma": 2.0,
+  "focal_alpha": 0.45,
+  "focal_thresholds": [
+    0.985,
+    0.991,
+    0.995
+  ],
+  "size_reduction_percent": 90.73138053136434
+}
