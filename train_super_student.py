@@ -15,7 +15,6 @@ Strategy
 
 3. **Train via progressive distillation** from the ensemble:
    - ProgressiveDistiller with temperature 8→2, alpha 0.3→0.8
-   - Strong augmentation (rotation ±15°, brightness, contrast, MixUp)
    - Warmup cosine LR schedule (AdamW)
    - Per-class focal loss for hard classes
    - 150-300 epochs depending on convergence
@@ -439,27 +438,32 @@ def run_super_student_training(
         ),
     ]
 
-    # Custom ModelCheckpoint that saves the student model, not the distiller wrapper
-    class _StudentCheckpoint(tf.keras.callbacks.ModelCheckpoint):
-        """ModelCheckpoint that saves the student model, not the distiller wrapper."""
-        def __init__(self, student, filepath, **kwargs):
-            super().__init__(filepath=filepath, **kwargs)
-            self._student = student
+    # Custom Callback that saves the student model when val_accuracy improves
+    # (Uses plain Callback instead of ModelCheckpoint to avoid Keras 3
+    #  read-only 'model' property issue.)
+    class _StudentCheckpoint(tf.keras.callbacks.Callback):
+        """Saves the standalone student model when val_accuracy improves."""
 
-        def _save_model(self, epoch, batch, logs):
-            """Override to save the student model instead."""
-            self.model = self._student
-            try:
-                super()._save_model(epoch, batch, logs)
-            finally:
-                self.model = None  # restore
+        def __init__(self, student: tf.keras.Model, filepath: str, verbose: int = 1):
+            super().__init__()
+            self._student = student
+            self.filepath = filepath
+            self.verbose = verbose
+            self.best_val_acc = -1.0
+
+        def on_epoch_end(self, epoch, logs=None):
+            logs = logs or {}
+            val_acc = logs.get("val_accuracy", 0.0)
+            if val_acc > self.best_val_acc:
+                self.best_val_acc = val_acc
+                self._student.save(self.filepath)
+                if self.verbose:
+                    bn = os.path.basename(self.filepath)
+                    print(f"\n  🏆 Best val_acc improved to {val_acc:.4f} — student saved to {bn}")
 
     student_ckpt = _StudentCheckpoint(
         student=student,
         filepath=os.path.join(output_dir, "best_student.keras"),
-        monitor="val_accuracy",
-        save_best_only=True,
-        save_weights_only=False,
         verbose=1,
     )
     callbacks.append(student_ckpt)
