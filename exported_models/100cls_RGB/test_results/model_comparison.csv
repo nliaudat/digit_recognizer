@@ -1,0 +1,13 @@
+Model,Directory,Type,Parameters,Size_KB,Accuracy,Accuracy_RealOnly,ESP32_Accuracy,Inference_Time_ms,Inferences_per_second,Tested_Images
+digit_recognizer_v24_quantized_full_integer_quant.tflite,digit_recognizer_v24_100cls_RGB_TQT_SOFTMAX_0511_0604,logits (quant),673700,434.3,0.9542,0.9877,0.9545,3.52,284,113505
+digit_recognizer_v23_quantized_full_integer_quant.tflite,digit_recognizer_v23_100cls_RGB_TQT_SOFTMAX_0511_0439,softmax (quant),661400,427,0.9224,0.9895,0.9226,2.06,486,113505
+digit_recognizer_v16_quantized_full_integer_quant.tflite,digit_recognizer_v16_100cls_RGB_TQT_SOFTMAX_0510_0318,softmax (quant),269500,138.6,0.9019,0.9799,0.9018,1.16,865,113505
+digit_recognizer_v6_quantized_full_integer_quant.tflite,digit_recognizer_v6_100cls_RGB_TQT_SOFTMAX_0509_1651,logits (quant),459000,160.1,0.8989,0.9836,0.8986,1.73,578,113505
+digit_recognizer_v27_quantized_full_integer_quant.tflite,digit_recognizer_v27_100cls_RGB_TQT_SOFTMAX_0511_0816,logits (quant),674300,433.9,0.8882,0.9196,0.8879,5.83,172,113505
+digit_recognizer_v19_quantized_full_integer_quant.tflite,digit_recognizer_v19_100cls_RGB_TQT_SOFTMAX_0510_2325,softmax (quant),312700,141.7,0.8841,0.9738,0.8841,1.25,800,113505
+digit_recognizer_v15_quantized_full_integer_quant.tflite,digit_recognizer_v15_100cls_RGB_TQT_SOFTMAX_0509_2335,softmax (quant),258300,106.5,0.8685,0.9545,0.8678,0.91,1098,113505
+digit_recognizer_v18_quantized_full_integer_quant.tflite,digit_recognizer_v18_100cls_RGB_TQT_SOFTMAX_0510_1640,softmax (quant),237000,105.6,0.8615,0.9613,0.8612,0.95,1055,113505
+digit_recognizer_v4_quantized_full_integer_quant.tflite,digit_recognizer_v4_100cls_RGB_TQT_SOFTMAX_0509_1444,softmax (quant),176900,87,0.8608,0.9698,0.8605,0.66,1510,113505
+digit_recognizer_v17_quantized_full_integer_quant.tflite,digit_recognizer_v17_100cls_RGB_TQT_SOFTMAX_0510_0953,softmax (quant),196800,77,0.83,0.9317,0.8308,0.97,1033,113505
+digit_recognizer_v3_quantized_full_integer_quant.tflite,digit_recognizer_v3_100cls_RGB_TQT_SOFTMAX_0509_1258,softmax (quant),98000,43.7,0.7912,0.9329,0.7906,0.48,2086,113505
+digit_recognizer_v7_quantized_full_integer_quant.tflite,digit_recognizer_v7_100cls_RGB_TQT_SOFTMAX_0509_2003,softmax (quant),116200,55.3,0.763,0.8764,0.7708,0.52,1922,113505
