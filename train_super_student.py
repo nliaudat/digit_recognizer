@@ -763,6 +763,11 @@ def main():
 
     # ── Evaluate on test set ──────────────────────────────────────────────
     logger.info("\n📊 Evaluating super student on test set...")
+    # Compile the extracted student before evaluation (Keras 3 requires it)
+    trained_student.compile(
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+    )
     test_loss, test_acc = trained_student.evaluate(test_ds, verbose=0)
     logger.info(f"   Test accuracy: {test_acc:.4f}")
 
