@@ -364,7 +364,7 @@ def run_super_student_training(
     epochs: int = 200,
     learning_rate: float = 0.001,
     output_dir: str = "super_student_output",
-) -> ProgressiveDistiller:
+) -> Tuple[ProgressiveDistiller, bool]:
     """
     Train the super student via progressive distillation from the ensemble.
 
@@ -391,6 +391,7 @@ def run_super_student_training(
         teacher=ensemble,
         temperature=8.0,
         alpha=0.3,
+        total_epochs=epochs,
         name="super_student_distiller",
     )
 
@@ -429,14 +430,8 @@ def run_super_student_training(
         tf.keras.callbacks.EarlyStopping(
             monitor="val_accuracy",
             patience=30,
-            min_delta=1e-4,
+            min_delta=5e-4,
             restore_best_weights=True,
-            verbose=1,
-        ),
-        tf.keras.callbacks.ModelCheckpoint(
-            filepath=os.path.join(output_dir, "best_super_student.keras"),
-            monitor="val_accuracy",
-            save_best_only=True,
             verbose=1,
         ),
         tf.keras.callbacks.CSVLogger(
@@ -444,14 +439,48 @@ def run_super_student_training(
         ),
     ]
 
-    # ── Train ─────────────────────────────────────────────────────────────
-    history = distiller.fit(
-        train_ds,
-        validation_data=val_ds,
-        epochs=epochs,
-        callbacks=callbacks,
+    # Custom ModelCheckpoint that saves the student model, not the distiller wrapper
+    class _StudentCheckpoint(tf.keras.callbacks.ModelCheckpoint):
+        """ModelCheckpoint that saves the student model, not the distiller wrapper."""
+        def __init__(self, student, filepath, **kwargs):
+            super().__init__(filepath=filepath, **kwargs)
+            self._student = student
+
+        def _save_model(self, epoch, batch, logs):
+            """Override to save the student model instead."""
+            self.model = self._student
+            try:
+                super()._save_model(epoch, batch, logs)
+            finally:
+                self.model = None  # restore
+
+    student_ckpt = _StudentCheckpoint(
+        student=student,
+        filepath=os.path.join(output_dir, "best_student.keras"),
+        monitor="val_accuracy",
+        save_best_only=True,
+        save_weights_only=False,
         verbose=1,
     )
+    callbacks.append(student_ckpt)
+
+    # ── Train ─────────────────────────────────────────────────────────────
+    interrupted = False
+    try:
+        history = distiller.fit(
+            train_ds,
+            validation_data=val_ds,
+            epochs=epochs,
+            callbacks=callbacks,
+            verbose=1,
+        )
+    except KeyboardInterrupt:
+        logger.warning("\n⚠️  Training interrupted by user (KeyboardInterrupt)")
+        interrupted = True
+        # Keras .fit() may or may not have a history object depending on when interrupted
+        history = getattr(distiller, "history", None)
+        if history is None or not history.history:
+            history = type("obj", (object,), {"history": {}})()
 
     # ── Save final model ──────────────────────────────────────────────────
     distiller.save(os.path.join(output_dir, "final_super_student.keras"))
@@ -461,7 +490,7 @@ def run_super_student_training(
     best_acc = max(history.history.get("val_accuracy", [0]))
     logger.info(f"   Best validation accuracy: {best_acc:.4f}")
 
-    return distiller
+    return distiller, interrupted
 
 
 def extract_student(distiller: ProgressiveDistiller) -> tf.keras.Model:
@@ -654,7 +683,7 @@ def main():
     logger.info("🚀 Step 5/5: Training super student via ensemble distillation")
     logger.info(f"{'='*60}")
 
-    distiller = run_super_student_training(
+    distiller, training_interrupted = run_super_student_training(
         ensemble=ensemble,
         student=student,
         train_ds=train_ds,
@@ -664,6 +693,44 @@ def main():
         learning_rate=args.lr,
         output_dir=output_dir,
     )
+
+    # ── Handle keyboard interrupt ─────────────────────────────────────────
+    if training_interrupted:
+        print()  # blank line for readability
+        while True:
+            choice = input(
+                "⚡ Training interrupted by user.\n"
+                "  [F] Finish gracefully — save best student, evaluate, generate summary\n"
+                "  [C] Continue training (resume)\n"
+                "  [A] Abort — exit immediately (no save)\n"
+                "  Choose [F/C/A]: "
+            ).strip().upper()
+
+            if choice == "F":
+                logger.info("→ Finishing gracefully...")
+                break
+            elif choice == "C":
+                logger.info("→ Resuming training...")
+                # Re-run training with the same distiller (it picks up from current state)
+                distiller, training_interrupted = run_super_student_training(
+                    ensemble=ensemble,
+                    student=student,
+                    train_ds=train_ds,
+                    val_ds=val_ds,
+                    num_classes=args.classes,
+                    epochs=args.epochs,
+                    learning_rate=args.lr,
+                    output_dir=output_dir,
+                )
+                if not training_interrupted:
+                    break  # training completed normally
+                # If interrupted again, loop back to the prompt
+                continue
+            elif choice == "A":
+                logger.warning("→ Aborting. No model saved.")
+                sys.exit(1)
+            else:
+                print("  ❌ Invalid choice. Please enter F, C, or A.")
 
     # ── Extract and save standalone student ───────────────────────────────
     logger.info(f"\n{'='*60}")
