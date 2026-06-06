@@ -340,9 +340,10 @@ from config import (  # noqa: F401, F403, E402
     get_available_model_names,
 )
 
-# Backward-compatible aliases
-update_derived_parameters = lambda: None  # no longer needed — config auto-computes
-print_hyperparameters = lambda: None  # no longer needed — config auto-computes
+# Backward-compatible aliases (delegate to the real implementations in config)
+from config import update_derived_parameters
+# print_hyperparameters is a harmless no-op alias kept for backward compatibility
+print_hyperparameters = lambda: None
 
 
 # --------------------------------------------------------------------------- #
