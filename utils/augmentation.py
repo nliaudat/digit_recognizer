@@ -480,12 +480,16 @@ def setup_augmentation_for_training(x_train, y_train_final,
     print_augmentation_summary()
 
     # 2️⃣  Build the base (unbatched) datasets
+    # NOTE: Must use from_tensor_slices (NOT create_tf_dataset_from_arrays)
+    # because create_tf_dataset_from_arrays already calls .batch() internally.
+    # We need unbatched data so the per-image augmentation .map() receives
+    # individual (H, W, C) images, and then we batch ONCE below in step 4.
     if params.USE_TF_DATA_PIPELINE:
         print("🔧 Using tf.data pipeline with augmentation...")
-        train_dataset = create_tf_dataset_from_arrays(
-            x_train, y_train_final, training=True)
-        val_dataset   = create_tf_dataset_from_arrays(
-            x_val,   y_val_final,   training=False)
+        train_dataset = tf.data.Dataset.from_tensor_slices(
+            (x_train, y_train_final))
+        val_dataset   = tf.data.Dataset.from_tensor_slices(
+            (x_val,   y_val_final))
     else:
         print("🔧 Using standard arrays with augmentation...")
         train_dataset = tf.data.Dataset.from_tensor_slices(

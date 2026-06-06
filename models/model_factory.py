@@ -57,9 +57,17 @@ def create_model():
     # Create the model
     model = creator()
     
-    # CRITICAL: Build the model with input shape
-    model.build((None,) + params.INPUT_SHAPE)
-    print(f"✅ Model '{model_name}' built successfully with input shape: {params.INPUT_SHAPE}")
+    # Build the model with input shape — but ONLY if not already built.
+    # Functional API models (tf.keras.Model(inputs, outputs)) are implicitly
+    # built at creation.  Calling .build() again on an already-built model
+    # is redundant for standard models and *corrupts the input spec* for
+    # QAT-wrapped models (producing (None, None, H, W, C) instead of
+    # (None, H, W, C)).  Skip if the model already has weights.
+    if not model.built:
+        model.build((None,) + params.INPUT_SHAPE)
+        print(f"✅ Model '{model_name}' built successfully with input shape: {params.INPUT_SHAPE}")
+    else:
+        print(f"✅ Model '{model_name}' already built (input shape: {model.input_shape})")
     
     return model
 
@@ -84,7 +92,8 @@ def _import_model_creator(model_name):
 
 def model_summary(model):
     """Print model summary"""
-    model.build((None,) + params.INPUT_SHAPE)
+    if not model.built:
+        model.build((None,) + params.INPUT_SHAPE)
     model.summary()
 
 def get_available_models():

@@ -89,21 +89,30 @@ def update_derived_parameters():
     """Recompute derived parameters after NB_CLASSES / INPUT_CHANNELS changes.
     
     Must be called after CLI or programmatic overrides so that derived values
-    like INPUT_SHAPE, USE_GRAYSCALE, and OUTPUT_DIR stay in sync.
+    like INPUT_SHAPE, USE_GRAYSCALE, and OUTPUT_DIR stay in sync across both 
+    the ``config`` and ``parameters`` modules (``parameters`` re-imports via
+    ``from config import ...`` which creates a snapshot at import time).
     """
-    global INPUT_SHAPE, USE_GRAYSCALE, OUTPUT_DIR
-    # Refresh from the possibly-overridden parent-level values.
-    # Because config/__init__.py defines these at module scope, we must
-    # re-read the same import-time path: NB_CLASSES & INPUT_CHANNELS are
-    # module-level names in *this* module.
     import sys
     this_mod = sys.modules[__name__]
+    global INPUT_SHAPE, USE_GRAYSCALE, OUTPUT_DIR
     nc = this_mod.NB_CLASSES
     ic = this_mod.INPUT_CHANNELS
     INPUT_SHAPE = (this_mod.INPUT_HEIGHT, this_mod.INPUT_WIDTH, ic)
     USE_GRAYSCALE = (ic == 1)
     _color_suffix = "GRAY" if USE_GRAYSCALE else "RGB"
     OUTPUT_DIR = f"exported_models/{nc}cls_{_color_suffix}"
+
+    # Also sync the ``parameters`` module's bindings, which are snapshots
+    # from ``from config import ...`` at import time and would otherwise
+    # remain stale after this function runs.
+    _parameters_mod = sys.modules.get('parameters')
+    if _parameters_mod is not None:
+        _parameters_mod.INPUT_SHAPE    = INPUT_SHAPE
+        _parameters_mod.USE_GRAYSCALE  = USE_GRAYSCALE
+        _parameters_mod.OUTPUT_DIR     = OUTPUT_DIR
+        _parameters_mod.INPUT_CHANNELS = ic
+        _parameters_mod.NB_CLASSES     = nc
 
 # --------------------------------------------------------------------------- #
 #  Import from submodules
