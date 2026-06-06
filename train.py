@@ -520,6 +520,13 @@ def main():
     # Apply overrides to params module
     if args.model is not None:
         params.MODEL_ARCHITECTURE = args.model
+        # Sync the other copies of MODEL_ARCHITECTURE so that:
+        #   config.models.MODEL_ARCHITECTURE → fixes get_tflite_filename()
+        #   config.MODEL_ARCHITECTURE          → fixes get_hyperparameter_summary()
+        import config.models as _cfg_models
+        import config as _cfg
+        _cfg.models.MODEL_ARCHITECTURE = args.model
+        _cfg.MODEL_ARCHITECTURE = args.model
     if args.epochs is not None:
         params.EPOCHS = args.epochs
     if args.batch is not None:

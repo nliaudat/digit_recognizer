@@ -151,7 +151,15 @@ ORIGINAL_HAVERLAND_DROPOUT_RATES = [0.25, 0.25, 0.25, 0.5]
 # ==============================================================================
 
 def get_model_filename():
-    return MODEL_ARCHITECTURE
+    """Return the actual model architecture name.
+    
+    Uses late import to read from the ``parameters`` module which may have
+    been overridden via CLI (``--model``). This avoids the stale-copy problem
+    where ``config.models.MODEL_ARCHITECTURE`` stays at the default value
+    while ``parameters.MODEL_ARCHITECTURE`` has been updated.
+    """
+    import parameters as _par
+    return _par.MODEL_ARCHITECTURE
 
 def get_tflite_filename():
     return f"{get_model_filename()}.tflite"
