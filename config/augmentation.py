@@ -10,16 +10,20 @@ config/augmentation.py — Data augmentation and GPU configuration.
 ## The important part is image invertion, it permit to train the model for both light-on-dark and dark-on-light digits
 
 USE_DATA_AUGMENTATION = True
+AUGMENTATION_PROBABILITY = 0.3          # Fraction of images augmented per epoch (0.0-1.0)
+                                          # Reduces overhead while keeping epoch-to-epoch
+                                          # re-randomization benefit. Static datasets (70k)
+                                          # handle the heavy diversity; inline adds variation.
 AUGMENTATION_ZOOM_RANGE = 0.1           # ±10% zoom
-AUGMENTATION_ROTATION_RANGE = 1.15      # ±1.15 degrees (converted from ±0.02 radians)
+AUGMENTATION_ROTATION_RANGE = 3.0       # ±3 degrees (was ±1.15° — increased parity with static aug's ±5°)
 AUGMENTATION_CONTRAST_RANGE = 0.1       # ±10% contrast
 AUGMENTATION_BRIGHTNESS_RANGE = [0.9, 1.1]  # ±10% brightness
-# Disabled
-AUGMENTATION_WIDTH_SHIFT_RANGE = 0.0
-AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.0
+# Enabled — small shift for positional robustness (was 0.0)
+AUGMENTATION_WIDTH_SHIFT_RANGE = 0.03   # ±3%
+AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.03  # ±3%
 AUGMENTATION_HORIZONTAL_FLIP = False
 AUGMENTATION_VERTICAL_FLIP = False
-AUGMENTATION_POLARITY_INVERSION = True
+AUGMENTATION_POLARITY_INVERSION = False # done in static augmentation for efficiency and caching
 
 # Advanced Augmentations (used by super_high_accuracy_validator)
 USE_MIXUP = False

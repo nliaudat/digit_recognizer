@@ -3,6 +3,15 @@ config/data_sources.py — Data source definitions.
 
 DATA_SOURCES is dynamically built based on NB_CLASSES so that label files
 and dataset paths use the correct class count.
+
+NOTE: Inline augmentation (USE_DATA_AUGMENTATION in config/augmentation.py) is
+enabled with a probability gate (AUGMENTATION_PROBABILITY = 0.3). Only ~30% of
+images per epoch go through the inline pipeline; the remaining 70% pass through
+unchanged. This drastically reduces overhead while preserving epoch-to-epoch
+re-randomization to prevent memorization of fixed static-augmented variants
+(70k pre-computed images). The inline transforms (±3° rotation, ±3% shift) are
+intentionally weaker than static counterparts (±5°, ±5%) since the static
+dataset provides the heavy diversity.
 """
 
 import sys

@@ -122,6 +122,7 @@ If no configuration is provided and the terminal is detected as non-interactive 
 - **Intelligent Focal Loss**: Replaces standard Cross-Entropy once the model masters the basics (default: >0.80 accuracy). Controlled via `LOSS_TYPE = "IntelligentFocalLossController"`.
 - **Dynamic Alpha Scaling**: Scaling factor $\alpha$ for Focal Loss is automatically calculated based on class count to maintain class balance.
 - **Adaptive Per-Class Weighting**: Dynamically adjusts importance of specific difficult digits during training.
+- **Dual-Layer Data Augmentation**: Heavy static augmentation (~82k pre-generated images covering rotation, zoom, shift, shear, perspective, flashlight, and more) combined with probability-gated inline augmentation (30% of images re-randomized per epoch to prevent memorization of fixed variants). See [Augmentation Strategy](documentations/augmentation_strategy.md).
 
 ## Knowledge Distillation
 The project includes a robust distillation framework in `utils/distiller.py`.
@@ -130,21 +131,13 @@ The project includes a robust distillation framework in `utils/distiller.py`.
 - **Logit/Softmax Autodetection**: Automatically handles diverse model output types.
 - **Mixed Input Support**: Distill from RGB teachers into efficient Grayscale students.
 
-## Benchmarking
-
 ## Documentation
 
 For detailed guides analyzing how to train, benchmark, and debug the models within this repository, refer to the guides in the [`documentations/`](documentations/) folder:
 - [Training Guide](documentations/training_guide.md)
 - [Benchmarking & Prediction](documentations/benchmarking_and_prediction.md)
 - [Analysis & Debugging](documentations/analysis_and_debugging.md)
-
-- Pre-trained models
-- **Advanced Training Features**:
-    - **Intelligent Focal Loss**: Automatically switches from Cross-Entropy to Focal Loss based on validation performance.
-    - **Dynamic Alpha Scaling**: Automatically adjusts class balancing based on dataset complexity (`NB_CLASSES`).
-    - **Adaptive Per-Class Balancing**: Dynamically re-weights classes during training to focus on difficult samples.
-    - **Quantization Aware Training (QAT)**: Integrated support for 8-bit quantization with ESP-DL compatibility.
+- [Augmentation Strategy](documentations/augmentation_strategy.md)
 
 ## Results
 

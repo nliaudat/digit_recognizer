@@ -65,7 +65,7 @@ class PolarityInversionAugmentation(BaseLayer):
     # return augmented_images, batch_labels
     
 # -------------------------------------------------------------
-#  NEW: simple per image augmentation wrapper
+#  Per-image augmentation wrappers
 # -------------------------------------------------------------
 def _augment_one_image(image, label, pipeline):
     """
@@ -77,6 +77,26 @@ def _augment_one_image(image, label, pipeline):
     # We keep `training=True` so that random transforms are active.
     aug_img = pipeline(image, training=True)
     return aug_img, label
+
+
+def _maybe_augment_one_image(image, label, pipeline, probability):
+    """
+    Apply augmentation pipeline with a per-image probability gate.
+    Only a fraction of images (probability) get re-randomized each epoch,
+    while the rest pass through unchanged. This reduces overhead while
+    preserving epoch-to-epoch variation to prevent memorization of fixed
+    static-augmented variants.
+
+    Args:
+        image: rank 3 tensor (H, W, C)
+        label: label tensor
+        pipeline: tf.keras.Sequential augmentation pipeline
+        probability: float in [0.0, 1.0], chance of applying augmentation
+    """
+    if tf.random.uniform(()) < probability:
+        aug_img = pipeline(image, training=True)
+        return aug_img, label
+    return image, label
 
 def create_augmentation_pipeline():
     """
@@ -157,15 +177,11 @@ def create_augmentation_pipeline():
             )
         )
 
-    # Contrast - WITH VALUE PROTECTION
+    # Contrast — WITH VALUE PROTECTION via final clamp (removed pre-contrast clip
+    # that was compressing dynamic range to [0.1, 0.9] before contrast was applied,
+    # weakening the transform. The final_value_clamp at the end of the pipeline
+    # guarantees output stays in [0, 1].)
     if params.AUGMENTATION_CONTRAST_RANGE > 0:
-        # Add protection before contrast to prevent extreme values
-        augmentation_layers.append(
-            tf.keras.layers.Lambda(
-                lambda x: tf.clip_by_value(x, 0.1, 0.9),  # Clip before contrast
-                name='pre_contrast_clip'
-            )
-        )
         augmentation_layers.append(
             tf.keras.layers.RandomContrast(
                 factor=params.AUGMENTATION_CONTRAST_RANGE,
@@ -499,8 +515,13 @@ def setup_augmentation_for_training(x_train, y_train_final,
 
     # 3️⃣  **Apply augmentation per image** (before batching)
     #    The lambda receives a single image + its label.
+    #    Only a fraction (AUGMENTATION_PROBABILITY) of images get re-randomized
+    #    each epoch; the rest pass through unchanged.
+    aug_prob = getattr(params, 'AUGMENTATION_PROBABILITY', 1.0)
     train_dataset = train_dataset.map(
-        lambda img, lbl: _augment_one_image(img, lbl, augmentation_pipeline),
+        lambda img, lbl: (_maybe_augment_one_image(img, lbl, augmentation_pipeline, aug_prob)
+                          if aug_prob < 1.0
+                          else _augment_one_image(img, lbl, augmentation_pipeline)),
         num_parallel_calls=tf.data.AUTOTUNE
     )
 
