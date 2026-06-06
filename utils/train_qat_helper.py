@@ -182,122 +182,37 @@ def check_qat_compatibility(qat_available):
     
     return len(errors) == 0, warnings, errors, info
     
+# ═══════════════════════════════════════════════════════════════════════════
+#  Debug / diagnostic functions have been moved to ``utils/qat_debug.py``
+#  to keep this module focused on production QAT code.
+# ═══════════════════════════════════════════════════════════════════════════
+# The following functions were extracted to utils/qat_debug.py:
+#   - debug_preprocessing_flow()
+#   - diagnose_quantization_settings()
+#   - debug_qat_layers()
+#   - two_phase_qat_training()
+# They remain importable via: from utils.qat_debug import (...)
+# For backward compatibility, thin re-exports are provided below.
+
 def debug_preprocessing_flow():
-    """Debug function to trace preprocessing flow and detect double processing"""
-    print("\n🔍 DEBUG: Tracing Preprocessing Flow")
-    print("=" * 50)
-    
-    # Create test data
-    test_images_raw = np.random.randint(0, 255, (2, params.INPUT_HEIGHT, params.INPUT_WIDTH, params.INPUT_CHANNELS), dtype=np.uint8)
-    print(f"Raw data range: [{test_images_raw.min()}, {test_images_raw.max()}]")
-    print(f"Raw data dtype: {test_images_raw.dtype}")
-    
-    print(f"\n📊 Current Configuration:")
-    print(f"   QUANTIZE_MODEL: {params.QUANTIZE_MODEL}")
-    print(f"   USE_QAT: {params.USE_QAT}")
-    print(f"   ESP_DL_QUANTIZE: {params.ESP_DL_QUANTIZE}")
-    
-    # Test BOTH training and inference modes
-    print(f"\n🧪 Testing Training Mode (for_training=True):")
-    train_processed = preprocess_for_training(test_images_raw)
-    print(f"   Result: {train_processed.dtype} [{train_processed.min():.3f}, {train_processed.max():.3f}]")
-    
-    print(f"\n🧪 Testing Inference Mode (for_training=False):")
-    infer_processed = preprocess_for_inference(test_images_raw)
-    print(f"   Result: {infer_processed.dtype} [{infer_processed.min():.3f}, {infer_processed.max():.3f}]")
-    
-    # Determine expected behavior
-    print(f"\n✅ Expected Behavior:")
-    if params.QUANTIZE_MODEL:
-        if params.USE_QAT:
-            # QAT: Both training and inference should use UINT8
-            expected_train = "UINT8 [0, 255]"
-            expected_infer = "UINT8 [0, 255]"
-            print("   QAT Mode: Training and inference both use UINT8 [0, 255]")
-        else:
-            # Standard quantization: Training uses float32, inference uses UINT8
-            expected_train = "Float32 [0, 1]"
-            expected_infer = "UINT8 [0, 255]"
-            print("   Standard Quant: Training=Float32 [0,1], Inference=UINT8 [0,255]")
-    else:
-        # No quantization: Both use float32
-        expected_train = "Float32 [0, 1]"
-        expected_infer = "Float32 [0, 1]"
-        print("   No Quantization: Training and inference both use Float32 [0, 1]")
-    
-    # Check consistency
-    print(f"\n🔍 Consistency Check:")
-    if params.USE_QAT and params.QUANTIZE_MODEL:
-        # QAT requires training and inference to be identical
-        if train_processed.dtype == infer_processed.dtype:
-            print("✅ QAT Consistency: Perfect - training matches inference")
-        else:
-            print("❌ QAT Consistency: FAILED - training ≠ inference")
-    else:
-        print("ℹ️  Non-QAT mode: Training/inference differences are expected")
-    
-    # Check for double preprocessing
-    if train_processed.max() < 0.1 and train_processed.dtype == np.float32:
-        print("🚨 WARNING: Possible double preprocessing in training!")
-    
-    if infer_processed.max() < 0.1 and infer_processed.dtype == np.float32:
-        print("🚨 WARNING: Possible double preprocessing in inference!")
-    
-    return infer_processed  # Return inference result as it's typically what matters for deployment
+    """Re-exported from utils.qat_debug for backward compatibility."""
+    from utils.qat_debug import debug_preprocessing_flow as _f
+    return _f()
 
 def diagnose_quantization_settings():
-    """Diagnose current quantization settings and suggest fixes"""
-    print("\n🔍 QUANTIZATION SETTINGS DIAGNOSIS")
-    print("=" * 50)
-    
-    issues = []
-    suggestions = []
-    
-    # Check individual parameters
-    print(f"QUANTIZE_MODEL: {params.QUANTIZE_MODEL}")
-    print(f"USE_QAT: {params.USE_QAT}")
-    print(f"ESP_DL_QUANTIZE: {params.ESP_DL_QUANTIZE}")
-    
-    # Check combinations
-    if params.ESP_DL_QUANTIZE and not params.QUANTIZE_MODEL:
-        issues.append("ESP_DL_QUANTIZE requires QUANTIZE_MODEL")
-        suggestions.append("Set QUANTIZE_MODEL = True")
-    
-    if params.USE_QAT and not params.QUANTIZE_MODEL:
-        issues.append("USE_QAT requires QUANTIZE_MODEL")
-        suggestions.append("Set QUANTIZE_MODEL = True")
-    
-    # Enhanced configuration analysis with data type info
-    if params.USE_QAT and params.ESP_DL_QUANTIZE:
-        print("✅ QAT + ESP-DL: Training for INT8 quantization with UINT8 [0,255]")
-    
-    elif params.USE_QAT and not params.ESP_DL_QUANTIZE:
-        print("✅ QAT only: Training for UINT8 quantization with UINT8 [0,255]")
-    
-    elif not params.USE_QAT and params.ESP_DL_QUANTIZE:
-        print("✅ ESP-DL only: Standard training + INT8 post-quantization")
-        print("   Training: Float32 [0,1], Inference: UINT8 [0,255]")
-    
-    elif not params.USE_QAT and params.QUANTIZE_MODEL and not params.ESP_DL_QUANTIZE:
-        print("✅ Standard quantization: Training + UINT8 post-quantization")
-        print("   Training: Float32 [0,1], Inference: UINT8 [0,255]")
-    
-    else:
-        print("✅ Float32: No quantization")
-        print("   Training: Float32 [0,1], Inference: Float32 [0,1]")
-    
-    # Print issues and suggestions
-    if issues:
-        print("\n❌ ISSUES FOUND:")
-        for issue in issues:
-            print(f"   - {issue}")
-        print("\n💡 SUGGESTIONS:")
-        for suggestion in suggestions:
-            print(f"   - {suggestion}")
-    else:
-        print("\n✅ No parameter conflicts detected")
-    
-    return len(issues) == 0    
+    """Re-exported from utils.qat_debug for backward compatibility."""
+    from utils.qat_debug import diagnose_quantization_settings as _f
+    return _f()
+
+def debug_qat_layers(model):
+    """Re-exported from utils.qat_debug for backward compatibility."""
+    from utils.qat_debug import debug_qat_layers as _f
+    return _f(model)
+
+def two_phase_qat_training(x_train, y_train, x_val, y_val):
+    """Re-exported from utils.qat_debug for backward compatibility."""
+    from utils.qat_debug import two_phase_qat_training as _f
+    return _f(x_train, y_train, x_val, y_val)
 
 
 def validate_quantization_combination():

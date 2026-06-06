@@ -523,7 +523,6 @@ def main():
         # Sync the other copies of MODEL_ARCHITECTURE so that:
         #   config.models.MODEL_ARCHITECTURE → fixes get_tflite_filename()
         #   config.MODEL_ARCHITECTURE          → fixes get_hyperparameter_summary()
-        import config.models as _cfg_models
         import config as _cfg
         _cfg.models.MODEL_ARCHITECTURE = args.model
         _cfg.MODEL_ARCHITECTURE = args.model
@@ -554,9 +553,15 @@ def main():
     if args.classes is not None:
         params.NB_CLASSES = args.classes
         os.environ["DIGIT_NB_CLASSES"] = str(args.classes)
+        # Sync the config module too (not just params snapshot)
+        import config as _cfg
+        _cfg.NB_CLASSES = args.classes
     if args.color is not None:
         params.INPUT_CHANNELS = 1 if args.color == "gray" else 3
         os.environ["DIGIT_INPUT_CHANNELS"] = str(params.INPUT_CHANNELS)
+        # Sync the config module too (not just params snapshot)
+        import config as _cfg
+        _cfg.INPUT_CHANNELS = params.INPUT_CHANNELS
     
     # Update derived parameters after potential CLI overrides
     if args.classes is not None or args.color is not None:
@@ -596,14 +601,32 @@ def main():
         params.INITIAL_EPOCH = args.initial_epoch
 
     # Quantization overrides
+    # NOTE: Must sync back to config.quantization module because validators
+    # (e.g. validate_quantization_flags, validate_quantization_parameters)
+    # import directly from config.quantization, not from the params snapshot.
     if args.qat:
         params.USE_QAT = True
+        import config.quantization as _cfg_q
+        _cfg_q.USE_QAT = True
+        _cfg_q.USE_TQT_PIPELINE = False
+        _cfg_q.QUANTIZATION_MODE = None  # manual override
     if args.no_qat:
         params.USE_QAT = False
+        import config.quantization as _cfg_q
+        _cfg_q.USE_QAT = False
     if args.tqt:
         params.USE_TQT_PIPELINE = True
+        import config.quantization as _cfg_q
+        _cfg_q.USE_TQT_PIPELINE = True
+        _cfg_q.USE_QAT = False
+        _cfg_q.ESP_DL_QUANTIZE = True
+        _cfg_q.QUANTIZE_MODEL = True
+        _cfg_q.QUANTIZATION_MODE = None  # manual override
     if args.no_tqt:
         params.USE_TQT_PIPELINE = False
+        import config.quantization as _cfg_q
+        _cfg_q.USE_TQT_PIPELINE = False
+        _cfg_q.ESP_DL_QUANTIZE = False
 
     # -----------------------------------------------------------------
     #  REFRESH DERIVED PARAMETERS (Apply CLI overrides to paths/shapes)
@@ -855,9 +878,16 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                 print(f"   ❌ Failed to load weights: {e}")
                 print("   ⚠️  Starting training from scratch instead.")
         
-        # Build model with explicit input shape (required for TF2.x eager mode)
-        print("🔧 Building model with explicit input shape...")
-        model.build(input_shape=(None,) + params.INPUT_SHAPE)
+        # Build model with explicit input shape if not already built.
+        # Functional API models (tf.keras.Model(inputs, outputs)) are implicitly
+        # built at creation — calling .build() again is redundant for standard
+        # models and *corrupts the quantization wrapper's internal tensor structure*
+        # for QAT-wrapped models (producing (None, None, H, W, C) instead of (None, H, W, C)).
+        if not model.built:
+            print("🔧 Building model with explicit input shape...")
+            model.build(input_shape=(None,) + params.INPUT_SHAPE)
+        else:
+            print(f"🔧 Model already built (input: {model.input_shape}) — skipping build()")
         
         # ✅ MOVE QAT VALIDATION HERE - AFTER MODEL IS CREATED
         print("🎯 VALIDATING QAT DATA CONSISTENCY...")

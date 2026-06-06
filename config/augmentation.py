@@ -9,7 +9,7 @@ config/augmentation.py — Data augmentation and GPU configuration.
 ## all augmentation is done in datasets/tools/generate_augmented_dataset.py for efficiency and caching
 ## The important part is image invertion, it permit to train the model for both light-on-dark and dark-on-light digits
 
-USE_DATA_AUGMENTATION = False
+USE_DATA_AUGMENTATION = True
 AUGMENTATION_ZOOM_RANGE = 0.1           # ±10% zoom
 AUGMENTATION_ROTATION_RANGE = 1.15      # ±1.15 degrees (converted from ±0.02 radians)
 AUGMENTATION_CONTRAST_RANGE = 0.1       # ±10% contrast
@@ -19,7 +19,7 @@ AUGMENTATION_WIDTH_SHIFT_RANGE = 0.0
 AUGMENTATION_HEIGHT_SHIFT_RANGE = 0.0
 AUGMENTATION_HORIZONTAL_FLIP = False
 AUGMENTATION_VERTICAL_FLIP = False
-AUGMENTATION_POLARITY_INVERSION = False
+AUGMENTATION_POLARITY_INVERSION = True
 
 # Advanced Augmentations (used by super_high_accuracy_validator)
 USE_MIXUP = False

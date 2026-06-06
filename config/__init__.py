@@ -55,21 +55,9 @@ elif _nb_classes_env is not None:
 elif "-h" in sys.argv or "--help" in sys.argv:
     NB_CLASSES = 100
 else:
-    if sys.stdin.isatty():
-        while True:
-            try:
-                _user_input = input("Enter number of classes [10 or 100]: ").strip()
-                if _user_input in ("10", "100"):
-                    NB_CLASSES = int(_user_input)
-                    break
-                print("  Please enter 10 or 100.")
-            except EOFError:
-                NB_CLASSES = 100
-                break
-    else:
-        NB_CLASSES = 100
-        print("WARNING: DIGIT_NB_CLASSES not set and no interactive terminal – defaulting to 100. "
-              "Set the env var explicitly to avoid this.")
+    NB_CLASSES = 100
+    print("WARNING: DIGIT_NB_CLASSES not set — defaulting to 100. "
+          "Set the env var or use --classes to specify.")
 del _nb_classes_env
 
 # --- INPUT_CHANNELS Logic ---
@@ -81,24 +69,9 @@ elif _input_channels_env is not None:
 elif "-h" in sys.argv or "--help" in sys.argv:
     INPUT_CHANNELS = 1
 else:
-    if sys.stdin.isatty():
-        while True:
-            try:
-                _user_input = input("Enter color mode [gray or rgb]: ").strip().lower()
-                if _user_input == "gray":
-                    INPUT_CHANNELS = 1
-                    break
-                elif _user_input == "rgb":
-                    INPUT_CHANNELS = 3
-                    break
-                print("  Please enter 'gray' or 'rgb'.")
-            except EOFError:
-                INPUT_CHANNELS = 3
-                break
-    else:
-        INPUT_CHANNELS = 3
-        print("WARNING: DIGIT_INPUT_CHANNELS not set and no interactive terminal – defaulting to 3 (RGB). "
-              "Set the env var explicitly to avoid this.")
+    INPUT_CHANNELS = 3
+    print("WARNING: DIGIT_INPUT_CHANNELS not set — defaulting to RGB (3). "
+          "Set the env var or use --color to specify.")
 del _input_channels_env
 
 # --- Image Parameters ---
@@ -110,6 +83,36 @@ INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
 USE_GRAYSCALE = (INPUT_CHANNELS == 1)
 _color_suffix = "GRAY" if USE_GRAYSCALE else "RGB"
 OUTPUT_DIR = f"exported_models/{NB_CLASSES}cls_{_color_suffix}"
+
+
+def update_derived_parameters():
+    """Recompute derived parameters after NB_CLASSES / INPUT_CHANNELS changes.
+    
+    Must be called after CLI or programmatic overrides so that derived values
+    like INPUT_SHAPE, USE_GRAYSCALE, and OUTPUT_DIR stay in sync across both 
+    the ``config`` and ``parameters`` modules (``parameters`` re-imports via
+    ``from config import ...`` which creates a snapshot at import time).
+    """
+    import sys
+    this_mod = sys.modules[__name__]
+    global INPUT_SHAPE, USE_GRAYSCALE, OUTPUT_DIR
+    nc = this_mod.NB_CLASSES
+    ic = this_mod.INPUT_CHANNELS
+    INPUT_SHAPE = (this_mod.INPUT_HEIGHT, this_mod.INPUT_WIDTH, ic)
+    USE_GRAYSCALE = (ic == 1)
+    _color_suffix = "GRAY" if USE_GRAYSCALE else "RGB"
+    OUTPUT_DIR = f"exported_models/{nc}cls_{_color_suffix}"
+
+    # Also sync the ``parameters`` module's bindings, which are snapshots
+    # from ``from config import ...`` at import time and would otherwise
+    # remain stale after this function runs.
+    _parameters_mod = sys.modules.get('parameters')
+    if _parameters_mod is not None:
+        _parameters_mod.INPUT_SHAPE    = INPUT_SHAPE
+        _parameters_mod.USE_GRAYSCALE  = USE_GRAYSCALE
+        _parameters_mod.OUTPUT_DIR     = OUTPUT_DIR
+        _parameters_mod.INPUT_CHANNELS = ic
+        _parameters_mod.NB_CLASSES     = nc
 
 # --------------------------------------------------------------------------- #
 #  Import from submodules

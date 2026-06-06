@@ -324,9 +324,6 @@ print("[Worker] ESP-DL Quantization finished successfully!")
         if os.path.exists(calib_npy_path): os.remove(calib_npy_path)
         if os.path.exists(worker_script): os.remove(worker_script)
 
-        # TFLite suite export: uses the TQT-quantized ONNX (*_quantized.onnx)
-        # for the full_integer_quant variant (preserves TQT scales), and the
-        # original FP32 ONNX for float variants (float32, float16, dynamic_range).
         if args.tflite:
             tflite_suite_export(onnx_path, calib_data, args, espdl_path)
 
@@ -346,10 +343,10 @@ print("[Worker] ESP-DL Quantization finished successfully!")
 def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
     """Generates the full suite of TFLite variants.
     
-    For the full_integer_quant variant, uses the TQT-quantized ONNX 
-    (*_quantized.onnx) if available — this preserves the TQT-learned 
-    quantization scales. For float variants (float32, float16, 
-    dynamic_range), uses the original FP32 ONNX.
+    All variants are generated from the original FP32 ONNX.
+    onnx2tf performs its own full-integer quantization from the FP32 model;
+    using the TQT-quantized ONNX (with Q/DQ nodes) as input breaks
+    the conversion and produces un-quantized (float32-size) output.
     """
     output_dir = os.path.dirname(espdl_path)
     model_base_name = os.path.basename(espdl_path).replace(".espdl", "")
@@ -377,7 +374,8 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
         ("_float32",            {"output_integer_quantized_tflite": False}),
         ("_float16",            {"output_float16_quantized_tflite": True}),
         ("_dynamic_range_quant", {"output_dynamic_range_quantized_tflite": True}),
-        ("_full_integer_quant",  {"output_integer_quantized_tflite": True, "input_quant_dtype": "int8", "output_quant_dtype": "int8"}), 
+        ("_integer_quant",      {"output_integer_quantized_tflite": True}),
+        ("_integer_quant_with_int16_act", {"output_integer_quantized_tflite": True, "quant_spec_conv_activation": "int16"}),
     ]
     
     print(f"📦 Generating TFLite variant suite for {args.target} in {output_dir}...")
@@ -386,14 +384,11 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
         target_path = os.path.join(output_dir, f"{model_base_name}_quantized{suffix}.tflite")
         print(f"   🚀 Exporting: {os.path.basename(target_path)}")
         
-        # For full_integer_quant, use the TQT-quantized ONNX if available.
-        # The quantized ONNX has Q/DQ nodes with TQT-learned scales baked in,
-        # which onnx2tf can convert to proper TFLite quantization parameters.
-        # For float variants, always use the original FP32 ONNX.
-        use_quantized_onnx = has_tqt_onnx and suffix == "_full_integer_quant"
-        input_onnx = quantized_onnx_path if use_quantized_onnx else onnx_path
-        if use_quantized_onnx:
-            print(f"      (using TQT-quantized ONNX for scale-preserved conversion)")
+        # Always use the original FP32 ONNX for TFLite conversion.
+        # onnx2tf does its own full-integer quantization from the FP32 model;
+        # feeding it the TQT-quantized ONNX (with Q/DQ nodes) breaks the
+        # conversion and produces an un-quantized (float32-size) output.
+        input_onnx = onnx_path
         
         try:
             onnx2tf.convert(
@@ -437,6 +432,7 @@ def organize_output_folder(output_dir):
     if not os.path.exists(full_models_dir): os.makedirs(full_models_dir)
     print(f"🧹 Organizing output folder: {output_dir}")
     
+    # Move float variants to full_models — they're not useful on ESP32
     to_move_patterns = ["_float32.tflite", "_float16.tflite", "_dynamic_range_quant.tflite"]
     
     for f in os.listdir(output_dir):
@@ -448,11 +444,14 @@ def organize_output_folder(output_dir):
             if f.endswith(pattern):
                 move_needed = True; break
         
-        # USER RULE: Keep ONLY the TQT-produced esp32 _full_integer_quant.tflite 
-        # (which has TQT-learned scales) in root. All other TFLites go to full_models.
+        # Keep the best esp32 integer-quantized model at root for easy access.
+        # Float variants are bulkier and slower for the ESP32 without an FPU.
         if f.endswith(".tflite"):
-            is_main_esp32_quant = "esp32_quantized_full_integer_quant.tflite" in f
-            if not is_main_esp32_quant:
+            # Always keep integer-quantized variants at root
+            is_integer_quant = "_integer_quant" in f and not f.endswith("_float")
+            # Always keep the _full_integer_quant* too (may exist from other flows)
+            is_full_integer_quant = "_full_integer_quant" in f
+            if not (is_integer_quant or is_full_integer_quant):
                 move_needed = True
         
         # ALSO: preserve espdl, keras, and onnx in root
