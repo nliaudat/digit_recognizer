@@ -23,19 +23,20 @@ del _config_mod
 # Dataset                        Raw     Weight   Effective   Category
 # ------------------------------ ------- -------- ----------- --------------------
 # Tenth-of-step-of-a-meter-digit  22 653   x 2.5    56 633     Real / baseline
-# real_integra_bad_predictions     1 867   x12.0    22 404     Real / corrected
-# real_integra                     1 873   x 8.0    14 984     Real
-# failed_predictions_{N}           4 371   x12.0    52 452     Real / corrected
-# static_augmentation             70 632   x 0.6    42 379     Synthetic
-# static_augmentation_mixup       11 301   x 0.4     4 520     Synthetic
-# GWF_watermeter                     832   x 8.0     6 656     Real
+# real_integra_bad_predictions     1 867   x 5.0     9 335     Real / corrected
+# real_integra                     1 873   x 3.0     5 619     Real
+# failed_predictions_{N}           4 371   x 5.0    21 855     Real / corrected
+# static_augmentation             70 632   x 1.0    70 632     Synthetic
+# static_augmentation_mixup       11 301   x 0.8     9 041     Synthetic
+# GWF_watermeter                     832   x 4.0     3 328     Real
 # ------------------------------ ------- -------- ----------- --------------------
-# TOTAL                                           200 028
+# TOTAL                                           176 443
 #
 # Target balance:
-#   Real corrected (bad_pred + failed + GWF) → ~82k  (41 %)
-#   Real baseline  (Tenth + real_integra)    → ~72k  (36 %)
-#   Synthetic                                → ~47k  (23 %)
+#   Real baseline  (Tenth + real_integra)    → ~62k  (35 %)
+#   Real corrected (bad_pred + failed)       → ~31k  (18 %)
+#   Synthetic                                → ~80k  (45 %)
+#   GWF                                      → ~ 3k  ( 2 %)
 # ---------------------------------------------------------------------------
 DATA_SOURCES = [
     {
@@ -50,28 +51,28 @@ DATA_SOURCES = [
         'type': 'label_file', 
         'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
         'path': 'datasets/real_integra_bad_predictions', 
-        'weight': 12.0,  # 1 867 raw → ~22 404 effective (Corrected hard cases)
+        'weight': 5.0,  # 1 867 raw → ~9 335 effective (Corrected hard cases, moderate weight)
     },
     {
         'name': 'real_integra',
         'type': 'label_file', 
         'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
         'path': 'datasets/real_integra', 
-        'weight': 8.0,  # 1 873 raw → ~14 984 effective (Real data)
+        'weight': 3.0,  # 1 873 raw → ~5 619 effective (Real data)
     },
     {
         'name': f'failed_predictions_{NB_CLASSES}',
         'type': 'label_file', 
         'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
         'path': f'datasets/failed_predictions_{NB_CLASSES}', 
-        'weight': 12.0,  # 4 371 raw → ~52 452 effective (Corrected hard cases)
+        'weight': 5.0,  # 4 371 raw → ~21 855 effective (Corrected hard cases, moderate weight)
     },
     {
         'name': 'static_augmentation',
         'type': 'label_file', 
         'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
         'path': 'datasets/static_augmentation', 
-        'weight': 0.6,  # 70 632 raw → ~42 379 effective (Synthetic — down-weighted to avoid dominance)
+        'weight': 1.0,  # 70 632 raw → ~70 632 effective (Synthetic — full weight, diverse coverage)
         'is_synthetic': True,
     },
     {
@@ -79,7 +80,7 @@ DATA_SOURCES = [
         'type': 'label_file', 
         'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
         'path': 'datasets/static_augmentation_mixup', 
-        'weight': 0.4,  # 11 301 raw → ~4 520 effective (Synthetic mixup)
+        'weight': 0.8,  # 11 301 raw → ~9 041 effective (Synthetic mixup)
         'is_synthetic': True,
     },
     {
@@ -87,6 +88,6 @@ DATA_SOURCES = [
         'type': 'label_file', 
         'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
         'path': f'datasets/GWF_watermeter', 
-        'weight': 8.0,  # 832 raw → ~6 656 effective (Small real-world domain)
+        'weight': 4.0,  # 832 raw → ~3 328 effective (Small real-world domain, moderate weight)
     },
 ]

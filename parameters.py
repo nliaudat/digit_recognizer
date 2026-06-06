@@ -352,7 +352,7 @@ print_hyperparameters = lambda: None  # no longer needed — config auto-compute
 def get_hyperparameter_summary():
     """Return a comprehensive summary of all hyperparameter settings."""
     from config import (
-        NB_CLASSES, INPUT_SHAPE, MODEL_ARCHITECTURE, OPTIMIZER_TYPE,
+        NB_CLASSES, INPUT_SHAPE, OPTIMIZER_TYPE,
         LEARNING_RATE, LOSS_TYPE, BATCH_SIZE, EPOCHS, LABEL_SMOOTHING,
         FOCAL_GAMMA, FOCAL_ALPHA, USE_DATA_AUGMENTATION, USE_QAT,
         QUANTIZE_MODEL, ESP_DL_QUANTIZE, USE_TQT_PIPELINE, QUANTIZATION_MODE,
@@ -367,9 +367,12 @@ def get_hyperparameter_summary():
         TRAINING_PERCENTAGE, VALIDATION_SPLIT, OUTPUT_DIR, USE_GRAYSCALE,
         INPUT_CHANNELS, INPUT_WIDTH, INPUT_HEIGHT,
     )
+    # Use the live architecture name from the parameters module (may have been
+    # overridden via CLI --model), not the stale copy in config.
+    _live_arch = get_model_filename()
     summary = {
         'model': {
-            'architecture': MODEL_ARCHITECTURE,
+            'architecture': _live_arch,
             'input_shape': INPUT_SHAPE,
             'num_classes': NB_CLASSES,
         },
