@@ -1,4 +1,4 @@
-import parameters as params
+import config as params
 
 def log_print(*args, level=1, **kwargs):
     """

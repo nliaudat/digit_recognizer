@@ -22,7 +22,7 @@ Estimated: ~20–60K parameters depending on filter config.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def create_simple_cnn():
     """Simple CNN model for testing"""

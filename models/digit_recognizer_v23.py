@@ -29,7 +29,7 @@ Achieved accuracy: 99.0% (same as v4, now with color robustness)
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 try:
     import tensorflow_model_optimization as tfmot
     QAT_AVAILABLE = True

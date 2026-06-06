@@ -27,7 +27,7 @@ Estimated: ~200K parameters → ~200 KB after INT8 quantization.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 try:
     import tensorflow_model_optimization as tfmot
     QAT_AVAILABLE = True

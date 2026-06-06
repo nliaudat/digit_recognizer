@@ -11,7 +11,7 @@ os.environ.setdefault("DIGIT_INPUT_CHANNELS", "3")
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
-import parameters as params
+import config as params
 from config.validation import validate_full_config
 
 def main():

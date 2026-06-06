@@ -39,7 +39,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-import parameters as params
+import config as params
 from models.model_factory import create_model_by_name
 from utils import (
     get_data_splits, preprocess_for_inference, preprocess_for_training

@@ -23,7 +23,7 @@ Estimated: ~600K+ parameters → large; not intended for ESP32 deployment.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def create_esp_high_capacity():
     """

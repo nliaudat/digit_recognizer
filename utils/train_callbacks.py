@@ -7,7 +7,7 @@ Handles: early stopping, model checkpointing, LR scheduling, CSV logging, etc.
 import os
 import tensorflow as tf
 
-import parameters as params
+import config as params
 from utils.augmentation import create_augmentation_safety_monitor
 from utils.train_checkpoint import TFLiteCheckpoint, save_training_state, load_training_state
 from utils.train_helpers import (

@@ -22,7 +22,7 @@ Estimated: ~200–350K parameters → suitable for benchmarking, not strict IoT.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 
 def create_practical_tiny_depthwise():

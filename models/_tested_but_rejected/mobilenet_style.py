@@ -22,7 +22,7 @@ Estimated: ~20–80K parameters depending on filter config.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 
 def create_mobilenet_style():

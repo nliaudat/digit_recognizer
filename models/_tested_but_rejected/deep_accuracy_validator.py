@@ -38,7 +38,7 @@ float32 only. No QAT, no quantization, no ReLU6.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 
 # ---------------------------------------------------------------------------

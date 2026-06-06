@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
-import parameters as params
+import config as params
 from models.model_factory import create_model, compile_model
 from utils.preprocess import preprocess_for_inference
 

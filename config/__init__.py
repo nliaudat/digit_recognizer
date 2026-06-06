@@ -103,17 +103,6 @@ def update_derived_parameters():
     _color_suffix = "GRAY" if USE_GRAYSCALE else "RGB"
     OUTPUT_DIR = f"exported_models/{NB_CLASSES}cls_{_color_suffix}"
 
-    # Also sync the ``parameters`` module's bindings, which are snapshots
-    # from ``from config import ...`` at import time and would otherwise
-    # remain stale after this function runs.
-    import sys
-    _parameters_mod = sys.modules.get('parameters')
-    if _parameters_mod is not None:
-        _parameters_mod.INPUT_SHAPE    = INPUT_SHAPE
-        _parameters_mod.USE_GRAYSCALE  = USE_GRAYSCALE
-        _parameters_mod.OUTPUT_DIR     = OUTPUT_DIR
-        _parameters_mod.INPUT_CHANNELS = INPUT_CHANNELS
-        _parameters_mod.NB_CLASSES     = NB_CLASSES
 # --------------------------------------------------------------------------- #
 #  Backward-compatible utility functions (moved from parameters.py)
 # --------------------------------------------------------------------------- #

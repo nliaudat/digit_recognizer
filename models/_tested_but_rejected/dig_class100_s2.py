@@ -25,7 +25,7 @@ Estimated: ~500K+ parameters depending on filter config → reference only, not 
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def create_dig_class100_s2():
     """

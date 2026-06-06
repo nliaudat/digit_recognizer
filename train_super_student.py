@@ -58,7 +58,7 @@ os.environ.setdefault("DIGIT_INPUT_CHANNELS", "3")
 import numpy as np
 import tensorflow as tf
 
-import parameters as params
+import config as params
 from config.validation import validate_full_config
 from models.model_factory import create_model_by_name, resolve_model_name
 from utils import get_data_splits

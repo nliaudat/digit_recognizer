@@ -12,7 +12,7 @@ import sys
 import numpy as np
 import tensorflow as tf
 
-import parameters as params
+import config as params
 from utils.preprocess import (
     get_qat_training_format, preprocess_for_inference, preprocess_for_training
 )

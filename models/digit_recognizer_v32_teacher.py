@@ -31,7 +31,7 @@ try:
 except ImportError:
     QAT_AVAILABLE = False
 
-import parameters as params
+import config as params
 
 
 # ---------------------------------------------------------------------------

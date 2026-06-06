@@ -14,7 +14,7 @@ Reference:
   https://github.com/haverland/Tenth-of-step-of-a-meter-digit/blob/master/dig-class100-s2.ipynb
 """
 
-import parameters as params
+import config as params
 from .cnn32 import create_original_haverland, CNN_s2
 
 def get_model_info():

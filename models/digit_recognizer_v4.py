@@ -30,7 +30,7 @@ Achieved accuracy: 99.0% (best in lineup for this size class).
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 try:
     import tensorflow_model_optimization as tfmot
     QAT_AVAILABLE = True

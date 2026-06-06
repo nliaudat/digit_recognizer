@@ -23,7 +23,7 @@ Estimated: ~250K parameters → ~250 KB after INT8 quantization.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def create_esp_quantization_ready_v3():
     """

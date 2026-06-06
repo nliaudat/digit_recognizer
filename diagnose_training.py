@@ -11,7 +11,7 @@ _ROOT = str(Path(__file__).resolve().parent)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-import parameters as params
+import config as params
 from config.validation import validate_full_config
 from utils.multi_source_loader import load_combined_dataset
 from utils.preprocess import preprocess_single_image

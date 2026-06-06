@@ -83,7 +83,7 @@ if "DIGIT_NB_CLASSES" not in os.environ:
 if "DIGIT_INPUT_CHANNELS" not in os.environ:
     os.environ["DIGIT_INPUT_CHANNELS"] = "1"
 
-import parameters as params
+import config as params
 from config.validation import validate_full_config
 from utils.train_distill_helper import (
     STUDENTS, TEACHERS, load_distillation_data, run_distillation_pipeline,

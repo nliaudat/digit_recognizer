@@ -12,7 +12,7 @@ try:
 except ImportError:
     ort = None
 
-import parameters as params
+import config as params
 from config.validation import validate_full_config
 from utils.preprocess import preprocess_for_inference
 

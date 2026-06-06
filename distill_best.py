@@ -71,7 +71,7 @@ os.environ.setdefault("DIGIT_INPUT_CHANNELS", "3")
 import numpy as np
 import tensorflow as tf
 
-import parameters as params
+import config as params
 from config.validation import validate_full_config
 from config.distillation import (
     DISTILLATION_TEMPERATURE,

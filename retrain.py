@@ -26,7 +26,7 @@ except ImportError:
     tfmot = None
 
 # ── Project imports ──
-import parameters as params
+import config as params
 from config.validation import validate_full_config
 from utils.augmentation import setup_augmentation_for_training
 from utils.export_onnx import export_keras_to_onnx

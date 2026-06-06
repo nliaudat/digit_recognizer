@@ -20,7 +20,7 @@ import faulthandler
 from pathlib import Path
 
 # Project-specific imports
-import parameters as params
+import config as params
 from config.validation import validate_full_config
 from utils import get_data_splits
 from utils.preprocess import preprocess_for_training

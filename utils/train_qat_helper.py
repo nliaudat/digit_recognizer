@@ -33,7 +33,7 @@ except ImportError:
     tfmot = None
 
 # ── Project imports ─────────────────────────────────────────────────────
-import parameters as params
+import config as params
 
 # Models/Circular dependency cautious imports
 try:

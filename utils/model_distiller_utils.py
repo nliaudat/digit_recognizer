@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 import tensorflow as tf
 
-import parameters as params
+import config as params
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

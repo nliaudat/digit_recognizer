@@ -29,7 +29,7 @@ Estimated: ~3–5M parameters → PC/server validation only.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def se_block(input_tensor, ratio=16):
     """Squeeze-and-Excitation block."""

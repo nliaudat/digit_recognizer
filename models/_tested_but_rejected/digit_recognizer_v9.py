@@ -30,7 +30,7 @@ Estimated: ~150–200K parameters → not intended for ESP32 deployment.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 from tensorflow.keras import layers, Model
 import tensorflow.keras.backend as K
 

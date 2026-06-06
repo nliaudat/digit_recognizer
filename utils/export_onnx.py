@@ -25,7 +25,7 @@ from pathlib import Path
 
 import tensorflow as tf
 
-import parameters as params
+import config as params
 
 # Optional/Third party imports
 try:

@@ -22,7 +22,7 @@ Estimated: ~150–250K parameters → ~150 KB after INT8 quantization.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def create_esp_haverland_compatible():
     """

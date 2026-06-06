@@ -10,7 +10,7 @@ import tensorflow as tf
 from tensorflow.keras import backend as K
 from tqdm import tqdm
 
-import parameters as params
+import config as params
 from utils.losses import (
     DynamicFocalLoss, DynamicSparseFocalLoss, focal_loss, sparse_focal_loss
 )

@@ -18,7 +18,7 @@ except ImportError:
     kt = None  # keras_tuner is optional
 
 # Project imports
-import parameters as params
+import config as params
 from config.validation import validate_full_config
 from models import compile_model, create_model
 from utils import get_data_splits, preprocess_for_training

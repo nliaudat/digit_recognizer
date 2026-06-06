@@ -17,7 +17,7 @@ Notes:
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def create_template_model():
     """

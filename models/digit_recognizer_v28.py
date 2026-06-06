@@ -33,7 +33,7 @@ import numpy as np
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import parameters as params
+import config as params
 
 try:
     import tensorflow_model_optimization as tfmot

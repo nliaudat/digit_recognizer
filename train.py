@@ -49,9 +49,9 @@ except ImportError:
     compute_class_weight = None
 
 # ── Project imports ──
-import parameters as params
+import config as params
 from models import compile_model, create_model, model_summary
-from parameters import (
+from config import (
     get_hyperparameter_summary_text, print_hyperparameter_summary,
     validate_quantization_parameters
 )
