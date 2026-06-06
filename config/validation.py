@@ -23,8 +23,10 @@ from config.data_sources import DATA_SOURCES
 from config.models import MODEL_ARCHITECTURE, AVAILABLE_MODELS, OPTIMIZER_TYPE
 from config.quantization import USE_QAT, USE_TQT_PIPELINE, ESP_DL_QUANTIZE, QUANTIZE_MODEL, QUANTIZATION_MODE
 from config.training import (
-    LOSS_TYPE, LR_SCHEDULER_TYPE, WEIGHT_INITIALIZER,
-    LABEL_SMOOTHING, LEARNING_RATE,
+    LR_SCHEDULER_TYPE, WEIGHT_INITIALIZER, LEARNING_RATE,
+)
+from config.losses import (
+    LOSS_TYPE, LABEL_SMOOTHING,
 )
 
 # Import core parameters from the package (these are defined directly in __init__.py)

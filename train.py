@@ -867,13 +867,13 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         model = compile_model(model, loss_type=loss_type) 
         
         # -----------------------------------------------------------------
-        #  Resume Training Logic
+        #  Resume Training Logic (Phase 1: model weights)
         # -----------------------------------------------------------------
         if hasattr(params, 'RESUME_MODEL_PATH') and params.RESUME_MODEL_PATH:
             print(f"🔄 Resuming from checkpoint: {params.RESUME_MODEL_PATH}")
             try:
                 model.load_weights(params.RESUME_MODEL_PATH)
-                print("   ✅ Weights loaded successfully")
+                print("   ✅ Model weights loaded successfully")
             except Exception as e:
                 print(f"   ❌ Failed to load weights: {e}")
                 print("   ⚠️  Starting training from scratch instead.")
@@ -1004,6 +1004,32 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             x_train_raw=x_train_raw
         )
         
+        # -----------------------------------------------------------------
+        #  Resume Training Logic (Phase 2: controller states + optimizer)
+        #  Must come AFTER create_callbacks so controller callbacks exist.
+        # -----------------------------------------------------------------
+        if hasattr(params, 'RESUME_MODEL_PATH') and params.RESUME_MODEL_PATH:
+            # Auto-detect INITIAL_EPOCH from training_log.csv
+            csv_path = os.path.join(training_dir, "training_log.csv")
+            if os.path.exists(csv_path):
+                try:
+                    import pandas as _pd
+                    df = _pd.read_csv(csv_path)
+                    if 'epoch' in df.columns and len(df) > 0:
+                        params.INITIAL_EPOCH = int(df['epoch'].max())
+                        print(f"   ✅ Auto-detected INITIAL_EPOCH = {params.INITIAL_EPOCH} from {csv_path}")
+                except Exception as e:
+                    print(f"   ⚠️  Could not read CSV for INITIAL_EPOCH: {e}")
+
+            # Restore controller states + optimizer weights
+            state_path = os.path.join(training_dir, "training_state.json")
+            if os.path.exists(state_path):
+                from utils.train_checkpoint import load_training_state
+                controllers = [cb for cb in callbacks if hasattr(cb, 'get_state')]
+                load_training_state(state_path, controllers, model)
+            else:
+                print("   ⚠️  No training_state.json found — optimizer/scheduler start fresh")
+
         # Start training
         print("\n🎯 Starting training...")
         start_time = datetime.now()

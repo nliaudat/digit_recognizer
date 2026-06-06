@@ -399,10 +399,17 @@ def train_student_distillation(
         # ReduceLROnPlateau monitors val_loss (smoother signal than val_accuracy
         # at high accuracy, where accuracy is pure noise ±0.003).
         tf.keras.callbacks.ReduceLROnPlateau(
-            monitor="val_loss", factor=0.5, patience=5, min_lr=1e-6, verbose=1
+            monitor="val_loss",
+            factor=getattr(params, 'LR_SCHEDULER_FACTOR', 0.5),
+            patience=getattr(params, 'LR_SCHEDULER_PATIENCE', 5),
+            min_lr=getattr(params, 'LR_SCHEDULER_MIN_LR', 1e-6),
+            verbose=1
         ),
         tf.keras.callbacks.EarlyStopping(
-            monitor="val_accuracy", patience=15, restore_best_weights=True, verbose=1
+            monitor="val_accuracy",
+            patience=getattr(params, 'EARLY_STOPPING_PATIENCE', 15),
+            restore_best_weights=True,
+            verbose=1
         ),
         tf.keras.callbacks.ModelCheckpoint(
             ckpt_path, monitor="val_accuracy", save_best_only=True, verbose=1

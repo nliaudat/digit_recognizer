@@ -52,3 +52,11 @@ USE_CYCLICAL_LEARNING_RATE = False
 
 USE_MODEL_ENSEMBLE = False
 ENSEMBLE_MODEL_COUNT = 3
+
+# ==============================================================================
+# AUGMENTATION SAFETY MONITOR
+# ==============================================================================
+
+AUG_SAFETY_THRESHOLD = 100.0      # Max val_loss before emergency stop (higher for QAT uint8)
+AUG_LEARNING_THRESHOLD = 0.10     # Min val_acc expected after patience_epochs
+AUG_PATIENCE_EPOCHS = 10          # How many epochs before checking learning signal

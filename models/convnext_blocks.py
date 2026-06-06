@@ -55,7 +55,17 @@ class DropPath(tf.keras.layers.Layer):
             binary_tensor = tf.floor(random_tensor)
             return (inputs / tf.cast(keep_prob, inputs.dtype)) * binary_tensor
 
-        return tf.keras.backend.in_train_phase(dropped, inputs, training=training)
+        # Use tf.cond instead of legacy tf.keras.backend.in_train_phase for
+        # Keras 3 forward-compatibility (in_train_phase is being phased out).
+        # Also explicitly restore static shape info that can be lost inside
+        # the cond branches — needed to avoid compilation failures downstream.
+        if training is None:
+            training = tf.keras.backend.learning_phase()
+        output = tf.cond(
+            tf.cast(training, tf.bool), dropped, lambda: inputs
+        )
+        output.set_shape(inputs.shape)
+        return output
 
     def get_config(self):
         config = super().get_config()

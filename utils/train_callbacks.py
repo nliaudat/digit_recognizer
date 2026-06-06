@@ -9,7 +9,7 @@ import tensorflow as tf
 
 import parameters as params
 from utils.augmentation import create_augmentation_safety_monitor
-from utils.train_checkpoint import TFLiteCheckpoint
+from utils.train_checkpoint import TFLiteCheckpoint, save_training_state, load_training_state
 from utils.train_helpers import (
     DynamicLRProxy, 
     LRWarmupCallback, 
@@ -18,6 +18,31 @@ from utils.train_helpers import (
     PerClassAccuracyCallback
 )
 from utils.train_progressbar import TQDMProgressBar
+
+class StateCheckpointCallback(tf.keras.callbacks.Callback):
+    """
+    Periodically saves the full training state (optimizer weights + controller
+    callback states) so that ``--resume`` can restore everything perfectly.
+    
+    Saves to ``<training_dir>/training_state.json`` + ``<training_dir>/training_state_optimizer.npy``
+    every ``checkpoint_freq`` epochs.
+    """
+
+    def __init__(self, training_dir, checkpoint_freq=5):
+        super().__init__()
+        self.training_dir = training_dir
+        self.checkpoint_freq = checkpoint_freq
+
+    def on_epoch_end(self, epoch, logs=None):
+        if (epoch + 1) % self.checkpoint_freq != 0:
+            return
+        # Collect controller callbacks that have get_state()
+        controllers = [cb for cb in self.model.callbacks if hasattr(cb, 'get_state')]
+        if not controllers:
+            return
+        state_path = os.path.join(self.training_dir, "training_state.json")
+        save_training_state(state_path, controllers, self.model)
+
 
 def create_callbacks(output_dir, tflite_manager, representative_data, total_epochs, monitor, debug=False, validation_data=None, x_train_raw=None):
     """Create comprehensive training callbacks with robust error handling"""
@@ -66,6 +91,17 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     callbacks.append(
         TFLiteCheckpoint(tflite_manager, representative_data, x_train_raw, save_frequency=params.CHECKPOINT_FREQUENCY)
     )
+
+    # Training state checkpoint — saves optimizer weights + controller states
+    # every CHECKPOINT_FREQUENCY epochs for perfect resume support.
+    callbacks.append(
+        StateCheckpointCallback(
+            training_dir=output_dir,
+            checkpoint_freq=params.CHECKPOINT_FREQUENCY,
+        )
+    )
+    if debug:
+        print("💾 StateCheckpointCallback added (optimizer + controllers)")
     
     # Learning rate scheduler — respects LR_SCHEDULER_TYPE from parameters.py
     scheduler_type = getattr(params, 'LR_SCHEDULER_TYPE', 'reduce_on_plateau')
@@ -97,15 +133,16 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
                   f"{getattr(params, 'LR_SCHEDULER_SEQUENCE', [])})")
 
     elif scheduler_type == 'onecycle':
-        # OneCycleLR: warm up to peak LR over 30% of total epochs,
-        # then cosine-decay to near-zero over the remaining 70%.
-        warmup_frac = 0.3
+        # OneCycleLR: warm up to peak LR over ONECYCLE_WARMUP_FRACTION of epochs,
+        # then cosine-decay to near-zero over the remaining epochs.
+        warmup_frac = getattr(params, 'ONECYCLE_WARMUP_FRACTION', 0.3)
         warmup_steps = max(1, int(total_epochs * warmup_frac))
         decay_steps  = max(1, total_epochs - warmup_steps)
         min_lr = getattr(params, 'COSINE_DECAY_ALPHA', 1e-6)
         peak_lr = params.LEARNING_RATE
+        initial_lr_frac = getattr(params, 'ONECYCLE_INITIAL_LR_FRACTION', 0.1)
         warmup_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
-            initial_learning_rate=peak_lr * 0.1, decay_steps=warmup_steps,
+            initial_learning_rate=peak_lr * initial_lr_frac, decay_steps=warmup_steps,
             end_learning_rate=peak_lr, power=1.0,
         )
         cosine_schedule = tf.keras.optimizers.schedules.CosineDecay(
@@ -211,7 +248,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     csv_logger = tf.keras.callbacks.CSVLogger(
         filename=csv_path,
         separator=',',
-        append=False
+        append=bool(getattr(params, 'RESUME_MODEL_PATH', ''))
     )
     callbacks.append(csv_logger)
     

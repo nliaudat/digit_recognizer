@@ -104,11 +104,16 @@ def _maybe_augment_one_image(image, label, pipeline, probability):
         pipeline: tf.keras.Sequential augmentation pipeline
         probability: float in [0.0, 1.0], chance of applying augmentation
     """
-    return tf.cond(
+    aug_img, aug_label = tf.cond(
         tf.random.uniform(()) < probability,
         lambda: (tf.cast(pipeline(image, training=True), tf.float32), label),
         lambda: (tf.cast(image, tf.float32), label),
     )
+    # Restore static shape — tf.cond with Keras layers inside can lose
+    # static dimension information (e.g. returning (None, None, 3) instead
+    # of (32, 20, 3)), which can break downstream model compilation.
+    aug_img.set_shape(image.shape)
+    return aug_img, aug_label
 
 def create_augmentation_pipeline():
     """
@@ -488,9 +493,9 @@ def create_augmentation_safety_monitor(validation_data, debug=False):
     return AugmentationSafetyMonitor(
         validation_data=validation_data,
         debug=debug,
-        safety_threshold=100.0,  # Higher threshold for QAT (UINT8 data has higher loss)
-        learning_threshold=0.10,  # Lower threshold for QAT
-        patience_epochs=10        # More patience for QAT
+        safety_threshold=getattr(params, 'AUG_SAFETY_THRESHOLD', 100.0),
+        learning_threshold=getattr(params, 'AUG_LEARNING_THRESHOLD', 0.10),
+        patience_epochs=getattr(params, 'AUG_PATIENCE_EPOCHS', 10),
     )
 
 def setup_augmentation_for_training(x_train, y_train_final,
