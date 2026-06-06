@@ -224,26 +224,14 @@ def two_phase_qat_training(x_train, y_train, x_val, y_val):
         except ImportError:
             raise ImportError("tensorflow_model_optimization required for Phase 2")
 
-        # Create QAT model
-        with tfmot.quantization.keras.quantize_scope():
-            qat_model = create_model()
-
-        # Build the model
-        qat_model.build(input_shape=(None,) + params.INPUT_SHAPE)
-
-        # Copy weights layer by layer
-        print("📥 Transferring weights to QAT model...")
-        weights_transferred = 0
-        for qat_layer, std_layer in zip(qat_model.layers, standard_model.layers):
-            try:
-                if (hasattr(qat_layer, 'get_weights') and hasattr(std_layer, 'get_weights') and
-                    len(qat_layer.get_weights()) == len(std_layer.get_weights())):
-                    qat_layer.set_weights(std_layer.get_weights())
-                    weights_transferred += 1
-            except Exception as e:
-                print(f"⚠️  Could not transfer weights for {qat_layer.name}: {e}")
-
-        print(f"✅ Transferred weights for {weights_transferred} layers")
+        # Create QAT model directly from the trained standard model.
+        # This preserves all weights AND wraps layers with QuantizeWrapper
+        # (which adds quantization scale/zero-point weights). The old manual
+        # layer-by-layer copy was broken because QAT wrappers change layer
+        # count and weight array lengths — quantize_model handles this correctly.
+        print("🔄 Converting standard model to QAT via quantize_model()...")
+        qat_model = tfmot.quantization.keras.quantize_model(standard_model)
+        print(f"✅ QAT model created from standard model ({qat_model.count_params():,} params)")
 
         # Compile with slightly higher learning rate for fine-tuning
         qat_optimizer = tf.keras.optimizers.Adam(learning_rate=params.LEARNING_RATE * 2.0)
