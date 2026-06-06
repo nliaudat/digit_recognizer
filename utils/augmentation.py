@@ -87,16 +87,28 @@ def _maybe_augment_one_image(image, label, pipeline, probability):
     preserving epoch-to-epoch variation to prevent memorization of fixed
     static-augmented variants.
 
+    Uses ``tf.cond`` instead of a Python ``if`` with a Tensor condition,
+    because AutoGraph's conversion of Python control flow inside
+    ``tf.data.Dataset.map`` can be fragile and may raise
+    ``OperatorNotAllowedInGraphError``.
+
+    Also casts the bypass path to ``tf.float32`` so that both branches of
+    the ``tf.cond`` return the same dtype. The augmented branch always
+    returns ``float32`` (the pipeline's first layer is ``ensure_float32``);
+    the raw image may be ``uint8``, and ``tf.cond`` requires both branches
+    to agree on dtype.
+
     Args:
         image: rank 3 tensor (H, W, C)
         label: label tensor
         pipeline: tf.keras.Sequential augmentation pipeline
         probability: float in [0.0, 1.0], chance of applying augmentation
     """
-    if tf.random.uniform(()) < probability:
-        aug_img = pipeline(image, training=True)
-        return aug_img, label
-    return image, label
+    return tf.cond(
+        tf.random.uniform(()) < probability,
+        lambda: (tf.cast(pipeline(image, training=True), tf.float32), label),
+        lambda: (tf.cast(image, tf.float32), label),
+    )
 
 def create_augmentation_pipeline():
     """
