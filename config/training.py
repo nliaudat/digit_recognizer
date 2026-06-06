@@ -111,9 +111,28 @@ else:
     # 100-class: smaller batches help with class imbalance and gradient diversity
     BATCH_SIZE = 32
 
-EPOCHS = 250
-LEARNING_RATE = 0.001  # Robust default for cold-start
 TRAINING_PERCENTAGE = 1.0  # Use 100% of available data
+
+# ---------------------------------------------------------------------- #
+#  Per-Percentage EPOCHS & LEARNING_RATE
+# ---------------------------------------------------------------------- #
+# 10cls converges at ~30 epochs with 100% data — scale epochs down
+# proportionally for smaller fractions so training doesn't waste compute.
+# LR is also scaled down gently to avoid overfitting on limited samples.
+if NB_CLASSES <= 10:
+    EPOCHS = int(30 * TRAINING_PERCENTAGE + 30)  # 100%→60, 50%→45, 25%→37, 10%→33
+else:
+    EPOCHS = int(80 * TRAINING_PERCENTAGE + 30)  # 100%→110, 50%→70
+
+if TRAINING_PERCENTAGE <= 0.1:
+    LEARNING_RATE = 5e-4
+elif TRAINING_PERCENTAGE <= 0.25:
+    LEARNING_RATE = 6e-4
+elif TRAINING_PERCENTAGE <= 0.5:
+    LEARNING_RATE = 8e-4
+else:
+    LEARNING_RATE = 1e-3
+
 VALIDATION_SPLIT = 0.2     # 20% of training for validation
 
 # ==============================================================================
@@ -186,7 +205,15 @@ else:
     LR_SCHEDULER_THRESHOLDS = [0.75, 0.82]
 
 LR_SCHEDULER_SEQUENCE = ["reduce_on_plateau", "reduce_on_plateau", "cosine"]
-LR_SCHEDULER_RESET_FRACTION = 0.5
+
+# Per-phase LR reset fractions — gentler reset for later phases near
+# the accuracy ceiling.  Each element corresponds to the transition
+# from phase N to phase N+1 (len = len(LR_SCHEDULER_THRESHOLDS)).
+# A scalar value is also accepted for backward compatibility.
+if NB_CLASSES <= 10:
+    LR_SCHEDULER_RESET_FRACTION = [0.5, 0.4, 0.3]
+else:
+    LR_SCHEDULER_RESET_FRACTION = 0.5
 
 # Dynamic Optimizer (disabled by default — resets momentum state)
 USE_DYNAMIC_OPTIMIZER = False

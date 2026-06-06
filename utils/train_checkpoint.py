@@ -5,9 +5,13 @@ Keras callback that handles:
 * Saving the *best* TFLite model (using ``TFLiteModelManager.save_best_model``)
   whenever the validation accuracy improves.
 * Periodically storing a trainable ``.keras`` checkpoint (default every 10 epochs).
+* Saving / loading full training state (optimizer weights, controller states)
+  for perfect resume support.
 """
 
+import json
 import os
+import numpy as np
 import tensorflow as tf
 from utils.train_qat_helper import create_qat_representative_dataset
 
@@ -70,3 +74,114 @@ class TFLiteCheckpoint(tf.keras.callbacks.Callback):
             except Exception as exc:
                 if self.tflite_manager.debug:
                     print(f"⚠️  Checkpoint save failed: {exc}")
+
+
+# --------------------------------------------------------------------------- #
+#  Training State Save / Load  (used by StateCheckpointCallback)
+# --------------------------------------------------------------------------- #
+
+def save_training_state(filepath, controller_callbacks, model):
+    """
+    Save optimizer weights + controller callback states to disk.
+
+    Parameters
+    ----------
+    filepath : str
+        Path for the JSON file (e.g. ``training_state.json``).  The optimizer
+        weights are saved alongside as ``<stem>_optimizer.npy``.
+    controller_callbacks : list of tf.keras.callbacks.Callback
+        Callbacks that implement ``get_state()`` (e.g. IntelligentFocalLossController,
+        DynamicSchedulerController).
+    model : tf.keras.Model
+        The compiled model whose optimizer weights will be saved.
+    """
+    state = {'version': 1}
+
+    # 1. Optimizer weights
+    if model is not None and model.optimizer is not None:
+        try:
+            opt_weights = model.optimizer.get_weights()
+            opt_path = filepath.replace('.json', '_optimizer.npy')
+            np.save(opt_path, opt_weights, allow_pickle=True)
+            state['optimizer_weights_file'] = os.path.basename(opt_path)
+        except Exception as exc:
+            print(f"⚠️  Could not save optimizer weights: {exc}")
+            state['optimizer_weights_file'] = None
+    else:
+        state['optimizer_weights_file'] = None
+
+    # 2. Controller callback states
+    states = {}
+    for cb in controller_callbacks:
+        if hasattr(cb, 'get_state') and callable(cb.get_state):
+            name = type(cb).__name__
+            try:
+                states[name] = cb.get_state()
+            except Exception as exc:
+                print(f"⚠️  Could not save state for {name}: {exc}")
+    state['controller_states'] = states
+
+    with open(filepath, 'w') as f:
+        json.dump(state, f, indent=2)
+
+
+def load_training_state(filepath, controller_callbacks, model):
+    """
+    Restore optimizer weights + controller callback states from disk.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to the JSON file previously written by :func:`save_training_state`.
+    controller_callbacks : list of tf.keras.callbacks.Callback
+        Callbacks that implement ``set_state()``.
+    model : tf.keras.Model
+        The compiled model whose optimizer weights will be restored.
+
+    Returns
+    -------
+    bool
+        True if state was successfully restored (or no file existed), False on error.
+    """
+    if not os.path.exists(filepath):
+        print("   ⚠️  No training_state.json found — starting fresh")
+        return True  # Not an error
+
+    try:
+        with open(filepath) as f:
+            state = json.load(f)
+    except Exception as exc:
+        print(f"   ❌ Failed to read training_state.json: {exc}")
+        return False
+
+    # 1. Optimizer weights
+    opt_file = state.get('optimizer_weights_file')
+    if opt_file and model is not None and model.optimizer is not None:
+        opt_dir = os.path.dirname(filepath)
+        opt_path = os.path.join(opt_dir, opt_file)
+        if os.path.exists(opt_path):
+            try:
+                weights = np.load(opt_path, allow_pickle=True)
+                model.optimizer.set_weights(weights)
+                print(f"   ✅ Optimizer weights restored from {opt_file}")
+            except Exception as exc:
+                print(f"   ⚠️  Could not restore optimizer weights: {exc}")
+        else:
+            print(f"   ⚠️  Optimizer weights file not found: {opt_file}")
+
+    # 2. Controller states
+    controller_states = state.get('controller_states', {})
+    if not controller_states:
+        print("   ⚠️  No controller states found in checkpoint")
+        return True
+
+    for cb in controller_callbacks:
+        name = type(cb).__name__
+        if name in controller_states and hasattr(cb, 'set_state') and callable(cb.set_state):
+            try:
+                cb.set_state(controller_states[name])
+                print(f"   ✅ {name} state restored")
+            except Exception as exc:
+                print(f"   ⚠️  Could not restore {name}: {exc}")
+
+    return True

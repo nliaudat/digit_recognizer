@@ -399,6 +399,8 @@ class LRWarmupCallback(tf.keras.callbacks.Callback):
 class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
     """
     Dynamically adjust Focal Loss based on validation accuracy thresholds.
+    
+    Supports :meth:`get_state` / :meth:`set_state` for checkpoint/resume.
     """
     def __init__(self, 
                  accuracy_thresholds=[0.80, 0.90, 0.95],
@@ -479,6 +481,69 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
         # Log current state
         if self.debug and epoch % 5 == 0:
             print(f"   Epoch {epoch}: val_acc={val_acc:.3f}, current_gamma={self.current_gamma:.3f}")
+
+    # ------------------------------------------------------------------
+    #  State serialisation (used by StateCheckpointCallback for resume)
+    # ------------------------------------------------------------------
+    def get_state(self):
+        """Return a JSON-serialisable dict of all mutable state."""
+        import numpy as np
+
+        # Convert per-threshold epoch tracking to string keys (JSON-safe)
+        threshold_epochs = {}
+        for k, v in self.threshold_reached_epoch.items():
+            threshold_epochs[str(k)] = int(v)
+
+        # alpha may be a TF Variable → convert to list
+        if hasattr(self, 'alpha') and isinstance(self.alpha, (list, tuple, np.ndarray)):
+            alpha_val = [float(a) for a in self.alpha]
+        elif hasattr(self, 'alpha') and hasattr(self.alpha, 'numpy'):
+            alpha_val = self.alpha.numpy().tolist()
+        else:
+            alpha_val = float(self.alpha)
+
+        return {
+            'current_gamma': float(self.current_gamma),
+            'alpha': alpha_val,
+            'last_switch_epoch': int(self.last_switch_epoch),
+            'threshold_reached_epoch': threshold_epochs,
+            '_ramp_start_epoch': int(self._ramp_start_epoch),
+            '_ramp_start_gamma': float(self._ramp_start_gamma),
+            '_ramp_target_gamma': float(self._ramp_target_gamma),
+        }
+
+    def set_state(self, state):
+        """Restore mutable state from a dict previously returned by :meth:`get_state`."""
+        import numpy as np
+
+        self.current_gamma = float(state['current_gamma'])
+        self.last_switch_epoch = int(state['last_switch_epoch'])
+        self.threshold_reached_epoch = {float(k): int(v) for k, v in state['threshold_reached_epoch'].items()}
+        self._ramp_start_epoch = int(state['_ramp_start_epoch'])
+        self._ramp_start_gamma = float(state['_ramp_start_gamma'])
+        self._ramp_target_gamma = float(state['_ramp_target_gamma'])
+
+        # Restore alpha (may be a list for per-class or a scalar list of length 1)
+        alpha_val = state['alpha']
+        if isinstance(alpha_val, list):
+            if len(alpha_val) == 1:
+                # Scalar alpha stored as list — wrap into per-class vector if needed
+                if hasattr(self, 'alpha') and hasattr(self.alpha, 'assign'):
+                    nb_classes = getattr(params, 'NB_CLASSES', 10)
+                    self.alpha.assign(np.ones(nb_classes, dtype=np.float32) * alpha_val[0])
+                else:
+                    self.alpha = alpha_val[0]
+            else:
+                if hasattr(self, 'alpha') and hasattr(self.alpha, 'assign'):
+                    self.alpha.assign(np.array(alpha_val, dtype=np.float32))
+                else:
+                    self.alpha = alpha_val
+        elif isinstance(alpha_val, (int, float)):
+            if hasattr(self, 'alpha') and hasattr(self.alpha, 'assign'):
+                nb_classes = getattr(params, 'NB_CLASSES', 10)
+                self.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(alpha_val))
+            else:
+                self.alpha = float(alpha_val)
     
     def _tick_gamma_ramp(self, epoch):
         """Called every epoch to advance an in-progress γ ramp."""
@@ -915,10 +980,15 @@ class DynamicSchedulerController(tf.keras.callbacks.Callback):
         peak_lr = params.LEARNING_RATE
 
         # Optionally restore LR before building the new schedule
+        # handle per-phase reset fractions (list) vs. scalar (backward compat)
         if self.reset_fraction is not None and phase > 0:
-            new_lr = float(peak_lr * self.reset_fraction)
+            if isinstance(self.reset_fraction, (list, tuple)):
+                frac = self.reset_fraction[min(phase - 1, len(self.reset_fraction) - 1)]
+            else:
+                frac = self.reset_fraction
+            new_lr = float(peak_lr * frac)
             self._set_lr(new_lr)
-            print(f"   ↺ LR reset to {new_lr:.2e} ({self.reset_fraction} × {peak_lr:.2e})")
+            print(f"   ↺ LR reset to {new_lr:.2e} ({frac} × {peak_lr:.2e})")
         else:
             new_lr = self._get_lr()
 
@@ -1007,6 +1077,26 @@ class DynamicSchedulerController(tf.keras.callbacks.Callback):
             print(f"   ✅ Optimizer switched to {opt_type}")
         except Exception as e:
             print(f"   ❌ Optimizer switch failed: {e}")
+
+    # ------------------------------------------------------------------
+    #  State serialisation (used by StateCheckpointCallback for resume)
+    # ------------------------------------------------------------------
+    def get_state(self):
+        """Return a JSON-serialisable dict of all mutable state."""
+        state = {
+            'current_phase': int(self.current_phase),
+            'epoch_offset': int(self.lr_proxy.epoch_offset),
+            'phase_switched_epoch': {str(k): int(v) for k, v in self.phase_switched_epoch.items()},
+        }
+        return state
+
+    def set_state(self, state):
+        """Restore mutable state from a dict previously returned by :meth:`get_state`."""
+        self.current_phase = int(state.get('current_phase', 0))
+        self.lr_proxy.epoch_offset = int(state.get('epoch_offset', 0))
+        self.phase_switched_epoch = {float(k): int(v) for k, v in state.get('phase_switched_epoch', {}).items()}
+        print(f"   🔀 Restored phase {self.current_phase} scheduler state "
+              f"(epoch_offset={self.lr_proxy.epoch_offset})")
 
     # ------------------------------------------------------------------
     def _get_lr(self):
