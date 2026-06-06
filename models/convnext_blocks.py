@@ -25,6 +25,11 @@ class DropPath(tf.keras.layers.Layer):
     to maintain expected output magnitude.  This is the correct implementation
     of stochastic depth as used in ConvNeXt, ResNeXt, etc.
     
+    Uses ``tf.keras.backend.in_train_phase`` to handle symbolic ``training``
+    tensors — a Python ``if not training:`` check is unreliable because TF
+    symbolic tensors are always truthy and would cause DropPath to be applied
+    during inference, severely degrading accuracy.
+    
     Reference:
         "Deep Networks with Stochastic Depth" (Huang et al., 2016)
         https://arxiv.org/abs/1603.09382
@@ -34,14 +39,23 @@ class DropPath(tf.keras.layers.Layer):
         self.drop_prob = drop_prob
 
     def call(self, inputs, training=None):
-        if self.drop_prob == 0.0 or not training:
+        if self.drop_prob == 0.0:
             return inputs
-        keep_prob = 1.0 - self.drop_prob
-        # Shape: (batch_size, 1, 1, 1) — broadcast across H, W, C
-        shape = (tf.shape(inputs)[0],) + (1,) * (len(inputs.shape) - 1)
-        random_tensor = keep_prob + tf.random.uniform(shape, dtype=inputs.dtype)
-        binary_tensor = tf.floor(random_tensor)
-        return (inputs / keep_prob) * binary_tensor
+
+        def dropped():
+            keep_prob = 1.0 - self.drop_prob
+            # Use tf.stack for graph-mode safety — mixing Python scalars
+            # with tf.shape in a tuple can be fragile inside tf.function.
+            shape = tf.stack(
+                [tf.shape(inputs)[0]] + [1] * (len(inputs.shape) - 1)
+            )
+            random_tensor = keep_prob + tf.random.uniform(
+                shape, dtype=inputs.dtype
+            )
+            binary_tensor = tf.floor(random_tensor)
+            return (inputs / tf.cast(keep_prob, inputs.dtype)) * binary_tensor
+
+        return tf.keras.backend.in_train_phase(dropped, inputs, training=training)
 
     def get_config(self):
         config = super().get_config()
