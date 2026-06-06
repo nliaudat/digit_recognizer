@@ -128,9 +128,10 @@ from . import training
 from . import tuner
 from . import augmentation
 from . import distillation
+from . import losses
 
 # Re-export all public names from submodules
-_submodules = [models, data_sources, quantization, training, tuner, augmentation, distillation]
+_submodules = [models, data_sources, quantization, training, tuner, augmentation, distillation, losses]
 for _mod in _submodules:
     for _name in dir(_mod):
         if not _name.startswith('_'):

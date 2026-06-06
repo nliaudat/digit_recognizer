@@ -689,8 +689,8 @@ def two_phase_qat_training(x_train, y_train, x_val, y_val):
         validation_data=(x_val, y_val),
         verbose=1,
         callbacks=[
-            tf.keras.callbacks.EarlyStopping(
-                patience=10, 
+        tf.keras.callbacks.EarlyStopping(
+                patience=getattr(params, 'EARLY_STOPPING_PATIENCE', 10),
                 restore_best_weights=True,
                 monitor='val_accuracy'
             )
@@ -734,7 +734,8 @@ def two_phase_qat_training(x_train, y_train, x_val, y_val):
         print(f"✅ Transferred weights for {weights_transferred} layers")
         
         # Compile with slightly higher learning rate for fine-tuning
-        qat_optimizer = tf.keras.optimizers.Adam(learning_rate=params.LEARNING_RATE * 2.0)
+        qat_lr_mult = getattr(params, 'QAT_LR_MULTIPLIER', 2.0)
+        qat_optimizer = tf.keras.optimizers.Adam(learning_rate=params.LEARNING_RATE * qat_lr_mult)
         loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=params.USE_LOGITS) if params.MODEL_ARCHITECTURE != "original_haverland" else tf.keras.losses.CategoricalCrossentropy()
         qat_model.compile(optimizer=qat_optimizer, loss=loss, metrics=['accuracy'])
         

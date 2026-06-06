@@ -133,15 +133,16 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
                   f"{getattr(params, 'LR_SCHEDULER_SEQUENCE', [])})")
 
     elif scheduler_type == 'onecycle':
-        # OneCycleLR: warm up to peak LR over 30% of total epochs,
-        # then cosine-decay to near-zero over the remaining 70%.
-        warmup_frac = 0.3
+        # OneCycleLR: warm up to peak LR over ONECYCLE_WARMUP_FRACTION of epochs,
+        # then cosine-decay to near-zero over the remaining epochs.
+        warmup_frac = getattr(params, 'ONECYCLE_WARMUP_FRACTION', 0.3)
         warmup_steps = max(1, int(total_epochs * warmup_frac))
         decay_steps  = max(1, total_epochs - warmup_steps)
         min_lr = getattr(params, 'COSINE_DECAY_ALPHA', 1e-6)
         peak_lr = params.LEARNING_RATE
+        initial_lr_frac = getattr(params, 'ONECYCLE_INITIAL_LR_FRACTION', 0.1)
         warmup_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
-            initial_learning_rate=peak_lr * 0.1, decay_steps=warmup_steps,
+            initial_learning_rate=peak_lr * initial_lr_frac, decay_steps=warmup_steps,
             end_learning_rate=peak_lr, power=1.0,
         )
         cosine_schedule = tf.keras.optimizers.schedules.CosineDecay(

@@ -493,9 +493,9 @@ def create_augmentation_safety_monitor(validation_data, debug=False):
     return AugmentationSafetyMonitor(
         validation_data=validation_data,
         debug=debug,
-        safety_threshold=100.0,  # Higher threshold for QAT (UINT8 data has higher loss)
-        learning_threshold=0.10,  # Lower threshold for QAT
-        patience_epochs=10        # More patience for QAT
+        safety_threshold=getattr(params, 'AUG_SAFETY_THRESHOLD', 100.0),
+        learning_threshold=getattr(params, 'AUG_LEARNING_THRESHOLD', 0.10),
+        patience_epochs=getattr(params, 'AUG_PATIENCE_EPOCHS', 10),
     )
 
 def setup_augmentation_for_training(x_train, y_train_final,

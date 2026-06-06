@@ -356,9 +356,9 @@ class LRWarmupCallback(tf.keras.callbacks.Callback):
 
     def __init__(self, initial_lr=None, warmup_epochs=None, initial_scale=None):
         super().__init__()
-        self.initial_lr = initial_lr or getattr(params, 'LEARNING_RATE', 1e-3)
-        self.warmup_epochs = warmup_epochs or getattr(params, 'LR_WARMUP_EPOCHS', 5)
-        self.initial_scale = initial_scale or getattr(params, 'LR_WARMUP_INITIAL_SCALE', 0.1)
+        self.initial_lr = initial_lr or getattr(params, 'LEARNING_RATE')
+        self.warmup_epochs = warmup_epochs or getattr(params, 'LR_WARMUP_EPOCHS')
+        self.initial_scale = initial_scale or getattr(params, 'LR_WARMUP_INITIAL_SCALE')
         self._active = True  # disabled after warm-up completes
 
     def on_train_begin(self, logs=None):
@@ -405,7 +405,7 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
     def __init__(self, 
                  accuracy_thresholds=[0.80, 0.90, 0.95],
                  gamma_values=[1.0, 1.5, 2.0],
-                 alpha=0.45,
+                 alpha=None,
                  min_epochs_between_switches=5,
                  patience=3,
                  debug=False,
@@ -415,7 +415,8 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
         super().__init__() # Don't pass kwargs to Keras Callback init
         self.thresholds = accuracy_thresholds
         self.gammas = gamma_values
-        self.alpha = alpha
+        # alpha default: read from config (0.27–0.45 depending on NB_CLASSES)
+        self.alpha = alpha if alpha is not None else getattr(params, 'FOCAL_ALPHA', 0.45)
         self.min_epochs = min_epochs_between_switches
         self.patience = patience
         self.debug = debug
@@ -695,9 +696,12 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
         
         # val_ds is already handled by super().__init__ which pops it from kwargs
         
-        # Dynamic Alpha Scaling - Base alpha on class count
+        # Dynamic Alpha Scaling - Base alpha on class count (all values from config/losses.py)
         nb_classes = params.NB_CLASSES
-        self.base_alpha = min(0.45, max(0.25, 0.45 * (10/nb_classes)**0.3))
+        _max = getattr(params, 'DYNAMIC_ALPHA_BASE_MAX', 0.45)
+        _min = getattr(params, 'DYNAMIC_ALPHA_BASE_MIN', 0.25)
+        _exp = getattr(params, 'DYNAMIC_ALPHA_BASE_EXP', 0.3)
+        self.base_alpha = min(_max, max(_min, _max * (10.0 / nb_classes) ** _exp))
         self.alpha = self.base_alpha # Ensure base class uses our dynamic alpha
         self.current_alpha = self.base_alpha
         
@@ -796,20 +800,73 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
             if not switched and hasattr(self, 'val_ds') and self.val_ds is not None:
                 per_class_acc = self._get_per_class_accuracy()
                 if per_class_acc is not None:
-                    # Inverse accuracy weights
-                    class_weights = 1.0 / (per_class_acc + 0.001)
-                    class_weights = class_weights / class_weights.mean()
-                    
-                    # Adjust alpha per class
-                    self.current_alpha = self.base_alpha * class_weights
-                    self.alpha = self.current_alpha # Sync for base class switch method
-                    
-                    if self.debug:
-                        print(f"⚖️  Adjusting Alpha per-class (max weight: {np.max(class_weights):.2f}x)")
-                    
-                    # Force recompilation with same gamma but new alpha
-                    self._switch_to_focal_loss(epoch, self.current_gamma, "alpha adjustment")
-                    self.plateau_count = 0
+                    # Read per-class alpha parameters from config/losses.py
+                    epsilon = getattr(params, 'DYNAMIC_ALPHA_EPSILON')
+                    cap_min = getattr(params, 'DYNAMIC_ALPHA_CAP_MIN')
+                    cap_max = getattr(params, 'DYNAMIC_ALPHA_CAP_MAX')
+                    trigger = getattr(params, 'DYNAMIC_ALPHA_TRIGGER')
+
+                    # Check periodic trigger for wide-distribution tasks (100cls)
+                    periodic = (trigger == 'periodic' and
+                                (epoch + 1) % getattr(params, 'DYNAMIC_WEIGHTS_EPOCHS') == 0)
+                    should_adjust = (self.plateau_count >= self.plateau_patience) or periodic
+
+                    if should_adjust and epoch - self.last_switch_epoch >= self.min_epochs:
+                        # Inverse accuracy weights with configured epsilon
+                        class_weights = 1.0 / (per_class_acc + epsilon)
+                        class_weights = class_weights / class_weights.mean()
+                        class_weights = np.clip(class_weights, cap_min, cap_max)
+
+                        # Adjust alpha per class
+                        self.current_alpha = self.base_alpha * class_weights
+                        self.alpha = self.current_alpha  # Sync for base class switch method
+
+                        if self.debug:
+                            by_what = "periodic" if periodic else "plateau"
+                            print(f"⚖️  [{by_what}] Adjusting Alpha per-class "
+                                  f"(ε={epsilon}, cap=[{cap_min}, {cap_max}], "
+                                  f"max weight: {np.max(class_weights):.2f}x)")
+
+                        # Force recompilation with same gamma but new alpha
+                        self._switch_to_focal_loss(epoch, self.current_gamma,
+                                                   f"{by_what} alpha adjustment")
+                        self.plateau_count = 0
+
+    # ------------------------------------------------------------------
+    #  State serialisation overrides (add plateau/alpha state)
+    # ------------------------------------------------------------------
+    def get_state(self):
+        """Extend parent state with IntelligentFocalLossController fields."""
+        state = super().get_state()
+        import numpy as np
+        # Convert current_alpha to JSON-safe form
+        if hasattr(self, 'current_alpha'):
+            if isinstance(self.current_alpha, (list, np.ndarray)):
+                alpha_val = [float(a) for a in self.current_alpha]
+            else:
+                alpha_val = float(self.current_alpha)
+        else:
+            alpha_val = float(self.base_alpha)
+        state.update({
+            'best_acc': float(self.best_acc),
+            'plateau_count': int(self.plateau_count),
+            'current_alpha': alpha_val,
+        })
+        return state
+
+    def set_state(self, state):
+        """Restore parent state + IntelligentFocalLossController fields."""
+        super().set_state(state)
+        import numpy as np
+        self.best_acc = float(state.get('best_acc', 0))
+        self.plateau_count = int(state.get('plateau_count', 0))
+        alpha_val = state.get('current_alpha', float(self.base_alpha))
+        if isinstance(alpha_val, list):
+            self.current_alpha = np.array(alpha_val, dtype=np.float32)
+        else:
+            self.current_alpha = float(alpha_val)
+        # Sync self.alpha (the parent's attribute used by _switch_to_focal_loss)
+        self.alpha = self.current_alpha
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Per-Class Accuracy Callback

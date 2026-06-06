@@ -22,84 +22,6 @@ else:
 del _config_mod
 
 # ==============================================================================
-# LOSS CONFIGURATION
-# ==============================================================================
-
-# ==============================================================================
-# --------------------------------------------------------------------------- #
-#  Training & Loss Configuration
-# --------------------------------------------------------------------------- #
-# Options:
-#   - "IntelligentFocalLossController":
-#       Adaptive Focal Loss that starts as CrossEntropy (γ=0) and gradually
-#       increases γ at val_acc thresholds (FOCAL_ACCURACY_THRESHOLDS).
-#       Also detects plateaus and adjusts α per-class when stuck.
-#       ✅ Best for most tasks — zero config needed, self-tuning.
-#       ⚠️  Adds ~15% training overhead (plateau detection / α recompute).
-#
-#   - "focal_loss":
-#       Standard Focal Loss with fixed γ=FOCAL_GAMMA and α=FOCAL_ALPHA.
-#       Down-weights well-classified examples so the model focuses on hard ones.
-#       ✅ Good when class imbalance is the main problem.
-#       ⚠️  Requires manual tuning of γ (start 1.0–2.0) and α (0.25–0.45).
-#       ⚠️  High γ (>3) can destabilize early training on 100-class tasks.
-#
-#   - "sparse_categorical_crossentropy":
-#       Standard CrossEntropy for integer labels (all models except haverland).
-#       Fast, stable, no hyperparameters.
-#       ✅ Best baseline; use to diagnose if focal/controller is hurting accuracy.
-#       ❌ No focus on hard examples; hits a ceiling earlier on complex tasks.
-#
-#   - "categorical_crossentropy":
-#       Standard CrossEntropy for one-hot labels.
-#       ✅ Required for original_haverland model (uses softmax + one-hot).
-#       ❌ Do not use with other models (label format mismatch).
-
-LOSS_TYPE = "IntelligentFocalLossController"
-
-if NB_CLASSES <= 10:
-    LABEL_SMOOTHING = 0.01 #0.01  # reduced: at >0.999 ceiling, 0.02 caps final accuracy
-else:  # 100 classes
-    LABEL_SMOOTHING = 0.05  # stronger smoothing — 100cls softmax easily collapses
-
-# Focal Loss Parameters
-FOCAL_GAMMA = 2.0      # Robust standard focus parameter
-
-if NB_CLASSES <= 10:
-    FOCAL_ALPHA = 0.45  # Your current value for 10 classes
-elif NB_CLASSES <= 20:
-    FOCAL_ALPHA = 0.38  # Sweet spot for 15-20 classes
-elif NB_CLASSES <= 50:
-    FOCAL_ALPHA = 0.32  # For medium-sized datasets
-else:  # 100 classes
-    FOCAL_ALPHA = 0.27  # Optimal for 100 classes
-
-# Intelligent Focal Loss Controller Settings
-if NB_CLASSES <= 10:
-    # --- 10-class: delay focal until model is genuinely stuck near ceiling ---
-    FOCAL_ACCURACY_THRESHOLDS = [0.992, 0.995, 0.997] #[0.985, 0.991, 0.995]
-else:  # 100 classes or more
-    # --- 100-class: wait longer; model needs to learn easy examples first ---
-    FOCAL_ACCURACY_THRESHOLDS = [0.88, 0.93, 0.97]
-
-if NB_CLASSES <= 10:
-    # Gentler γ ramp: at 0.985+ the model only needs a soft push, not heavy focus
-    FOCAL_GAMMA_VALUES = [0.5, 1.0, 2.0] #[1.0, 2.0, 3.5]
-else:
-    FOCAL_GAMMA_VALUES = [1.2, 2.0, 3.5]   # gentler ramp for 100cls
-
-# Smooth γ transition: ramp linearly over N epochs instead of an instant step.
-FOCAL_GAMMA_RAMP_EPOCHS = 3
-
-# Plateau detection for IntelligentFocalLossController
-FOCAL_PLATEAU_PATIENCE = 8
-FOCAL_PLATEAU_MIN_DELTA = 0.0005
-
-# Dynamic Class Weighting
-USE_DYNAMIC_WEIGHTS = True
-DYNAMIC_WEIGHTS_EPOCHS = 5
-
-# ==============================================================================
 # BASIC TRAINING HYPERPARAMETERS
 # ==============================================================================
 
@@ -134,6 +56,17 @@ else:
     LEARNING_RATE = 1e-3
 
 VALIDATION_SPLIT = 0.2     # 20% of training for validation
+
+# ---------------------------------------------------------------------- #
+#  OneCycle / Cosine LR helpers (used by DynamicSchedulerController and model_factory)
+# ---------------------------------------------------------------------- #
+ONECYCLE_WARMUP_FRACTION = 0.3       # % of total epochs used for linear warm-up
+ONECYCLE_INITIAL_LR_FRACTION = 0.1   # initial LR = peak LR × this fraction
+
+# ---------------------------------------------------------------------- #
+#  QAT LR multiplier (used by train_qat_helper)
+# ---------------------------------------------------------------------- #
+QAT_LR_MULTIPLIER = 2.0              # QAT fine-tuning LR = LEARNING_RATE × this
 
 # ==============================================================================
 # LEARNING RATE SCHEDULING

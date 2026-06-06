@@ -502,16 +502,17 @@ def create_learning_rate_scheduler():
         # OneCycleLR: warm up to peak LR over 30% of total epochs,
         # then cosine-decay to near-zero over the remaining 70%.
         total_epochs = params.EPOCHS
-        warmup_frac = 0.3
+        warmup_frac = getattr(params, 'ONECYCLE_WARMUP_FRACTION', 0.3)
         warmup_steps = max(1, int(total_epochs * warmup_frac))
         decay_steps  = max(1, total_epochs - warmup_steps)
 
         min_lr = getattr(params, 'COSINE_DECAY_ALPHA', 1e-6)
         peak_lr = params.LEARNING_RATE
+        init_lr_frac = getattr(params, 'ONECYCLE_INITIAL_LR_FRACTION', 0.1)
 
         # Phase 1: linear warm-up
         warmup_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
-            initial_learning_rate=peak_lr * 0.1,
+            initial_learning_rate=peak_lr * init_lr_frac,
             decay_steps=warmup_steps,
             end_learning_rate=peak_lr,
             power=1.0,
