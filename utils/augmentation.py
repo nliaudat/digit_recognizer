@@ -104,11 +104,16 @@ def _maybe_augment_one_image(image, label, pipeline, probability):
         pipeline: tf.keras.Sequential augmentation pipeline
         probability: float in [0.0, 1.0], chance of applying augmentation
     """
-    return tf.cond(
+    aug_img, aug_label = tf.cond(
         tf.random.uniform(()) < probability,
         lambda: (tf.cast(pipeline(image, training=True), tf.float32), label),
         lambda: (tf.cast(image, tf.float32), label),
     )
+    # Restore static shape — tf.cond with Keras layers inside can lose
+    # static dimension information (e.g. returning (None, None, 3) instead
+    # of (32, 20, 3)), which can break downstream model compilation.
+    aug_img.set_shape(image.shape)
+    return aug_img, aug_label
 
 def create_augmentation_pipeline():
     """
