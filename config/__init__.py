@@ -92,27 +92,28 @@ def update_derived_parameters():
     like INPUT_SHAPE, USE_GRAYSCALE, and OUTPUT_DIR stay in sync across both 
     the ``config`` and ``parameters`` modules (``parameters`` re-imports via
     ``from config import ...`` which creates a snapshot at import time).
+    
+    Uses direct module-level name access — ``NB_CLASSES``, ``INPUT_CHANNELS``,
+    etc. are resolved dynamically at runtime, so external mutations like
+    ``config.NB_CLASSES = 100`` are correctly reflected.
     """
-    import sys
-    this_mod = sys.modules[__name__]
     global INPUT_SHAPE, USE_GRAYSCALE, OUTPUT_DIR
-    nc = this_mod.NB_CLASSES
-    ic = this_mod.INPUT_CHANNELS
-    INPUT_SHAPE = (this_mod.INPUT_HEIGHT, this_mod.INPUT_WIDTH, ic)
-    USE_GRAYSCALE = (ic == 1)
+    INPUT_SHAPE = (INPUT_HEIGHT, INPUT_WIDTH, INPUT_CHANNELS)
+    USE_GRAYSCALE = (INPUT_CHANNELS == 1)
     _color_suffix = "GRAY" if USE_GRAYSCALE else "RGB"
-    OUTPUT_DIR = f"exported_models/{nc}cls_{_color_suffix}"
+    OUTPUT_DIR = f"exported_models/{NB_CLASSES}cls_{_color_suffix}"
 
     # Also sync the ``parameters`` module's bindings, which are snapshots
     # from ``from config import ...`` at import time and would otherwise
     # remain stale after this function runs.
+    import sys
     _parameters_mod = sys.modules.get('parameters')
     if _parameters_mod is not None:
         _parameters_mod.INPUT_SHAPE    = INPUT_SHAPE
         _parameters_mod.USE_GRAYSCALE  = USE_GRAYSCALE
         _parameters_mod.OUTPUT_DIR     = OUTPUT_DIR
-        _parameters_mod.INPUT_CHANNELS = ic
-        _parameters_mod.NB_CLASSES     = nc
+        _parameters_mod.INPUT_CHANNELS = INPUT_CHANNELS
+        _parameters_mod.NB_CLASSES     = NB_CLASSES
 
 # --------------------------------------------------------------------------- #
 #  Import from submodules

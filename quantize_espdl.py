@@ -375,7 +375,7 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
         ("_float16",            {"output_float16_quantized_tflite": True}),
         ("_dynamic_range_quant", {"output_dynamic_range_quantized_tflite": True}),
         ("_integer_quant",      {"output_integer_quantized_tflite": True}),
-        ("_integer_quant_with_int16_act", {"output_integer_quantized_tflite": True, "quant_spec_conv_activation": "int16"}),
+        ("_integer_quant_with_int16_act", {"output_integer_quantized_tflite": True, "quant_spec": {"quant_spec_conv_activation": "int16"}}),
     ]
     
     print(f"📦 Generating TFLite variant suite for {args.target} in {output_dir}...")
@@ -448,7 +448,7 @@ def organize_output_folder(output_dir):
         # Float variants are bulkier and slower for the ESP32 without an FPU.
         if f.endswith(".tflite"):
             # Always keep integer-quantized variants at root
-            is_integer_quant = "_integer_quant" in f and not f.endswith("_float")
+            is_integer_quant = "_integer_quant" in f
             # Always keep the _full_integer_quant* too (may exist from other flows)
             is_full_integer_quant = "_full_integer_quant" in f
             if not (is_integer_quant or is_full_integer_quant):

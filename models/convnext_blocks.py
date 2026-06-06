@@ -15,6 +15,40 @@ import tensorflow as tf
 from typing import Optional
 
 
+class DropPath(tf.keras.layers.Layer):
+    """
+    DropPath (Stochastic Depth) — drops entire residual paths per sample.
+    
+    Unlike element-wise Dropout which zeros individual activations, DropPath
+    randomly drops the *entire* residual branch for a given sample with
+    probability ``drop_prob``, and scales survivors by ``1 / (1 - drop_prob)``
+    to maintain expected output magnitude.  This is the correct implementation
+    of stochastic depth as used in ConvNeXt, ResNeXt, etc.
+    
+    Reference:
+        "Deep Networks with Stochastic Depth" (Huang et al., 2016)
+        https://arxiv.org/abs/1603.09382
+    """
+    def __init__(self, drop_prob: float, **kwargs):
+        super().__init__(**kwargs)
+        self.drop_prob = drop_prob
+
+    def call(self, inputs, training=None):
+        if self.drop_prob == 0.0 or not training:
+            return inputs
+        keep_prob = 1.0 - self.drop_prob
+        # Shape: (batch_size, 1, 1, 1) — broadcast across H, W, C
+        shape = (tf.shape(inputs)[0],) + (1,) * (len(inputs.shape) - 1)
+        random_tensor = keep_prob + tf.random.uniform(shape, dtype=inputs.dtype)
+        binary_tensor = tf.floor(random_tensor)
+        return (inputs / keep_prob) * binary_tensor
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"drop_prob": self.drop_prob})
+        return config
+
+
 def layer_norm_2d(x: tf.Tensor, epsilon: float = 1e-6, name: str = "ln") -> tf.Tensor:
     """LayerNorm for 2D feature maps (applied per-channel)."""
     return tf.keras.layers.LayerNormalization(
@@ -76,10 +110,10 @@ def convnext_block(
             name=f"{name}_layer_scale",
         )(x)
 
-    # 6. DropPath (stochastic depth)
+    # 6. DropPath (stochastic depth) — drop entire residual path per sample
     if drop_path_rate > 0:
-        x = tf.keras.layers.Dropout(
-            rate=drop_path_rate, name=f"{name}_droppath"
+        x = DropPath(
+            drop_prob=drop_path_rate, name=f"{name}_droppath"
         )(x)
 
     # 7. Residual
