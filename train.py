@@ -1016,7 +1016,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                     import pandas as _pd
                     df = _pd.read_csv(csv_path)
                     if 'epoch' in df.columns and len(df) > 0:
-                        params.INITIAL_EPOCH = int(df['epoch'].max())
+                        params.INITIAL_EPOCH = int(df['epoch'].max()) + 1
                         print(f"   ✅ Auto-detected INITIAL_EPOCH = {params.INITIAL_EPOCH} from {csv_path}")
                 except Exception as e:
                     print(f"   ⚠️  Could not read CSV for INITIAL_EPOCH: {e}")

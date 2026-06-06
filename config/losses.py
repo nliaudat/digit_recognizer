@@ -111,11 +111,9 @@ else:
 #   base_alpha = min(DYNAMIC_ALPHA_BASE_MAX,
 #                    max(DYNAMIC_ALPHA_BASE_MIN,
 #                        DYNAMIC_ALPHA_BASE_MAX * (10/nb_classes)**DYNAMIC_ALPHA_BASE_EXP))
-if NB_CLASSES <= 10:
-    DYNAMIC_ALPHA_BASE_MAX   = 0.45
-    DYNAMIC_ALPHA_BASE_MIN   = 0.25
-    DYNAMIC_ALPHA_BASE_EXP   = 0.3
-else:
-    DYNAMIC_ALPHA_BASE_MAX   = 0.45
-    DYNAMIC_ALPHA_BASE_MIN   = 0.25
-    DYNAMIC_ALPHA_BASE_EXP   = 0.3
+# NOTE: Both 10-class and 100-class use the same base formula parameters.
+# The branching is intentionally kept for future per-class tuning but both
+# branches are currently identical.
+DYNAMIC_ALPHA_BASE_MAX   = 0.45
+DYNAMIC_ALPHA_BASE_MIN   = 0.25
+DYNAMIC_ALPHA_BASE_EXP   = 0.3
