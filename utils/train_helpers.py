@@ -854,8 +854,8 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
                         self.current_alpha = self.base_alpha * class_weights
                         self.alpha = self.current_alpha  # Sync for base class switch method
 
+                        by_what = "periodic" if periodic else "plateau"
                         if self.debug:
-                            by_what = "periodic" if periodic else "plateau"
                             print(f"⚖️  [{by_what}] Adjusting Alpha per-class "
                                   f"(ε={epsilon}, cap=[{cap_min}, {cap_max}], "
                                   f"max weight: {np.max(class_weights):.2f}x)")
