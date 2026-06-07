@@ -28,16 +28,17 @@ class StateCheckpointCallback(tf.keras.callbacks.Callback):
     every ``checkpoint_freq`` epochs.
     """
 
-    def __init__(self, training_dir, checkpoint_freq=5):
+    def __init__(self, training_dir, callbacks, checkpoint_freq=5):
         super().__init__()
         self.training_dir = training_dir
+        self.callbacks = callbacks
         self.checkpoint_freq = checkpoint_freq
 
     def on_epoch_end(self, epoch, logs=None):
         if (epoch + 1) % self.checkpoint_freq != 0:
             return
         # Collect controller callbacks that have get_state()
-        controllers = [cb for cb in self.model.callbacks if hasattr(cb, 'get_state')]
+        controllers = [cb for cb in self.callbacks if hasattr(cb, 'get_state')]
         if not controllers:
             return
         state_path = os.path.join(self.training_dir, "training_state.json")
@@ -92,16 +93,6 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         TFLiteCheckpoint(tflite_manager, representative_data, x_train_raw, save_frequency=params.CHECKPOINT_FREQUENCY)
     )
 
-    # Training state checkpoint — saves optimizer weights + controller states
-    # every CHECKPOINT_FREQUENCY epochs for perfect resume support.
-    callbacks.append(
-        StateCheckpointCallback(
-            training_dir=output_dir,
-            checkpoint_freq=params.CHECKPOINT_FREQUENCY,
-        )
-    )
-    if debug:
-        print("💾 StateCheckpointCallback added (optimizer + controllers)")
     
     # Learning rate scheduler — respects LR_SCHEDULER_TYPE from parameters.py
     scheduler_type = getattr(params, 'LR_SCHEDULER_TYPE', 'reduce_on_plateau')
@@ -289,6 +280,19 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         )
         if debug:
             print("📊 PerClassAccuracyCallback callback added")
+
+    # Training state checkpoint — saves optimizer weights + controller states
+    # every CHECKPOINT_FREQUENCY epochs for perfect resume support.
+    # Must come AFTER all controller callbacks so they're in the list.
+    callbacks.append(
+        StateCheckpointCallback(
+            training_dir=output_dir,
+            callbacks=callbacks,
+            checkpoint_freq=params.CHECKPOINT_FREQUENCY,
+        )
+    )
+    if debug:
+        print("💾 StateCheckpointCallback added (optimizer + controllers)")
 
     # TensorBoard Logger
     tb_log_dir = os.path.join(output_dir, 'tensorboard_logs')
