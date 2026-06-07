@@ -100,7 +100,7 @@ def save_training_state(filepath, controller_callbacks, model):
     # 1. Optimizer weights
     if model is not None and model.optimizer is not None:
         try:
-            opt_weights = model.optimizer.get_weights()
+            opt_weights = [v.numpy() for v in model.optimizer.variables]
             opt_path = filepath.replace('.json', '_optimizer.npy')
             np.save(opt_path, opt_weights, allow_pickle=True)
             state['optimizer_weights_file'] = os.path.basename(opt_path)
@@ -161,8 +161,9 @@ def load_training_state(filepath, controller_callbacks, model):
         opt_path = os.path.join(opt_dir, opt_file)
         if os.path.exists(opt_path):
             try:
-                weights = np.load(opt_path, allow_pickle=True)
-                model.optimizer.set_weights(weights)
+                saved_weights = np.load(opt_path, allow_pickle=True)
+                for var, w in zip(model.optimizer.variables, saved_weights):
+                    var.assign(w)
                 print(f"   ✅ Optimizer weights restored from {opt_file}")
             except Exception as exc:
                 print(f"   ⚠️  Could not restore optimizer weights: {exc}")
