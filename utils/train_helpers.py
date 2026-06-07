@@ -555,7 +555,12 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                 if isinstance(self.alpha, (list, np.ndarray)):
                     loss_obj.alpha.assign(np.array(self.alpha, dtype=np.float32))
                 elif isinstance(self.alpha, tf.Variable) or tf.is_tensor(self.alpha):
-                    loss_obj.alpha.assign(self.alpha)
+                    if self.alpha.shape == loss_obj.alpha.shape:
+                        loss_obj.alpha.assign(self.alpha)
+                    else:
+                        nb_classes = getattr(params, 'NB_CLASSES', 10)
+                        scalar_val = tf.reshape(self.alpha, [])
+                        loss_obj.alpha.assign(tf.ones(nb_classes, dtype=tf.float32) * tf.cast(scalar_val, tf.float32))
                 else:
                     nb_classes = getattr(params, 'NB_CLASSES', 10)
                     loss_obj.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
@@ -639,7 +644,12 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                 if isinstance(self.alpha, (list, tuple, np.ndarray)):
                     target_loss.alpha.assign(np.array(self.alpha, dtype=np.float32))
                 elif isinstance(self.alpha, tf.Variable) or tf.is_tensor(self.alpha):
-                    target_loss.alpha.assign(self.alpha)
+                    if self.alpha.shape == target_loss.alpha.shape:
+                        target_loss.alpha.assign(self.alpha)
+                    else:
+                        nb_classes = params.NB_CLASSES
+                        scalar_val = tf.reshape(self.alpha, [])
+                        target_loss.alpha.assign(tf.ones(nb_classes, dtype=tf.float32) * tf.cast(scalar_val, tf.float32))
                 else:
                     nb_classes = params.NB_CLASSES
                     target_loss.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
@@ -653,7 +663,12 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                 if isinstance(self.alpha, (list, tuple, np.ndarray)):
                     target_loss.alpha.assign(np.array(self.alpha, dtype=np.float32))
                 elif isinstance(self.alpha, tf.Variable) or tf.is_tensor(self.alpha):
-                    target_loss.alpha.assign(self.alpha)
+                    if self.alpha.shape == target_loss.alpha.shape:
+                        target_loss.alpha.assign(self.alpha)
+                    else:
+                        nb_classes = params.NB_CLASSES
+                        scalar_val = tf.reshape(self.alpha, [])
+                        target_loss.alpha.assign(tf.ones(nb_classes, dtype=tf.float32) * tf.cast(scalar_val, tf.float32))
                 else:
                     nb_classes = params.NB_CLASSES
                     target_loss.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
@@ -839,8 +854,8 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
                         self.current_alpha = self.base_alpha * class_weights
                         self.alpha = self.current_alpha  # Sync for base class switch method
 
+                        by_what = "periodic" if periodic else "plateau"
                         if self.debug:
-                            by_what = "periodic" if periodic else "plateau"
                             print(f"⚖️  [{by_what}] Adjusting Alpha per-class "
                                   f"(ε={epsilon}, cap=[{cap_min}, {cap_max}], "
                                   f"max weight: {np.max(class_weights):.2f}x)")

@@ -37,10 +37,12 @@ class StateCheckpointCallback(tf.keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         if (epoch + 1) % self.checkpoint_freq != 0:
             return
-        # Collect controller callbacks that have get_state()
-        controllers = [cb for cb in self.callbacks if hasattr(cb, 'get_state')]
-        if not controllers:
+        # Defensive guard: self.callbacks should be a list, but protect against None
+        if not self.callbacks:
             return
+        # Collect controller callbacks that have get_state() — may be empty,
+        # but we still call save_training_state so optimizer weights are saved.
+        controllers = [cb for cb in self.callbacks if hasattr(cb, 'get_state')]
         state_path = os.path.join(self.training_dir, "training_state.json")
         save_training_state(state_path, controllers, self.model)
 
