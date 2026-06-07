@@ -112,7 +112,7 @@ def update_derived_parameters():
 
 def get_hyperparameter_summary():
     """Return a comprehensive summary of all hyperparameter settings."""
-    _live_arch = models.get_model_filename()
+    _live_arch = get_model_filename()
     summary = {
         'model': {
             'architecture': _live_arch,

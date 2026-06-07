@@ -41,10 +41,7 @@ TRAINING_PERCENTAGE = 1.0  # Use 100% of available data
 # 10cls converges at ~30 epochs with 100% data — scale epochs down
 # proportionally for smaller fractions so training doesn't waste compute.
 # LR is also scaled down gently to avoid overfitting on limited samples.
-if NB_CLASSES <= 10:
-    EPOCHS = int(30 * TRAINING_PERCENTAGE + 30)  # 100%→60, 50%→45, 25%→37, 10%→33
-else:
-    EPOCHS = int(80 * TRAINING_PERCENTAGE + 30)  # 100%→110, 50%→70
+EPOCHS = 250  # Upper ceiling — early stopping decides actual duration
 
 if TRAINING_PERCENTAGE <= 0.1:
     LEARNING_RATE = 5e-4

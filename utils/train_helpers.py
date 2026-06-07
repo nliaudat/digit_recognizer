@@ -554,6 +554,8 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                 loss_obj.gamma.assign(float(self.current_gamma))
                 if isinstance(self.alpha, (list, np.ndarray)):
                     loss_obj.alpha.assign(np.array(self.alpha, dtype=np.float32))
+                elif isinstance(self.alpha, tf.Variable) or tf.is_tensor(self.alpha):
+                    loss_obj.alpha.assign(self.alpha)
                 else:
                     nb_classes = getattr(params, 'NB_CLASSES', 10)
                     loss_obj.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
@@ -636,6 +638,8 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                 # We still need to update alpha immediately
                 if isinstance(self.alpha, (list, tuple, np.ndarray)):
                     target_loss.alpha.assign(np.array(self.alpha, dtype=np.float32))
+                elif isinstance(self.alpha, tf.Variable) or tf.is_tensor(self.alpha):
+                    target_loss.alpha.assign(self.alpha)
                 else:
                     nb_classes = params.NB_CLASSES
                     target_loss.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
@@ -648,6 +652,8 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                 # Update alpha (handle both scalar and per-class vector)
                 if isinstance(self.alpha, (list, tuple, np.ndarray)):
                     target_loss.alpha.assign(np.array(self.alpha, dtype=np.float32))
+                elif isinstance(self.alpha, tf.Variable) or tf.is_tensor(self.alpha):
+                    target_loss.alpha.assign(self.alpha)
                 else:
                     nb_classes = params.NB_CLASSES
                     target_loss.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
