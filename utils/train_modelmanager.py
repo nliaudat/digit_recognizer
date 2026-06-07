@@ -9,7 +9,7 @@ import numpy as np
 import tensorflow as tf
 
 # ── Project imports ─────────────────────────────────────────────────────
-import parameters as params
+import config as params
 from utils import (
     get_calibration_data, get_data_splits, suppress_all_output
 )

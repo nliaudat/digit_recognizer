@@ -2,7 +2,7 @@
 import tensorflow as tf
 import numpy as np
 import os
-import parameters as params
+import config as params
 
 def create_tf_dataset_from_arrays(x_data, y_data, training=True, batch_size=None):
     """Create tf.data.Dataset from PREPROCESSED arrays (NO additional preprocessing)"""

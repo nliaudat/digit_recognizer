@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
-import parameters as params
+import config as params
 
 try:
     import tensorflow_model_optimization as tfmot

@@ -2,7 +2,7 @@
 import tensorflow as tf
 from tensorflow.keras import backend as K
 import numpy as np
-import parameters as params
+import config as params
 
 def sparse_focal_loss(gamma=2.0, alpha=0.25, from_logits=params.USE_LOGITS):
     """

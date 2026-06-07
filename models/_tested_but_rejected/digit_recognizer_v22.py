@@ -22,7 +22,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import tensorflow as tf
 import numpy as np
-import parameters as params
+import config as params
 
 try:
     import tensorflow_model_optimization as tfmot

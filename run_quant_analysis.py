@@ -24,7 +24,7 @@ if str(repo_root) not in os.sys.path:
 # ----------------------------------------------------------------------
 from train import get_data_splits, create_model, compile_model
 from utils.quantization_analysis import analyze_quantization_impact, QuantizationAnalyzer
-import parameters as params
+import config as params
 from config.validation import validate_full_config
 
 

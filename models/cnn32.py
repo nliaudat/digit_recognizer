@@ -26,7 +26,7 @@ Estimated: ~200–300K parameters → reference only, not intended for ESP32.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def CNN_s2(input_shape=None, nb_classes=params.NB_CLASSES, activation_top='softmax'):
     """

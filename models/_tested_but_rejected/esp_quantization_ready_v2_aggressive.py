@@ -23,7 +23,7 @@ Estimated: ~800K+ parameters → not intended for ESP32 RAM constraints.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def create_esp_quantization_ready_v2_aggressive():
     """

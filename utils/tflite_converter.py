@@ -27,7 +27,7 @@ from typing import Callable, Optional
 import numpy as np
 import tensorflow as tf
 
-import parameters as params
+import config as params
 from utils import suppress_all_output
 
 logger = logging.getLogger(__name__)

@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf 
 
-import parameters as params
+import config as params
 
 
 class TrainingMonitor:

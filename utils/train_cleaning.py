@@ -4,7 +4,7 @@ import shutil
 import argparse
 from datetime import datetime, timedelta
 
-import parameters as params
+import config as params
 
 def cleanup_training_directory(output_dir, debug=False):
     """

@@ -103,17 +103,124 @@ def update_derived_parameters():
     _color_suffix = "GRAY" if USE_GRAYSCALE else "RGB"
     OUTPUT_DIR = f"exported_models/{NB_CLASSES}cls_{_color_suffix}"
 
-    # Also sync the ``parameters`` module's bindings, which are snapshots
-    # from ``from config import ...`` at import time and would otherwise
-    # remain stale after this function runs.
-    import sys
-    _parameters_mod = sys.modules.get('parameters')
-    if _parameters_mod is not None:
-        _parameters_mod.INPUT_SHAPE    = INPUT_SHAPE
-        _parameters_mod.USE_GRAYSCALE  = USE_GRAYSCALE
-        _parameters_mod.OUTPUT_DIR     = OUTPUT_DIR
-        _parameters_mod.INPUT_CHANNELS = INPUT_CHANNELS
-        _parameters_mod.NB_CLASSES     = NB_CLASSES
+# --------------------------------------------------------------------------- #
+#  Backward-compatible utility functions (moved from parameters.py)
+# --------------------------------------------------------------------------- #
+# These are kept here so that ``from config import get_hyperparameter_summary``
+# works and so that ``parameters.py`` (which re-exports everything from config)
+# continues to provide them for legacy code.
+
+def get_hyperparameter_summary():
+    """Return a comprehensive summary of all hyperparameter settings."""
+    _live_arch = models.get_model_filename()
+    summary = {
+        'model': {
+            'architecture': _live_arch,
+            'input_shape': INPUT_SHAPE,
+            'num_classes': NB_CLASSES,
+        },
+        'optimizer': {
+            'type': OPTIMIZER_TYPE,
+            'learning_rate': LEARNING_RATE,
+        },
+        'loss': {
+            'type': LOSS_TYPE,
+            'label_smoothing': LABEL_SMOOTHING,
+            'focal_gamma': FOCAL_GAMMA,
+            'focal_alpha': FOCAL_ALPHA,
+        },
+        'training': {
+            'batch_size': BATCH_SIZE,
+            'epochs': EPOCHS,
+            'training_percentage': TRAINING_PERCENTAGE,
+            'validation_split': VALIDATION_SPLIT,
+            'use_lr_scheduler': USE_LEARNING_RATE_SCHEDULER,
+            'lr_scheduler_type': LR_SCHEDULER_TYPE,
+            'use_dynamic_scheduler': USE_DYNAMIC_SCHEDULER,
+            'use_dynamic_optimizer': USE_DYNAMIC_OPTIMIZER,
+            'use_dynamic_weights': USE_DYNAMIC_WEIGHTS,
+            'use_lr_warmup': USE_LR_WARMUP,
+            'weight_initializer': WEIGHT_INITIALIZER,
+            'use_gradient_clipping': USE_GRADIENT_CLIPPING,
+            'use_early_stopping': USE_EARLY_STOPPING,
+            'use_tensorboard': USE_TENSORBOARD,
+            'save_checkpoints': SAVE_CHECKPOINTS,
+            'restore_best_weights': RESTORE_BEST_WEIGHTS,
+        },
+        'regularization': {
+            'use_batch_norm': USE_BATCH_NORM,
+            'l1_regularization': L1_REGULARIZATION,
+            'l2_regularization': L2_REGULARIZATION,
+            'dropout_rate': DEFAULT_DROPOUT_RATE,
+        },
+        'augmentation': {
+            'use_data_augmentation': USE_DATA_AUGMENTATION,
+            'use_mixup': USE_MIXUP,
+            'use_cutmix': USE_CUTMIX,
+            'use_random_erasing': USE_RANDOM_ERASING,
+        },
+        'quantization': {
+            'quantization_mode': QUANTIZATION_MODE,
+            'quantize_model': QUANTIZE_MODEL,
+            'use_qat': USE_QAT,
+            'use_tqt_pipeline': USE_TQT_PIPELINE,
+            'esp_dl_quantize': ESP_DL_QUANTIZE,
+        },
+        'advanced': {
+            'use_mixed_precision': USE_MIXED_PRECISION,
+            'use_gradient_accumulation': USE_GRADIENT_ACCUMULATION,
+            'use_stochastic_weight_averaging': USE_STOCHASTIC_WEIGHT_AVERAGING,
+            'use_cyclical_lr': USE_CYCLICAL_LEARNING_RATE,
+            'use_lr_finder': USE_LEARNING_RATE_FINDER,
+            'use_model_ensemble': USE_MODEL_ENSEMBLE,
+        },
+        'hardware': {
+            'use_gpu': USE_GPU,
+            'output_dir': OUTPUT_DIR,
+            'grayscale': USE_GRAYSCALE,
+            'input_channels': INPUT_CHANNELS,
+            'input_width': INPUT_WIDTH,
+            'input_height': INPUT_HEIGHT,
+        },
+    }
+    return summary
+
+
+def print_hyperparameter_summary():
+    """Print a formatted summary of all hyperparameter settings."""
+    summary = get_hyperparameter_summary()
+    print("\n" + "=" * 60)
+    print("HYPERPARAMETER CONFIGURATION SUMMARY")
+    print("=" * 60)
+    for category, settings in summary.items():
+        print(f"\n{category.upper()}:")
+        for key, value in settings.items():
+            if isinstance(value, dict):
+                print(f"  {key}:")
+                for k, v in value.items():
+                    print(f"    {k}: {v}")
+            else:
+                print(f"  {key}: {value}")
+    print("=" * 60 + "\n")
+
+
+def get_hyperparameter_summary_text():
+    """Return hyperparameter summary as formatted text for file export."""
+    summary = get_hyperparameter_summary()
+    lines = []
+    lines.append("HYPERPARAMETER CONFIGURATION SUMMARY")
+    lines.append("=" * 50)
+    for category, settings in summary.items():
+        lines.append(f"\n{category.upper()}:")
+        for key, value in settings.items():
+            if isinstance(value, dict):
+                lines.append(f"  {key}:")
+                for k, v in value.items():
+                    lines.append(f"    {k}: {v}")
+            else:
+                lines.append(f"  {key}: {value}")
+    return "\n".join(lines)
+
 
 # --------------------------------------------------------------------------- #
 #  Import from submodules

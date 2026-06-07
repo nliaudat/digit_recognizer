@@ -29,7 +29,7 @@ Estimated: ~80–120K parameters depending on variant.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def create_digit_recognizer_v3():
     """

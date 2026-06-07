@@ -15,7 +15,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-import parameters as params
+import config as params
 from utils.cache import load_disk_cache, save_disk_cache, dataset_cache_path
 from utils.multi_source_loader import clear_cache
 from utils.preprocess import preprocess_for_inference

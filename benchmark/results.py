@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-import parameters as params
+import config as params
 from .predictor import TFLiteDigitPredictor, get_model_metadata
 from .data import load_test_dataset_with_labels
 

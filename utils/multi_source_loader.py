@@ -7,7 +7,7 @@ import tensorflow as tf
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.model_selection import train_test_split
 
-import parameters as params
+import config as params
 from utils.cache import (
     get_cached_in_memory, set_cached_in_memory, clear_cache,
     load_disk_cache, save_disk_cache, dataset_cache_path,

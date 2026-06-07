@@ -10,7 +10,7 @@ import tensorflow as tf
 from tensorflow.keras import backend as K
 from tqdm import tqdm
 
-import parameters as params
+import config as params
 from utils.losses import (
     DynamicFocalLoss, DynamicSparseFocalLoss, focal_loss, sparse_focal_loss
 )
@@ -356,9 +356,9 @@ class LRWarmupCallback(tf.keras.callbacks.Callback):
 
     def __init__(self, initial_lr=None, warmup_epochs=None, initial_scale=None):
         super().__init__()
-        self.initial_lr = initial_lr or getattr(params, 'LEARNING_RATE')
-        self.warmup_epochs = warmup_epochs or getattr(params, 'LR_WARMUP_EPOCHS')
-        self.initial_scale = initial_scale or getattr(params, 'LR_WARMUP_INITIAL_SCALE')
+        self.initial_lr = initial_lr or getattr(params, 'LEARNING_RATE', 1e-3)
+        self.warmup_epochs = warmup_epochs or getattr(params, 'LR_WARMUP_EPOCHS', 5)
+        self.initial_scale = initial_scale or getattr(params, 'LR_WARMUP_INITIAL_SCALE', 0.1)
         self._active = True  # disabled after warm-up completes
 
     def on_train_begin(self, logs=None):
@@ -545,6 +545,18 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                 self.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(alpha_val))
             else:
                 self.alpha = float(alpha_val)
+
+        # Sync restored state to the model's loss object if model is attached.
+        # (cb.model is set by load_training_state() before calling set_state().)
+        if hasattr(self, 'model') and self.model is not None and self.model.loss is not None:
+            loss_obj = self.model.loss
+            if isinstance(loss_obj, (DynamicSparseFocalLoss, DynamicFocalLoss)):
+                loss_obj.gamma.assign(float(self.current_gamma))
+                if isinstance(self.alpha, (list, np.ndarray)):
+                    loss_obj.alpha.assign(np.array(self.alpha, dtype=np.float32))
+                else:
+                    nb_classes = getattr(params, 'NB_CLASSES', 10)
+                    loss_obj.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
     
     def _tick_gamma_ramp(self, epoch):
         """Called every epoch to advance an in-progress γ ramp."""
@@ -801,14 +813,14 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
                 per_class_acc = self._get_per_class_accuracy()
                 if per_class_acc is not None:
                     # Read per-class alpha parameters from config/losses.py
-                    epsilon = getattr(params, 'DYNAMIC_ALPHA_EPSILON')
-                    cap_min = getattr(params, 'DYNAMIC_ALPHA_CAP_MIN')
-                    cap_max = getattr(params, 'DYNAMIC_ALPHA_CAP_MAX')
-                    trigger = getattr(params, 'DYNAMIC_ALPHA_TRIGGER')
+                    epsilon = getattr(params, 'DYNAMIC_ALPHA_EPSILON', 0.01)
+                    cap_min = getattr(params, 'DYNAMIC_ALPHA_CAP_MIN', 0.5)
+                    cap_max = getattr(params, 'DYNAMIC_ALPHA_CAP_MAX', 2.0)
+                    trigger = getattr(params, 'DYNAMIC_ALPHA_TRIGGER', 'plateau')
 
                     # Check periodic trigger for wide-distribution tasks (100cls)
                     periodic = (trigger == 'periodic' and
-                                (epoch + 1) % getattr(params, 'DYNAMIC_WEIGHTS_EPOCHS') == 0)
+                                (epoch + 1) % getattr(params, 'DYNAMIC_WEIGHTS_EPOCHS', 5) == 0)
                     should_adjust = (self.plateau_count >= self.plateau_patience) or periodic
 
                     if should_adjust and epoch - self.last_switch_epoch >= self.min_epochs:
@@ -999,15 +1011,27 @@ class DynamicSchedulerController(tf.keras.callbacks.Callback):
 
     # ------------------------------------------------------------------
     def on_train_begin(self, logs=None):
-        print("\n🔀 DynamicSchedulerController initialized")
+        # If we are resuming from a checkpoint, redirect the initial phase-0
+        # activation to the restored phase so that the scheduler picks up at
+        # the correct phase instead of always resetting to phase 0.
+        restart_phase = getattr(self, '_restored_phase', 0)
+        if restart_phase > 0:
+            phase = restart_phase
+            epoch = getattr(params, 'INITIAL_EPOCH', 0)
+            self._restored_phase = 0
+            print(f"\n🔀 DynamicSchedulerController resuming from phase {phase}")
+        else:
+            phase = 0
+            epoch = 0
+            print("\n🔀 DynamicSchedulerController initialized")
         print(f"   Thresholds      : {self.thresholds}")
         print(f"   Scheduler phases: {self.scheduler_sequence}")
         if self.reset_fraction is not None:
             print(f"   LR reset        : {self.reset_fraction} × LEARNING_RATE on switch")
         if self.use_dynamic_optimizer:
             print(f"   Optimizer phases: {self.optimizer_sequence}")
-        # Activate phase-0 schedule immediately
-        self._activate_phase(0, epoch=0)
+        # Activate the appropriate phase schedule immediately
+        self._activate_phase(phase, epoch=epoch)
 
     # ------------------------------------------------------------------
     def on_epoch_end(self, epoch, logs=None):
@@ -1152,6 +1176,8 @@ class DynamicSchedulerController(tf.keras.callbacks.Callback):
         self.current_phase = int(state.get('current_phase', 0))
         self.lr_proxy.epoch_offset = int(state.get('epoch_offset', 0))
         self.phase_switched_epoch = {float(k): int(v) for k, v in state.get('phase_switched_epoch', {}).items()}
+        # Store restored phase so on_train_begin doesn't reset to phase 0
+        self._restored_phase = self.current_phase
         print(f"   🔀 Restored phase {self.current_phase} scheduler state "
               f"(epoch_offset={self.lr_proxy.epoch_offset})")
 

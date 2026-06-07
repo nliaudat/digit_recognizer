@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
-import parameters as params
+import config as params
 from utils.preprocess import preprocess_for_inference
 
 # Optional/complex dependencies
@@ -476,4 +476,4 @@ def analyze_quantization_impact(keras_model, tflite_model_path: str,
                               debug: bool = False) -> Dict:
     """Convenience function for quick quantization analysis"""
     analyzer = QuantizationAnalyzer(debug=debug)
-    return analyzer.analyze_quantization_impact(keras_model, tflite_model_path, x_test, y_test)
+    return analyzer.analyze_quantization_impact(keras_model, tflite_model_path, x_test, y_test)

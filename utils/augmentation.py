@@ -1,7 +1,7 @@
 # utils/augmentation.py
 import tensorflow as tf
 import numpy as np
-import parameters as params
+import config as params
 from utils.data_pipeline import create_tf_dataset_from_arrays
 
 

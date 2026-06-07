@@ -42,7 +42,7 @@ ESP32 C++ transition rule (same as v25):
 
 import tensorflow as tf
 import numpy as np
-import parameters as params
+import config as params
 
 try:
     import tensorflow_model_optimization as tfmot

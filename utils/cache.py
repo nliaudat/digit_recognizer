@@ -67,7 +67,7 @@ def dataset_cache_key(source_configs: list, nb_classes: int,
 
 def _get_cache_dir() -> str:
     """Return the dataset cache directory, creating it if needed."""
-    from parameters import DATASET_CACHE_DIR  # late import to avoid circular deps
+    from config import DATASET_CACHE_DIR  # late import to avoid circular deps
     os.makedirs(DATASET_CACHE_DIR, exist_ok=True)
     return DATASET_CACHE_DIR
 

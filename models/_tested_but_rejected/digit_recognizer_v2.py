@@ -22,7 +22,7 @@ Estimated: ~50K parameters → ~50 KB after INT8 quantization.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def create_digit_recognizer_v2():
     """

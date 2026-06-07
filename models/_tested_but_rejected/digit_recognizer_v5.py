@@ -31,7 +31,7 @@ Estimated: ~55–130K parameters depending on class count and variant.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def create_digit_recognizer_v5():
     """

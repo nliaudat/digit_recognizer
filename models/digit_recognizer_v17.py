@@ -21,7 +21,7 @@ Fully QAT-compatible.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 try:
     import tensorflow_model_optimization as tfmot

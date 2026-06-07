@@ -15,7 +15,7 @@ import traceback
 
 logger = logging.getLogger(__name__)
 
-import parameters as params
+import config as params
 
 
 def get_analysis_samples(x_data, y_data):

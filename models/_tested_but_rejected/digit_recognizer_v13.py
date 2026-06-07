@@ -26,7 +26,7 @@ Estimated: ~30K parameters → ~30 KB after INT8 quantization.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 try:
     import tensorflow_model_optimization as tfmot

@@ -179,6 +179,9 @@ def load_training_state(filepath, controller_callbacks, model):
         name = type(cb).__name__
         if name in controller_states and hasattr(cb, 'set_state') and callable(cb.set_state):
             try:
+                # Attach model before restoring state so set_state() can sync
+                # restored gamma/alpha values back to model.loss if needed.
+                cb.model = model
                 cb.set_state(controller_states[name])
                 print(f"   ✅ {name} state restored")
             except Exception as exc:

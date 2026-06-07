@@ -23,7 +23,7 @@ Estimated: ~30–100K parameters depending on filter config.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def create_simple_cnn_v2():
     """TFLite-optimized CNN with better quantization support"""

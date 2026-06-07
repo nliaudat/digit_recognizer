@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
-import parameters as params
+import config as params
 
 # Shared ConvNeXt building blocks (extracted to avoid duplication with V34)
 from .convnext_blocks import convnext_block, convnext_downsample, layer_norm_2d

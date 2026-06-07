@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import tensorflow as tf
 
-import parameters as params
+import config as params
 
 def _preprocess_common(images, target_size, grayscale):
     """Resize / colour convert images, preserving the original dtype."""

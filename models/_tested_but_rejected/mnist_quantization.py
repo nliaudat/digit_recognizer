@@ -32,7 +32,7 @@ Estimated: ~60K parameters → ~60 KB after INT8 quantization.
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 def create_mnist_quantization():
     """

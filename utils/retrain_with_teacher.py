@@ -26,7 +26,7 @@ _ROOT = str(Path(__file__).resolve().parent.parent)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-import parameters as params
+import config as params
 from utils.distiller import (
     DistillationProgressCallback, Distiller, MixedInputDistiller,
     ProgressiveDistiller

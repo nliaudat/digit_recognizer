@@ -17,7 +17,7 @@ except ImportError:
     tfa = None
 
 # Project imports
-import parameters as params
+import config as params
 
 try:
     from utils.losses import (

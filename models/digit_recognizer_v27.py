@@ -32,7 +32,7 @@ Output: single softmax [NB_CLASSES]. Apply transition rule in C++ or Python:
 """
 
 import tensorflow as tf
-import parameters as params
+import config as params
 
 try:
     import tensorflow_model_optimization as tfmot
