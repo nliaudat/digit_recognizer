@@ -50,7 +50,7 @@ elif TRAINING_PERCENTAGE <= 0.25:
 elif TRAINING_PERCENTAGE <= 0.5:
     LEARNING_RATE = 8e-4
 else:
-    LEARNING_RATE = 1e-4
+    LEARNING_RATE = 1e-3
 
 VALIDATION_SPLIT = 0.2     # 20% of training for validation
 
