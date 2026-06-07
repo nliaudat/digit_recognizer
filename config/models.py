@@ -94,10 +94,10 @@ USE_LOGITS = False # else softmax
 
 
 
-OPTIMIZER_TYPE = "nadam"            # Best default for cold-start 100cls
+OPTIMIZER_TYPE = "adamw"            # Tuner winner (#13): best 10cls val_acc @ 98.83%
 # OPTIMIZER_TYPE = "rmsprop"        # Best default for cold-start 100cls
 # OPTIMIZER_TYPE = "sgd"            # (Optimized for v17 fine-tuning)
-# OPTIMIZER_TYPE = "adamw"          # Restore to roll back
+# OPTIMIZER_TYPE = "nadam"          # Restore to roll back
 
 # RMSprop parameters
 RMSPROP_RHO = 0.9
