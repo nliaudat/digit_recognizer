@@ -1,0 +1,5 @@
+Model,Directory,Type,Parameters,Size_KB,Accuracy,Accuracy_RealOnly,ESP32_Accuracy,Inference_Time_ms,Inferences_per_second,Tested_Images
+digit_recognizer_v23_full_integer_quant.tflite,digit_recognizer_v23_100cls_RGB_TQT_SOFTMAX_0609_2036,softmax (quant),661400,427.0,0.9745,0.9921,0.9746,0.98,1018.0,113505
+digit_recognizer_v24_full_integer_quant.tflite,digit_recognizer_v24_100cls_RGB_TQT_SOFTMAX_0609_2036,logits (quant),673700,434.2,0.9704,0.9817,0.9706,1.03,972.0,113505
+digit_recognizer_v16_full_integer_quant.tflite,digit_recognizer_v16_100cls_RGB_TQT_SOFTMAX_0610_2030,logits (quant),269500,138.6,0.9415,0.9732,0.9406,0.48,2066.0,113505
+digit_recognizer_v6_full_integer_quant.tflite,digit_recognizer_v6_100cls_RGB_TQT_SOFTMAX_0609_2036,softmax (quant),459000,160.1,0.9398,0.9766,0.9395,0.82,1223.0,113505
