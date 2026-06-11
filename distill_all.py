@@ -1,40 +1,43 @@
 #!/usr/bin/env python3
 """
-distill_all.py  —  Multi-teacher ensemble distillation command builder.
+distill_all.py  —  Multi-teacher ensemble distillation command generator.
 
 Reads the ``model_comparison.csv`` for a given ``(classes, color)``
-combination, collects *all* teacher directories that contain a valid ``.keras``
-file, and builds the corresponding ``train_distill.py --phase student``
-command string.
+combination, collects all model directories that contain a valid ``.keras``
+file, and generates one ``train_distill.py --phase student`` command per
+student variant.
 
-The generated command distills every available teacher as an ensemble into
-a lightweight student model.
+For each student model, all *other* models serve as the teacher ensemble.
+This way every model benefits from the collective knowledge of the rest.
 
 Modes
 ─────
     --script    (default) Print the command line only — copy-paste friendly.
-    --execute   Print the command and then run it immediately.
+    --execute   Print the command and then run it immediately (one at a time).
 
 Examples
 ────────
-    # Print the command (copy-paste safe)
+    # Generate commands for ALL models as students (8 → 8 commands)
     python distill_all.py --classes 10 --color rgb
 
-    # Print + run
+    # Generate + execute all (runs sequentially)
     python distill_all.py --classes 10 --color rgb --execute
 
-    # Custom student + hyper-parameters
-    python distill_all.py --cls 10 --color rgb --student v15 \\
-        --temperature 8.0 --alpha 0.7 --epochs 200
+    # Only a specific student (one command)
+    python distill_all.py --classes 10 --color rgb --student v4
 
-    # Only grayscale teachers
-    python distill_all.py --classes 100 --color gray --student v23
+    # Custom hyper-parameters for all students
+    python distill_all.py --cls 10 --color rgb --temperature 8.0 --alpha 0.7 --epochs 200
+
+    # Only grayscale
+    python distill_all.py --classes 100 --color gray --mode hard
 """
 
 import argparse
 import csv
 import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -44,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Path helpers  (mirrors distill_best.py conventions)
+#  Path helpers
 # ═══════════════════════════════════════════════════════════════════════════
 
 def csv_path(num_classes: int, color_mode: str) -> str:
@@ -72,36 +75,84 @@ def parse_csv(filepath: str) -> list[dict]:
     return records
 
 
-def collect_teacher_dirs(records: list[dict], export_base: str) -> list[str]:
+# ═══════════════════════════════════════════════════════════════════════════
+#  Student version extraction
+# ═══════════════════════════════════════════════════════════════════════════
+
+_STUDENT_RE = re.compile(
+    r"digit_recognizer_(v\d+)_"
+)
+
+
+def extract_student_version(directory: str) -> str | None:
     """
-    Return a deduplicated, ordered list of directory names (relative to
-    *export_base*) that contain at least one ``.keras`` file.
+    Extract the student version (e.g. ``v16``) from a directory name.
+
+    Pattern: ``digit_recognizer_v16_10cls_RGB_TQT_SOFTMAX_0610_2030``
+    Returns: ``v16``
     """
-    seen: set[str] = set()
-    directories: list[str] = []
+    m = _STUDENT_RE.search(directory)
+    return m.group(1) if m else None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Collect teachers
+# ═══════════════════════════════════════════════════════════════════════════
+
+class ModelEntry:
+    """One model found in the CSV with a valid .keras file."""
+
+    def __init__(self, directory: str, accuracy: float, version: str):
+        self.directory = directory
+        self.accuracy = accuracy
+        self.version = version
+
+    def __repr__(self) -> str:
+        return f"{self.version} ({self.accuracy:.2%})"
+
+
+def collect_entries(records: list[dict], export_base: str) -> list[ModelEntry]:
+    """
+    Return a deduplicated, ordered list of ``ModelEntry`` items whose
+    directories exist and contain at least one ``.keras`` file.
+    """
+    seen_dir: set[str] = set()
+    seen_ver: set[str] = set()
+    entries: list[ModelEntry] = []
 
     for rec in records:
         directory = rec.get("Directory", "").strip()
         if not directory:
             continue
-        if directory in seen:
+        if directory in seen_dir:
             continue
 
-        # Verify the directory actually exists and contains a .keras file
+        version = extract_student_version(directory)
+        if version is None:
+            logger.warning(f"  ⚠️  Could not extract version from '{directory}' — skipping")
+            continue
+
+        # Verify the directory actually contains a .keras file
         full_path = os.path.join(export_base, directory)
         keras_files = list(Path(full_path).rglob("*.keras"))
         if not keras_files:
             logger.warning(f"  ⚠️  Skipping '{directory}' — no .keras file found")
             continue
 
-        seen.add(directory)
-        directories.append(directory)
-        logger.info(
-            f"  ✓  {directory}  "
-            f"(acc={rec['Accuracy']:.2%})"
-        )
+        # Keep the entry with the highest accuracy for this version
+        if version in seen_ver:
+            # Replace with better one
+            idx = next(i for i, e in enumerate(entries) if e.version == version)
+            if rec["Accuracy"] > entries[idx].accuracy:
+                entries[idx] = ModelEntry(directory, rec["Accuracy"], version)
+            continue
 
-    return directories
+        seen_dir.add(directory)
+        seen_ver.add(version)
+        entries.append(ModelEntry(directory, rec["Accuracy"], version))
+        logger.info(f"  ✓  {version:>4}  →  {directory}  (acc={rec['Accuracy']:.2%})")
+
+    return entries
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -109,7 +160,7 @@ def collect_teacher_dirs(records: list[dict], export_base: str) -> list[str]:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def build_command(
-    teacher_dirs: list[str],
+    teachers: list[ModelEntry],
     student: str,
     classes: int,
     color: str,
@@ -130,9 +181,10 @@ def build_command(
         "--phase", "student",
     ]
 
-    # Teachers (directories relative to exported_models/{cls}cls_{COLOR}/)
+    # Teachers — all other model directories
     cmd.append("--teachers")
-    cmd.extend(teacher_dirs)
+    for t in teachers:
+        cmd.append(t.directory)
 
     # Student
     cmd.extend(["--student", student])
@@ -159,7 +211,7 @@ def build_command(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Multi-teacher ensemble distillation command builder",
+        description="Multi-teacher ensemble distillation command generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -182,8 +234,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--student",
         type=str,
-        default="v23",
-        help="Student model architecture (default: v23)",
+        default=None,
+        help="Single student model version (e.g. v4). "
+             "If omitted, generates commands for ALL available versions.",
     )
     parser.add_argument(
         "--temperature",
@@ -241,13 +294,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--script",
         action="store_true",
         default=False,
-        help="Print the command line only (default behaviour without --execute)",
+        help="Print the command(s) only (default behaviour without --execute).",
     )
     group.add_argument(
         "--execute",
         action="store_true",
         default=False,
-        help="Print the command AND run it immediately",
+        help="Print the command AND run it immediately.",
     )
 
     return parser.parse_args(argv)
@@ -271,72 +324,87 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # ── Parse CSV and collect teacher directories ─────────────────────────
+    # ── Parse CSV and collect model entries ───────────────────────────────
     logger.info(f"📄  Reading {csv_fpath}")
     records = parse_csv(csv_fpath)
 
-    logger.info(f"\n🔍  Scanning for teachers with .keras files under {export_base}")
-    teacher_dirs = collect_teacher_dirs(records, export_base)
+    logger.info(f"\n🔍  Scanning for models with .keras files under {export_base}")
+    entries = collect_entries(records, export_base)
 
-    if not teacher_dirs:
+    if not entries:
         logger.error(
-            "❌  No teachers with .keras files found.\n"
+            "❌  No models with .keras files found.\n"
             "    Make sure at least one model has been trained and exported."
         )
         sys.exit(1)
 
-    # ── Build command ─────────────────────────────────────────────────────
-    cmd = build_command(
-        teacher_dirs=teacher_dirs,
-        student=args.student,
-        classes=args.classes,
-        color=args.color,
-        temperature=args.temperature,
-        alpha=args.alpha,
-        epochs=args.epochs,
-        mode=args.mode,
-        progressive=args.progressive,
-        tqt=args.tqt,
-    )
-
-    # ── Print summary ────────────────────────────────────────────────────
-    print()
-    print("=" * 70)
-    print("📋  DISTILL ALL — Command summary")
-    print("=" * 70)
-    print(f"   Teachers ({len(teacher_dirs)}):")
-    for d in teacher_dirs:
-        print(f"     • {d}")
-    print(f"   Student:      {args.student}")
-    print(f"   Classes:      {args.classes}")
-    print(f"   Color:        {args.color.upper()}")
-    print(f"   Temperature:  {args.temperature}")
-    print(f"   Alpha:        {args.alpha}")
-    print(f"   Epochs:       {args.epochs}")
-    print(f"   Mode:         {args.mode}")
-    print(f"   Progressive:  {args.progressive}")
-    print(f"   TQT:          {args.tqt}")
-    print()
-
-    # ── Print the command ────────────────────────────────────────────────
-    # Use shlex.quote for safe copy-paste on the shell
-    import shlex
-    command_str = " ".join(shlex.quote(c) for c in cmd)
-    print("─" * 70)
-    print(f"$ {command_str}")
-    print("─" * 70)
-    print()
-
-    if args.execute:
-        logger.info("🚀  Executing command...\n")
-        result = subprocess.run(cmd, cwd=os.path.dirname(__file__) or ".")
-        if result.returncode != 0:
-            logger.error(f"❌  Command failed with exit code {result.returncode}")
-            sys.exit(result.returncode)
-        logger.info("✅  Distillation completed successfully.")
+    # ── Determine which students to process ───────────────────────────────
+    if args.student:
+        # Single student — validate it exists
+        matching = [e for e in entries if e.version == args.student]
+        if not matching:
+            logger.error(
+                f"❌  Student version '{args.student}' not found in CSV.\n"
+                f"    Available versions: {', '.join(e.version for e in entries)}"
+            )
+            sys.exit(1)
+        student_versions = [args.student]
     else:
+        # ALL versions — each takes a turn as student
+        student_versions = [e.version for e in entries]
+
+    # ── Generate commands ────────────────────────────────────────────────
+    import shlex  # for safe quoting
+
+    for sv in student_versions:
+        # All entries except the student
+        teachers = [e for e in entries if e.version != sv]
+
+        if not teachers:
+            logger.warning(f"  ⚠️  Skipping {sv} — no other models to use as teachers")
+            continue
+
+        cmd = build_command(
+            teachers=teachers,
+            student=sv,
+            classes=args.classes,
+            color=args.color,
+            temperature=args.temperature,
+            alpha=args.alpha,
+            epochs=args.epochs,
+            mode=args.mode,
+            progressive=args.progressive,
+            tqt=args.tqt,
+        )
+
+        command_str = " ".join(shlex.quote(c) for c in cmd)
+
+        # ── Print ────────────────────────────────────────────────────────
+        print()
+        print("=" * 70)
+        print(f"🎯  Distill all INTO student:  {sv}")
+        print(f"    Teachers ({len(teachers)}):")
+        for t in teachers:
+            print(f"      • {t.version:>4}  {t.directory}")
+        print("─" * 70)
+        print(f"$ {command_str}")
+        print("=" * 70)
+
+        # ── Execute ──────────────────────────────────────────────────────
+        if args.execute:
+            logger.info(f"🚀  Executing {sv} distillation...\n")
+            result = subprocess.run(cmd, cwd=os.path.dirname(__file__) or ".")
+            if result.returncode != 0:
+                logger.error(
+                    f"❌  {sv} distillation failed with exit code {result.returncode}"
+                )
+                sys.exit(result.returncode)
+            logger.info(f"✅  {sv} distillation completed successfully.\n")
+
+    if not args.execute:
+        print()
         logger.info(
-            "💡  Use --execute to run, or copy-paste the command above."
+            "💡  Use --execute to run all, or copy-paste individual commands above."
         )
 
 
