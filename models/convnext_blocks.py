@@ -60,7 +60,7 @@ class DropPath(tf.keras.layers.Layer):
         # Also explicitly restore static shape info that can be lost inside
         # the cond branches — needed to avoid compilation failures downstream.
         if training is None:
-            training = tf.keras.backend.learning_phase()
+            training = False
         output = tf.cond(
             tf.cast(training, tf.bool), dropped, lambda: inputs
         )
