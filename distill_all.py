@@ -181,10 +181,10 @@ def build_command(
         "--phase", "student",
     ]
 
-    # Teachers — all other model directories
+    # Teachers — version names (e.g. v19), the pipeline resolves them internally
     cmd.append("--teachers")
     for t in teachers:
-        cmd.append(t.directory)
+        cmd.append(t.version)
 
     # Student
     cmd.extend(["--student", student])
@@ -383,9 +383,7 @@ def main() -> None:
         print()
         print("=" * 70)
         print(f"🎯  Distill all INTO student:  {sv}")
-        print(f"    Teachers ({len(teachers)}):")
-        for t in teachers:
-            print(f"      • {t.version:>4}  {t.directory}")
+        print(f"    Teachers ({len(teachers)}): {', '.join(t.version for t in teachers)}")
         print("─" * 70)
         print(f"$ {command_str}")
         print("=" * 70)
