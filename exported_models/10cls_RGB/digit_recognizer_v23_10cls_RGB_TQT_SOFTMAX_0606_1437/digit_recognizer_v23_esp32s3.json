@@ -1,0 +1,1364 @@
+{
+    "configs": {
+        "digit_recognizer_v23_rgb_1/luminance_grayscale_conv_1/convolution": {
+            "input": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4281911493,
+                "dominator": 4281911493
+            },
+            "digit_recognizer_v23_rgb_1/luminance_grayscale_conv_1/convolution/ReadVariableOp:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1914673268,
+                "dominator": 1914673268
+            },
+            "digit_recognizer_v23_rgb_1/luminance_grayscale_conv_1/convolution:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3617760615,
+                "dominator": 3617760615
+            }
+        },
+        "digit_recognizer_v23_rgb_1/conv1_20f_1/BiasAdd": {
+            "digit_recognizer_v23_rgb_1/luminance_grayscale_conv_1/convolution:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2640513678,
+                "dominator": 3617760615
+            },
+            "digit_recognizer_v23_rgb_1/conv1_20f_1/convolution/ReadVariableOp:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2524264217,
+                "dominator": 2524264217
+            },
+            "digit_recognizer_v23_rgb_1/conv1_20f_1/Squeeze:0": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 78945656,
+                "dominator": 78945656
+            },
+            "digit_recognizer_v23_rgb_1/conv1_20f_1/BiasAdd:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3292833371,
+                "dominator": 3672060815
+            }
+        },
+        "digit_recognizer_v23_rgb_1/relu6_1_1/Relu6": {
+            "digit_recognizer_v23_rgb_1/conv1_20f_1/BiasAdd:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3801733042,
+                "dominator": 3672060815
+            },
+            "PPQ_Variable_5": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3166330797,
+                "dominator": 3166330797
+            },
+            "PPQ_Variable_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1785230268,
+                "dominator": 1785230268
+            },
+            "digit_recognizer_v23_rgb_1/relu6_1_1/Relu6:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3672060815,
+                "dominator": 3672060815
+            }
+        },
+        "digit_recognizer_v23_rgb_1/pool1_1/MaxPool2d": {
+            "digit_recognizer_v23_rgb_1/relu6_1_1/Relu6:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1407713302,
+                "dominator": 3672060815
+            },
+            "digit_recognizer_v23_rgb_1/pool1_1/MaxPool2d:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2763421313,
+                "dominator": 3672060815
+            }
+        },
+        "digit_recognizer_v23_rgb_1/conv2_36f_1/BiasAdd": {
+            "digit_recognizer_v23_rgb_1/pool1_1/MaxPool2d:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3976232768,
+                "dominator": 3672060815
+            },
+            "digit_recognizer_v23_rgb_1/conv2_36f_1/convolution/ReadVariableOp:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3635552515,
+                "dominator": 3635552515
+            },
+            "digit_recognizer_v23_rgb_1/conv2_36f_1/Squeeze:0": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 702416826,
+                "dominator": 702416826
+            },
+            "digit_recognizer_v23_rgb_1/conv2_36f_1/BiasAdd:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2479353749,
+                "dominator": 2366734057
+            }
+        },
+        "digit_recognizer_v23_rgb_1/relu6_2_1/Relu6": {
+            "digit_recognizer_v23_rgb_1/conv2_36f_1/BiasAdd:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 791766020,
+                "dominator": 2366734057
+            },
+            "PPQ_Variable_6": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3174007479,
+                "dominator": 3174007479
+            },
+            "PPQ_Variable_1": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4017468062,
+                "dominator": 4017468062
+            },
+            "digit_recognizer_v23_rgb_1/relu6_2_1/Relu6:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2366734057,
+                "dominator": 2366734057
+            }
+        },
+        "digit_recognizer_v23_rgb_1/pool2_1/MaxPool2d": {
+            "digit_recognizer_v23_rgb_1/relu6_2_1/Relu6:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2070087176,
+                "dominator": 2366734057
+            },
+            "digit_recognizer_v23_rgb_1/pool2_1/MaxPool2d:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3987713195,
+                "dominator": 2366734057
+            }
+        },
+        "digit_recognizer_v23_rgb_1/conv3_48f_1/BiasAdd": {
+            "digit_recognizer_v23_rgb_1/pool2_1/MaxPool2d:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3874882754,
+                "dominator": 2366734057
+            },
+            "digit_recognizer_v23_rgb_1/conv3_48f_1/convolution/ReadVariableOp:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2999851133,
+                "dominator": 2999851133
+            },
+            "digit_recognizer_v23_rgb_1/conv3_48f_1/Squeeze:0": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 4021586252,
+                "dominator": 4021586252
+            },
+            "digit_recognizer_v23_rgb_1/conv3_48f_1/BiasAdd:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3244634847,
+                "dominator": 160491859
+            }
+        },
+        "digit_recognizer_v23_rgb_1/relu6_3_1/Relu6": {
+            "digit_recognizer_v23_rgb_1/conv3_48f_1/BiasAdd:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 907493926,
+                "dominator": 160491859
+            },
+            "PPQ_Variable_7": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1373958225,
+                "dominator": 1373958225
+            },
+            "PPQ_Variable_2": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2873119184,
+                "dominator": 2873119184
+            },
+            "digit_recognizer_v23_rgb_1/relu6_3_1/Relu6:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 160491859,
+                "dominator": 160491859
+            }
+        },
+        "digit_recognizer_v23_rgb_1/conv4_56f_1/BiasAdd": {
+            "digit_recognizer_v23_rgb_1/relu6_3_1/Relu6:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 493285066,
+                "dominator": 160491859
+            },
+            "digit_recognizer_v23_rgb_1/conv4_56f_1/convolution/ReadVariableOp:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3418192485,
+                "dominator": 3418192485
+            },
+            "digit_recognizer_v23_rgb_1/conv4_56f_1/Squeeze:0": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 1621099412,
+                "dominator": 1621099412
+            },
+            "digit_recognizer_v23_rgb_1/conv4_56f_1/BiasAdd:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1777722375,
+                "dominator": 2509076219
+            }
+        },
+        "digit_recognizer_v23_rgb_1/relu6_4_1/Relu6": {
+            "digit_recognizer_v23_rgb_1/conv4_56f_1/BiasAdd:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3203124910,
+                "dominator": 2509076219
+            },
+            "PPQ_Variable_8": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3528682169,
+                "dominator": 3528682169
+            },
+            "PPQ_Variable_3": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4054876824,
+                "dominator": 4054876824
+            },
+            "digit_recognizer_v23_rgb_1/relu6_4_1/Relu6:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2509076219,
+                "dominator": 2509076219
+            }
+        },
+        "digit_recognizer_v23_rgb_1/global_avg_pool_1/Mean": {
+            "digit_recognizer_v23_rgb_1/relu6_4_1/Relu6:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 940172754,
+                "dominator": 2509076219
+            },
+            "digit_recognizer_v23_rgb_1/global_avg_pool_1/Mean:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2861217101,
+                "dominator": 2861217101
+            }
+        },
+        "digit_recognizer_v23_rgb_1/global_avg_pool_1/Mean_Squeeze__49": {
+            "PPQ_Variable_10": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4170576604,
+                "dominator": 2861217101
+            },
+            "const_axes__48": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "FP32",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3279631919,
+                "dominator": 3279631919
+            },
+            "digit_recognizer_v23_rgb_1/global_avg_pool_1/Mean_Squeeze__49:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 312899638,
+                "dominator": 2861217101
+            }
+        },
+        "digit_recognizer_v23_rgb_1/feature_dense_1/MatMul": {
+            "digit_recognizer_v23_rgb_1/global_avg_pool_1/Mean_Squeeze__49:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1757646369,
+                "dominator": 2861217101
+            },
+            "digit_recognizer_v23_rgb_1/feature_dense_1/Cast/ReadVariableOp:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1644148832,
+                "dominator": 1644148832
+            },
+            "digit_recognizer_v23_rgb_1/feature_dense_1/MatMul:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4030789027,
+                "dominator": 4030789027
+            }
+        },
+        "digit_recognizer_v23_rgb_1/feature_dense_1/BiasAdd": {
+            "digit_recognizer_v23_rgb_1/feature_dense_1/MatMul:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1368132058,
+                "dominator": 1368132058
+            },
+            "digit_recognizer_v23_rgb_1/feature_dense_1/BiasAdd/ReadVariableOp:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1538156853,
+                "dominator": 1538156853
+            },
+            "digit_recognizer_v23_rgb_1/feature_dense_1/BiasAdd:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2091677476,
+                "dominator": 573444904
+            }
+        },
+        "digit_recognizer_v23_rgb_1/relu6_dense_1/Relu6": {
+            "digit_recognizer_v23_rgb_1/feature_dense_1/BiasAdd:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3207776599,
+                "dominator": 573444904
+            },
+            "PPQ_Variable_9": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2618187454,
+                "dominator": 2618187454
+            },
+            "PPQ_Variable_4": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 425720457,
+                "dominator": 425720457
+            },
+            "digit_recognizer_v23_rgb_1/relu6_dense_1/Relu6:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 573444904,
+                "dominator": 573444904
+            }
+        },
+        "digit_recognizer_v23_rgb_1/output_1/MatMul": {
+            "digit_recognizer_v23_rgb_1/relu6_dense_1/Relu6:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 271254859,
+                "dominator": 573444904
+            },
+            "digit_recognizer_v23_rgb_1/output_1/Cast/ReadVariableOp:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1290697442,
+                "dominator": 1290697442
+            },
+            "digit_recognizer_v23_rgb_1/output_1/MatMul:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3802478109,
+                "dominator": 3802478109
+            }
+        },
+        "digit_recognizer_v23_rgb_1/output_1/BiasAdd": {
+            "digit_recognizer_v23_rgb_1/output_1/MatMul:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3706564716,
+                "dominator": 3706564716
+            },
+            "digit_recognizer_v23_rgb_1/output_1/BiasAdd/ReadVariableOp:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2642296191,
+                "dominator": 2642296191
+            },
+            "digit_recognizer_v23_rgb_1/output_1/BiasAdd:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1753129542,
+                "dominator": 1753129542
+            }
+        },
+        "digit_recognizer_v23_rgb_1/output_1/Softmax": {
+            "digit_recognizer_v23_rgb_1/output_1/BiasAdd:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1352093681,
+                "dominator": 1753129542
+            },
+            "output": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "FP32",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 795849456,
+                "dominator": 795849456
+            }
+        },
+        "PPQ_Operation_0": {
+            "digit_recognizer_v23_rgb_1/global_avg_pool_1/Mean:0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4170576604,
+                "dominator": 2861217101
+            },
+            "PPQ_Variable_10": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4170576604,
+                "dominator": 2861217101
+            }
+        }
+    },
+    "dispatchings": {
+        "digit_recognizer_v23_rgb_1/luminance_grayscale_conv_1/convolution": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/conv1_20f_1/BiasAdd": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/relu6_1_1/Relu6": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/pool1_1/MaxPool2d": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/conv2_36f_1/BiasAdd": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/relu6_2_1/Relu6": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/pool2_1/MaxPool2d": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/conv3_48f_1/BiasAdd": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/relu6_3_1/Relu6": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/conv4_56f_1/BiasAdd": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/relu6_4_1/Relu6": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/global_avg_pool_1/Mean": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/global_avg_pool_1/Mean_Squeeze__49": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/feature_dense_1/MatMul": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/feature_dense_1/BiasAdd": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/relu6_dense_1/Relu6": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/output_1/MatMul": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/output_1/BiasAdd": "ESPDL_S3_INT8",
+        "digit_recognizer_v23_rgb_1/output_1/Softmax": "ESPDL_S3_INT8",
+        "PPQ_Operation_0": "ESPDL_S3_INT8"
+    },
+    "values": {
+        "4281911493": {
+            "scale": 0.0078125,
+            "zero_point": 0.0
+        },
+        "1914673268": {
+            "scale": 0.0078125,
+            "zero_point": 0.0
+        },
+        "3617760615": {
+            "scale": 0.0078125,
+            "zero_point": 0.0
+        },
+        "2524264217": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "78945656": {
+            "scale": 0.0001220703125,
+            "zero_point": 0.0
+        },
+        "3166330797": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "1785230268": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "3672060815": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "3635552515": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "702416826": {
+            "scale": 0.000244140625,
+            "zero_point": 0.0
+        },
+        "3174007479": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "4017468062": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2366734057": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2999851133": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "4021586252": {
+            "scale": 0.001953125,
+            "zero_point": 0.0
+        },
+        "1373958225": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2873119184": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "160491859": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "3418192485": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "1621099412": {
+            "scale": 0.0009765625,
+            "zero_point": 0.0
+        },
+        "3528682169": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "4054876824": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2509076219": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2861217101": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "1644148832": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "4030789027": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "1368132058": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "1538156853": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "2618187454": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "425720457": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "573444904": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "1290697442": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "3802478109": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "3706564716": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2642296191": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "1753129542": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        }
+    }
+}

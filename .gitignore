@@ -35,4 +35,3 @@ convert_v31_to_tflite.py
 extract_keras_tqt.py
 repair_int8.py
 repair_tflite_qat.py
-/exported_models

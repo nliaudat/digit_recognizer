@@ -1,0 +1,45 @@
+TRAINING CONFIGURATION AND RESULTS
+==================================================
+
+📅 Training Information:
+   Timestamp: 2026-06-07 17:13:21
+   Duration: 3:41:19.534149
+
+🔧 Model Configuration:
+   Architecture: digit_recognizer_v3
+   Input shape: (32, 20, 3)
+   Number of classes: 10
+   Total parameters: 27,229
+
+🧠 Learning Mode & Parameters:
+   Loss Type: IntelligentFocalLossController
+   Optimizer: nadam
+   Label Smoothing: 0.01
+   Focal Gamma: 2.0
+   Focal Alpha: 0.45
+   Thresholds: [0.992, 0.995, 0.997]
+   Learning Rate: 0.001
+   LR Scheduler: reduce_on_plateau
+   L1/L2 Reg: 0.0/1e-05
+   Dropout: 0.5
+   Batch Norm: True
+   Dynamic Weights: True
+
+⚙️  Training Context:
+   Epochs: 250
+   Batch size: 32
+   Data augmentation: True
+   Grayscale: False
+
+🎯 Quantization Settings:
+   Quantization enabled: True
+   QAT enabled: False
+   ESP-DL enabled: True
+
+📊 Results:
+   Best validation accuracy: 0.9712
+   Test accuracy (Keras): 0.9703
+   Test accuracy (TFLite): 0.9701
+   Keras model size: 382.9 KB
+   TFLite model size: 38.1 KB
+   Size reduction: 90.1%
