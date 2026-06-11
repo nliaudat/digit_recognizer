@@ -65,7 +65,6 @@ from utils.preprocess import preprocess_for_inference
 
 
 
-
 class TFLiteDigitPredictor:
     def __init__(self, model_path):
         self.model_path = model_path
@@ -318,6 +317,25 @@ def load_image_from_path(image_path, input_channels):
     
     return image
 
+
+# ── TFLite Model Selection Helper ──────────────────────────────────────────
+
+def _select_best_tflite_files(dir_path):
+    """Get TFLite model files from a directory, preferring full_integer_quant models.
+    
+    Priority:
+    1. *_full_integer_quant.tflite (if any exist)
+    2. Any *.tflite (excluding *_float.tflite) as fallback
+    """
+    all_tflite = [f for f in os.listdir(dir_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
+    full_integer_quant = [f for f in all_tflite if f.endswith('_full_integer_quant.tflite')]
+    if full_integer_quant:
+        return full_integer_quant
+    return all_tflite
+
+
+# ── Model Path Finding ────────────────────────────────────────────────────
+
 def find_model_path(model_name=None, input_dir=None):
     """Find the model path based on model name"""
     if input_dir is None:
@@ -331,7 +349,7 @@ def find_model_path(model_name=None, input_dir=None):
     for dir_name in all_dirs:
         dir_path = os.path.join(input_dir, dir_name)
         # Check if this directory contains .tflite files and is likely a training directory
-        tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
+        tflite_files = _select_best_tflite_files(dir_path)
         if tflite_files and not dir_name.startswith('test_results'):
             training_dirs.append(dir_name)
     
@@ -356,25 +374,20 @@ def find_model_path(model_name=None, input_dir=None):
                 best_match = matching_dirs[0]  # Use first partial match
             
             training_path = os.path.join(input_dir, best_match)
-            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
+            tflite_files = _select_best_tflite_files(training_path)
             
             if tflite_files:
-                # Prefer quantized models
-                quantized_models = [f for f in tflite_files if 'quantized' in f.lower()]
-                if quantized_models:
-                    model_path = os.path.join(training_path, quantized_models[0])
-                    return model_path
-                else:
-                    model_path = os.path.join(training_path, tflite_files[0])
-                    return model_path
+                # Prefer full_integer_quant (first in list from _select_best_tflite_files)
+                model_path = os.path.join(training_path, tflite_files[0])
+                return model_path
         
         # If no directory match, search for specific model files
         for training_dir in sorted(training_dirs, reverse=True):
             training_path = os.path.join(input_dir, training_dir)
             
             # Check for exact model file matches
-            tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
-        for model_file in tflite_files:
+            tflite_files = _select_best_tflite_files(training_path)
+            for model_file in tflite_files:
                 model_file_clean = model_file.replace('.tflite', '')
                 
                 # Exact match or partial match
@@ -392,21 +405,17 @@ def find_model_path(model_name=None, input_dir=None):
         latest_training = sorted(training_dirs)[-1]
         latest_dir_path = os.path.join(input_dir, latest_training)
         
-        # Look for any .tflite file in the latest directory
-        tflite_files = [f for f in os.listdir(latest_dir_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
+        # Look for any .tflite file in the latest directory (preferring full_integer_quant)
+        tflite_files = _select_best_tflite_files(latest_dir_path)
         
         if tflite_files:
-            # Prefer quantized models if available
-            quantized_models = [f for f in tflite_files if 'quantized' in f.lower()]
-            if quantized_models:
-                model_path = os.path.join(latest_dir_path, quantized_models[0])
-                return model_path
-            else:
-                model_path = os.path.join(latest_dir_path, tflite_files[0])
-                return model_path
+            model_path = os.path.join(latest_dir_path, tflite_files[0])
+            return model_path
         
         print(f"No TFLite model found in: {latest_dir_path}")
         return None
+
+# ── Model Metadata Extraction ─────────────────────────────────────────────
 
 def get_model_metadata(model_path):
     """
@@ -491,6 +500,8 @@ def get_model_output_type(model_path):
     mtype, _ = get_model_metadata(model_path)
     return mtype
 
+# ── Model Discovery ───────────────────────────────────────────────────────
+
 def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude_model=None, debug=False, model_list=None, iot_compat=True):
     """Get all available models with parameters count - with error handling
     
@@ -510,7 +521,7 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
     for dir_name in all_dirs:
         dir_path = os.path.join(input_dir, dir_name)
         # Check if this directory contains .tflite files and is likely a training directory
-        tflite_files = [f for f in os.listdir(dir_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
+        tflite_files = _select_best_tflite_files(dir_path)
         if tflite_files and not dir_name.startswith('test_results'):
             training_dirs.append(dir_name)
     
@@ -533,8 +544,8 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None, exclude
     for training_dir in training_dirs:
         training_path = os.path.join(input_dir, training_dir)
         
-        # Look for any .tflite files in the directory
-        tflite_files = [f for f in os.listdir(training_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
+        # Look for .tflite files in the directory (preferring full_integer_quant)
+        tflite_files = _select_best_tflite_files(training_path)
         
         for model_file in tflite_files:
             # Skip excluded models if specified
@@ -617,6 +628,8 @@ def is_valid_tflite_model(model_path):
         else:
             print(f"❌ Invalid TFLite model {os.path.basename(model_path)}: {str(e).split(chr(10))[0][:150]}...")
         return False
+
+# ── Dataset Loading ───────────────────────────────────────────────────────
 
 def _decode_bench_image(image_path, label, fname, target_h, target_w, grayscale, is_augmented=False):
     flag = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
@@ -817,6 +830,8 @@ def load_test_dataset_with_labels(num_samples=0, use_all_datasets=True):
 
     return test_data
 
+# ── Parameter Configuration ───────────────────────────────────────────────
+
 def configure_parameters_for_model(model_name_or_dir, override_classes=None, override_color=None):
     """
     Adjust globals in parameters.py for the specific model.
@@ -862,6 +877,8 @@ def configure_parameters_for_model(model_name_or_dir, override_classes=None, ove
         # Clear the dataset cache so it reloads with new parameters
         clear_cache()
         print(f"🔄 Reconfigured test environment for {params.NB_CLASSES} classes in {'Grayscale' if params.USE_GRAYSCALE else 'RGB'}")
+
+# ── Model Evaluation ──────────────────────────────────────────────────────
 
 def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_datasets=True, 
                          collect_failed=False, model_name=None, tolerance=0.1,
@@ -1027,6 +1044,8 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False, use_all_da
         print(f"Inferences per second: {inferences_per_second:.0f}")
     
     return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions, all_predictions_lite, esp32_accuracy, accuracy_real_only
+
+# ── Results Presentation ──────────────────────────────────────────────────
 
 def generate_confusion_matrix(all_results, output_dir=None):
     """Generate a confusion matrix heatmap and per-class accuracy CSV from all predictions.
@@ -2344,6 +2363,8 @@ def test_single_model(model_path, num_test_images=0, debug=False, use_all_datase
     
     return accuracy, total_tested, avg_inference_time, inferences_per_second, failed_predictions, all_predictions_lite
 
+# ── CLI Entry Point ───────────────────────────────────────────────────────
+
 def main():
     """Main function with command line arguments"""
     parser = argparse.ArgumentParser(description='Digit Recognition Benchmarking System')
@@ -2564,4 +2585,3 @@ def inspect_espdl(espdl_path: str) -> dict:
         print(f"  [!] Could not read header: {e}")
 
     return {"path": espdl_path, "size_bytes": size_bytes, "size_kb": size_kb}
-
