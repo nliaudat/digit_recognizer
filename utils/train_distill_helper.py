@@ -406,8 +406,9 @@ def train_student_distillation(
             verbose=1
         ),
         tf.keras.callbacks.EarlyStopping(
-            monitor="val_accuracy",
-            patience=getattr(params, 'EARLY_STOPPING_PATIENCE', 15),
+            monitor="val_loss",
+            min_delta=getattr(params, 'DISTILLATION_MIN_DELTA', 0.0001),
+            patience=getattr(params, 'DISTILLATION_EARLY_STOPPING_PATIENCE', 20),
             restore_best_weights=True,
             verbose=1
         ),

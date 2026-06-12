@@ -254,7 +254,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--epochs",
         type=int,
         default=250,
-        help="Max distillation epochs (default: 250)",
+        help="Max distillation epochs (default: 250, early stopping will stop earlier)",
     )
     parser.add_argument(
         "--mode",

@@ -215,16 +215,32 @@ class Distiller(tf.keras.Model):
         # Combined loss (matches train_step logic for consistency)
         loss = self.alpha * student_loss + (1 - self.alpha) * distill_loss
 
-        # Update metrics
+        # Update metrics — compiled_metrics tracks accuracy (passed via compile())
         self.compiled_metrics.update_state(y, student_probs)
         self.loss_tracker.update_state(loss)
         
+        # Start with default metrics (e.g. loss_tracker → "loss")
         results = {m.name: m.result() for m in self.metrics}
+        
+        # Explicitly include compiled metrics (e.g. accuracy) — Keras should prefix
+        # these with "val_" in the validation logs, but some versions do not prefix
+        # subclass-model custom test_step results consistently.  We add both bare
+        # and prefixed keys so callbacks (EarlyStopping, ModelCheckpoint, CSVLogger)
+        # can find whichever key the runtime produces.
+        for m in self.compiled_metrics.metrics:
+            if m.name not in results:
+                results[m.name] = m.result()
+            results[f"val_{m.name}"] = m.result()
+        
         results.update({
             "loss": self.loss_tracker.result(),
+            "val_loss": self.loss_tracker.result(),
             "student_loss": student_loss,
             "distill_loss": distill_loss,
         })
+        # Also add prefixed versions for the custom losses
+        results["val_student_loss"] = student_loss
+        results["val_distill_loss"] = distill_loss
         return results
 
     def call(self, inputs: tf.Tensor, training: bool = False) -> tf.Tensor:
@@ -680,13 +696,22 @@ class MixedInputDistiller(Distiller):
         loss = self.alpha * student_loss + (1 - self.alpha) * distill_loss
 
         self.compiled_metrics.update_state(y, student_probs)
+        self.loss_tracker.update_state(loss)
         
         results = {m.name: m.result() for m in self.metrics}
+        for m in self.compiled_metrics.metrics:
+            if m.name not in results:
+                results[m.name] = m.result()
+            results[f"val_{m.name}"] = m.result()
+        
         results.update({
-            "loss": loss,
+            "loss": self.loss_tracker.result(),
+            "val_loss": self.loss_tracker.result(),
             "student_loss": student_loss,
             "distill_loss": distill_loss,
         })
+        results["val_student_loss"] = student_loss
+        results["val_distill_loss"] = distill_loss
         return results
 
     def get_config(self) -> Dict[str, Any]:
