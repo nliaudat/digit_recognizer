@@ -418,7 +418,7 @@ def run_distillation(
     epochs: int = 150,
     learning_rate: float = 0.001,
     output_dir: str = "distill_output",
-) -> ProgressiveDistiller:
+) -> Tuple[ProgressiveDistiller, bool]:
     """
     Run ProgressiveDistillation training.
 
@@ -485,24 +485,34 @@ def run_distillation(
         ),
     ]
 
-    # ── Train ─────────────────────────────────────────────────────────────
-    history = distiller.fit(
-        train_ds,
-        validation_data=val_ds,
-        epochs=epochs,
-        callbacks=callbacks,
-        verbose=1,
-    )
+    # ── Train (with keyboard interrupt support) ──────────────────────────
+    interrupted = False
+    try:
+        history = distiller.fit(
+            train_ds,
+            validation_data=val_ds,
+            epochs=epochs,
+            callbacks=callbacks,
+            verbose=1,
+        )
+    except KeyboardInterrupt:
+        logger.warning("\n⚠️  Distillation interrupted by user (KeyboardInterrupt)")
+        interrupted = True
+        # EarlyStopping with restore_best_weights already restored best weights
+        # ModelCheckpoint saved best during training
+        history = getattr(distiller, "history", None)
+        if history is None or not history.history:
+            history = type("obj", (object,), {"history": {}})()
 
     # ── Save final model ──────────────────────────────────────────────────
     distiller.save(os.path.join(output_dir, "final_distill.keras"))
-    logger.info(f"✅ Distillation complete — model saved to {output_dir}")
+    logger.info(f"✅ Distillation final model saved — {output_dir}")
 
     # Log best accuracy
     best_acc = max(history.history.get("val_accuracy", [0]))
     logger.info(f"   Best validation accuracy: {best_acc:.4f}")
 
-    return distiller
+    return distiller, interrupted
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -833,7 +843,7 @@ def main():
     logger.info(f"\n{'='*60}")
     logger.info("🚀 Step 4/5: Running distillation")
     logger.info(f"{'='*60}")
-    distiller = run_distillation(
+    distiller, training_interrupted = run_distillation(
         teacher=teacher,
         student=student,
         train_ds=train_ds,
@@ -846,6 +856,45 @@ def main():
         learning_rate=args.lr,
         output_dir=output_dir,
     )
+
+    # ── Handle keyboard interrupt ─────────────────────────────────────────
+    if training_interrupted:
+        print()
+        while True:
+            choice = input(
+                "⚡ Training interrupted by user.\n"
+                "  [F] Finish gracefully — extract student, evaluate, export TFLite/TQT\n"
+                "  [C] Continue training (resume)\n"
+                "  [A] Abort — exit immediately (no save)\n"
+                "  Choose [F/C/A]: "
+            ).strip().upper()
+
+            if choice == "F":
+                logger.info("→ Finishing gracefully...")
+                break
+            elif choice == "C":
+                logger.info("→ Resuming training...")
+                distiller, training_interrupted = run_distillation(
+                    teacher=teacher,
+                    student=student,
+                    train_ds=train_ds,
+                    val_ds=val_ds,
+                    num_classes=args.classes,
+                    temperature=args.temperature,
+                    alpha=args.alpha,
+                    beta=args.beta,
+                    epochs=args.epochs,
+                    learning_rate=args.lr,
+                    output_dir=output_dir,
+                )
+                if not training_interrupted:
+                    break  # completed normally
+                continue
+            elif choice == "A":
+                logger.warning("→ Aborting. No model saved.")
+                sys.exit(1)
+            else:
+                print("  ❌ Invalid choice. Please enter F, C, or A.")
 
     # ── Step 5: Extract student & export ──────────────────────────────────
     logger.info(f"\n{'='*60}")
