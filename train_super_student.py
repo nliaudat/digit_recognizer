@@ -383,13 +383,26 @@ def run_super_student_training(
     os.makedirs(output_dir, exist_ok=True)
 
     # ── Build the ProgressiveDistiller ────────────────────────────────────
-    # Start with high temperature (8) to soften teacher signals,
-    # alpha=0.3 (more teacher influence early on)
+    if num_classes > 10:
+        # 100-class task is harder: use a lower starting temperature (4)
+        # so teacher soft targets are sharper / more informative, and a
+        # higher alpha (0.5) to give more weight to ground-truth labels
+        # from the start, preventing the student from getting stuck in
+        # the random-guess regime.
+        initial_temperature = 4.0
+        initial_alpha = 0.5
+        logger.info(f"   [100cls mode] temperature={initial_temperature}, alpha={initial_alpha}")
+    else:
+        # 10-class: high temperature (8) softens teacher signals,
+        # alpha=0.3 (more teacher influence early on) — works well.
+        initial_temperature = 8.0
+        initial_alpha = 0.3
+
     distiller = ProgressiveDistiller(
         student=student,
         teacher=ensemble,
-        temperature=8.0,
-        alpha=0.3,
+        temperature=initial_temperature,
+        alpha=initial_alpha,
         total_epochs=epochs,
         name="super_student_distiller",
     )

@@ -227,7 +227,14 @@ class Distiller(tf.keras.Model):
         # subclass-model custom test_step results consistently.  We add both bare
         # and prefixed keys so callbacks (EarlyStopping, ModelCheckpoint, CSVLogger)
         # can find whichever key the runtime produces.
-        for m in self.compiled_metrics.metrics:
+        # Keras 3 compatibility: self.compiled_metrics may be DeprecatedCompiledMetric
+        # which does not have a .metrics attribute — fall back to self.metrics.
+        if hasattr(self.compiled_metrics, 'metrics'):
+            _metric_list = self.compiled_metrics.metrics
+        else:
+            # Filter out the loss tracker (Mean metric named "loss")
+            _metric_list = [m for m in self.metrics if not isinstance(m, tf.keras.metrics.Mean)]
+        for m in _metric_list:
             if m.name not in results:
                 results[m.name] = m.result()
             results[f"val_{m.name}"] = m.result()
@@ -699,7 +706,12 @@ class MixedInputDistiller(Distiller):
         self.loss_tracker.update_state(loss)
         
         results = {m.name: m.result() for m in self.metrics}
-        for m in self.compiled_metrics.metrics:
+        # Keras 3 compatibility: self.compiled_metrics may be DeprecatedCompiledMetric
+        if hasattr(self.compiled_metrics, 'metrics'):
+            _metric_list = self.compiled_metrics.metrics
+        else:
+            _metric_list = [m for m in self.metrics if not isinstance(m, tf.keras.metrics.Mean)]
+        for m in _metric_list:
             if m.name not in results:
                 results[m.name] = m.result()
             results[f"val_{m.name}"] = m.result()
