@@ -7,8 +7,11 @@ combination, collects all model directories that contain a valid ``.keras``
 file, and generates one ``train_distill.py --phase student`` command per
 student variant.
 
-For each student model, all *other* models serve as the teacher ensemble.
-This way every model benefits from the collective knowledge of the rest.
+For each student model, **all** models (including the student's own version)
+serve as the teacher ensemble. This is a form of **self-distillation** where
+the frozen pre-trained checkpoint of the student architecture contributes its
+soft targets alongside every other architecture, helping the fresh student
+converge to a better solution.
 
 Modes
 ─────
@@ -176,7 +179,7 @@ def build_command(
     arguments suitable for ``subprocess.run``.
     """
     cmd = [
-        sys.executable or "python",
+        "python",
         "train_distill.py",
         "--phase", "student",
     ]
@@ -357,12 +360,8 @@ def main() -> None:
     import shlex  # for safe quoting
 
     for sv in student_versions:
-        # All entries except the student
-        teachers = [e for e in entries if e.version != sv]
-
-        if not teachers:
-            logger.warning(f"  ⚠️  Skipping {sv} — no other models to use as teachers")
-            continue
+        # All entries including the student (self-distillation)
+        teachers = [e for e in entries]
 
         cmd = build_command(
             teachers=teachers,

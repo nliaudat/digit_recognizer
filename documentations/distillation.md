@@ -66,7 +66,7 @@ See `python distill_best.py --help` for full options.
 
 ### `distill_all.py` — Multi-teacher ensemble for ALL students
 
-Reads the ``model_comparison.csv`` for a given ``(classes, color)`` combination, collects all model directories that contain a valid ``.keras`` file, and generates **one command per student variant**. For each student, all *other* models serve as the teacher ensemble — so every model benefits from the collective knowledge of the rest.
+Reads the ``model_comparison.csv`` for a given ``(classes, color)`` combination, collects all model directories that contain a valid ``.keras`` file, and generates **one command per student variant**. For each student, **all** models (including the student's own version) serve as the teacher ensemble — this is a form of **self-distillation** where the frozen pre-trained checkpoint of the student architecture contributes its soft targets alongside every other model.
 
 ```bash
 # Generate commands for ALL models as students (8 models → 8 commands)
@@ -85,18 +85,13 @@ python distill_all.py --cls 10 --color rgb --temperature 8.0 --alpha 0.7 --epoch
 Output example:
 ```
 🎯  Distill all INTO student:  v23
-    Teachers (7):
-      •  v16  digit_recognizer_v16_10cls_RGB_TQT_SOFTMAX_0610_2030
-      •  v19  digit_recognizer_v19_10cls_RGB_TQT_SOFTMAX_0610_2031
-      •  v18  digit_recognizer_v18_10cls_RGB_TQT_SOFTMAX_0610_2030
-      •  v15  digit_recognizer_v15_10cls_RGB_TQT_SOFTMAX_0607_1316
-      •  v24  digit_recognizer_v24_10cls_RGB_TQT_SOFTMAX_0607_1316
-      •   v4  digit_recognizer_v4_10cls_RGB_TQT_SOFTMAX_0607_1316
-      •   v3  digit_recognizer_v3_10cls_RGB_TQT_SOFTMAX_0607_1315
+    Teachers (8): v16, v19, v18, v15, v24, v4, v3, v23
 ──────────────────────────────────────────────────────────────────────
-$ python train_distill.py --phase student --teachers ... --student v23 ...
+$ python train_distill.py --phase student --teachers v16 v19 v18 v15 v24 v4 v3 v23 --student v23 ...
 ──────────────────────────────────────────────────────────────────────
 ```
+
+Note that `v23` itself appears in the teacher list — the frozen pre-trained v23 checkpoint contributes its soft targets alongside the other architectures. This **self-distillation** helps the fresh student converge to a better solution by combining self-consistency signals with diverse cross-architecture knowledge.
 
 The printed command is directly copy-pasteable. Use `--execute` to run all commands sequentially.
 
@@ -147,7 +142,7 @@ In the background, the pipeline wraps these models inside the `EnsembleTeacher` 
 
 *Note: You can also utilize pre-built "super-teacher" models, such as the `v32` family (`v32_small`, `v32_medium`, `v32_large`, `v32_xl`), which themselves were trained via ensemble distillation.*
 
-**Automatic ensemble distillation** is handled by `distill_all.py`. It scans the benchmark CSV and builds one command per student, using all other models as the ensemble teacher — no manual teacher listing required.
+**Automatic ensemble distillation** is handled by `distill_all.py`. It scans the benchmark CSV and builds one command per student, using all available models (including the student's own version) as the ensemble teacher — no manual teacher listing required.
 
 ### 4. Retraining Existing Models with a Teacher
 
