@@ -36,6 +36,17 @@ This project focuses on training deep learning models for water meter digit reco
 - Use `snake_case` for variables and functions, `CamelCase` for classes.
 - Log important script outputs explicitly (e.g., using `print` with emojis for visibility, as seen across the codebase).
 
-### 5. Advanced Training Routines
+### 5. **NO HARDCODED VALUES** — Centralized Configuration
+- Every tunable value must live in its dedicated `config/` module, NOT in Python code.
+  - `config/distillation.py` — distillation hyperparameters
+  - `config/training.py` — training hyperparameters
+  - `config/augmentation.py` — augmentation parameters
+  - `config/models.py` — model architecture choices
+  - `config/quantization.py` — quantization parameters
+- Function default arguments should reference config constants (e.g., `temperature=dist_cfg.DISTILLATION_TEMPERATURE`), not literal numbers.
+- Ratios, thresholds, and clipping boundaries must be config constants.
+- See `.clinerules` (project root) for the definitive rule and a checklist of common violations.
+
+### 6. Advanced Training Routines
 - The codebase uses custom loss controllers (`IntelligentFocalLossController`) and dynamic learning rate schedulers to tackle difficult datasets. Updates to the loss or fitting loop should respect these adaptive training routines.
 - Data augmentation is configured centrally in `parameters.py`. When adding new augmentation layers, ensure they can be bypassed for standard validation or evaluation flows.
