@@ -395,8 +395,26 @@ def train_student_distillation(
                 mode=mode,
             )
 
+    # Use optimizer from config (config/models.py OPTIMIZER_TYPE)
+    lr = learning_rate
+    opt_type = params.OPTIMIZER_TYPE
+    if opt_type == "nadam":
+        optimizer = tf.keras.optimizers.Nadam(learning_rate=lr)
+    elif opt_type == "adamw":
+        try:
+            import tensorflow_addons as tfa
+            optimizer = tfa.optimizers.AdamW(learning_rate=lr, weight_decay=dist_cfg.SUPER_STUDENT_WEIGHT_DECAY)
+        except ImportError:
+            logger.warning("⚠️  tensorflow-addons not available, using Adam")
+            optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+    elif opt_type == "rmsprop":
+        optimizer = tf.keras.optimizers.RMSprop(learning_rate=lr)
+    elif opt_type == "sgd":
+        optimizer = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True)
+    else:
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     distiller.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+        optimizer=optimizer,
         metrics=["accuracy"],
     )
     
