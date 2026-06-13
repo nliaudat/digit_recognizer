@@ -40,6 +40,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 import config as params
+import config.distillation as dist_cfg
 from models.model_factory import create_model_by_name
 from utils import (
     get_data_splits, preprocess_for_inference, preprocess_for_training
@@ -340,6 +341,16 @@ def train_student_distillation(
         teacher_input_fn = lambda x: tf.image.grayscale_to_rgb(x)
     
     if use_progressive:
+        # Derive final values from config (config/distillation.py).
+        progressive_final_temp = max(
+            dist_cfg.PROGRESSIVE_MIN_FINAL_TEMP,
+            temperature * dist_cfg.PROGRESSIVE_FINAL_TEMP_RATIO
+        )
+        progressive_final_alpha = min(
+            dist_cfg.PROGRESSIVE_MAX_FINAL_ALPHA,
+            alpha + dist_cfg.PROGRESSIVE_FINAL_ALPHA_SHIFT
+        )
+
         if teacher_input_fn:
             logger.warning("ProgressiveDistiller does not natively support MixedInputDistiller logic yet. Using standard MixedInputDistiller.")
             distiller = MixedInputDistiller(
@@ -351,13 +362,17 @@ def train_student_distillation(
                 mode=mode,
             )
         else:
+            logger.info(
+                f"ProgressiveDistiller: initial T={temperature} α={alpha} "
+                f"→ final T={progressive_final_temp} α={progressive_final_alpha}"
+            )
             distiller = ProgressiveDistiller(
                 student=student,
                 teacher=teacher,
-                initial_temperature=8.0,
-                final_temperature=2.0,
-                initial_alpha=0.3,
-                final_alpha=0.8,
+                initial_temperature=temperature,
+                final_temperature=progressive_final_temp,
+                initial_alpha=alpha,
+                final_alpha=progressive_final_alpha,
                 total_epochs=epochs,
                 mode=mode,
             )
@@ -630,13 +645,29 @@ def run_distillation_pipeline(
         logger.error("  3. EnsembleTeacher weights not properly loaded")
         logger.error("=" * 60)
         
-        # List all loaded teachers for debugging
+        # Dump teacher output diagnostics
+        logger.error("--- Teacher output diagnostics ---")
         for i, t in enumerate(loaded_teachers):
-            logger.info(f"Teacher {i}: {t.name}")
-            if hasattr(t, 'input_shape'):
-                logger.info(f"  Input shape: {t.input_shape}")
+            logger.error(f"Teacher {i}: name='{t.name}', type={type(t).__name__}")
+            try:
+                raw = t.predict(x_test[:8], verbose=0)
+                if isinstance(raw, list):
+                    for j, r in enumerate(raw):
+                        logger.error(f"  Output[{j}]: shape={r.shape}, "
+                                     f"min={r.min():.4f}, max={r.max():.4f}, "
+                                     f"mean={r.mean():.4f}")
+                else:
+                    logger.error(f"  Output: shape={raw.shape}, "
+                                 f"min={raw.min():.4f}, max={raw.max():.4f}, "
+                                 f"mean={raw.mean():.4f}")
+            except Exception as ee:
+                logger.error(f"  Error probing teacher {i}: {ee}")
         
-        logger.warning("Continuing with broken teacher - student will likely fail!")
+        raise RuntimeError(
+            f"Teacher ensemble accuracy is {teacher_acc:.4f} — "
+            f"well below random chance ({1.0/num_classes:.1%}). "
+            "Aborting distillation. Fix teacher checkpoints and re-run."
+        )
 
     # Quick teacher evaluation
     teacher_metrics = evaluate_distilled_model(teacher, (x_test, y_test))

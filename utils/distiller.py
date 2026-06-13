@@ -17,6 +17,7 @@ import numpy as np
 from typing import Optional, Callable, Dict, Any, Tuple, Union
 import logging
 import config as params
+import config.distillation as dist_cfg
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,6 +34,92 @@ class DistillationProgressCallback(tf.keras.callbacks.Callback):
             logger.info(f"Distiller epoch updated to {epoch}")
 
 
+# ── Helper: detect output format ─────────────────────────────────────
+def _detect_teacher_format(model: tf.keras.Model) -> str:
+    """
+    Detect whether *any* output of *model* is softmax or logits.
+    Used by Distiller to normalise teacher outputs to softmax.
+
+    Returns 'softmax', 'logits', or 'unknown'.
+    """
+    import config as params
+
+    try:
+        if "EnsembleTeacher" in str(type(model)):
+            return 'softmax'
+
+        outputs = getattr(model, 'outputs', None)
+        if outputs is None or not isinstance(outputs, (list, tuple)):
+            outputs = [outputs]
+
+        has_logits = False
+        for out_tensor in outputs:
+            node_layer = None
+            if hasattr(out_tensor, 'node') and hasattr(out_tensor.node, 'layer'):
+                node_layer = out_tensor.node.layer
+            elif hasattr(out_tensor, '_keras_history'):
+                node_layer = out_tensor._keras_history[0]
+
+            if node_layer is None:
+                continue
+
+            cls_name = node_layer.__class__.__name__
+            if "Softmax" in cls_name:
+                return 'softmax'
+
+            if hasattr(node_layer, 'activation'):
+                act = node_layer.activation
+                if act is None:
+                    has_logits = True
+                    continue
+                name = act if isinstance(act, str) else getattr(act, '__name__', '').lower()
+                if name == 'softmax':
+                    return 'softmax'
+                if name == 'linear' or act == tf.keras.activations.linear:
+                    has_logits = True
+                    continue
+
+        if has_logits:
+            return 'logits'
+
+        # Fallback: output name heuristics
+        for out_tensor in outputs:
+            name = getattr(out_tensor, 'name', '').lower()
+            if 'softmax' in name or 'output' in name:
+                return 'softmax'
+
+    except Exception:
+        pass
+    return 'unknown'
+
+
+def _extract_teacher_probs(model: tf.keras.Model,
+                            raw_output) -> tf.Tensor:
+    """
+    Convert teacher raw output to a single softmax-probability tensor.
+
+    - Multi-output -> pick the softmax head, or softmax the first.
+    - Single logits -> apply softmax.
+    - Single softmax -> return as-is.
+    """
+    if isinstance(raw_output, (list, tuple)) and len(raw_output) > 1:
+        # Try to find the softmax head
+        for t in raw_output:
+            name = getattr(t, 'name', '').lower()
+            t_t = tf.convert_to_tensor(t)
+            if 'softmax' in name or 'output' in name:
+                return t_t
+        # Fallback: softmax first output
+        return tf.nn.softmax(tf.convert_to_tensor(raw_output[0]))
+    else:
+        t = tf.convert_to_tensor(raw_output if not isinstance(raw_output, (list, tuple)) else raw_output[0])
+        fmt = _detect_teacher_format(model)
+        if fmt == 'softmax':
+            return t
+        else:
+            return tf.nn.softmax(t)
+
+
 class Distiller(tf.keras.Model):
     """
     Knowledge distillation wrapper with multiple distillation modes.
@@ -45,7 +132,7 @@ class Distiller(tf.keras.Model):
     - Attention transfer (experimental)
     
     Usage:
-        distiller = Distiller(student, teacher, temperature=4.0, alpha=0.7)
+        distiller = Distiller(student, teacher, temperature=DISTILLATION_TEMPERATURE, alpha=DISTILLATION_ALPHA)
         distiller.compile(optimizer='adam', metrics=['accuracy'])
         distiller.fit(train_data, validation_data=val_data)
     """
@@ -54,9 +141,9 @@ class Distiller(tf.keras.Model):
         self,
         student: tf.keras.Model,
         teacher: tf.keras.Model,
-        temperature: float = 4.0,
-        alpha: float = 0.7,
-        mode: str = 'soft',
+        temperature: float = dist_cfg.DISTILLATION_TEMPERATURE,
+        alpha: float = dist_cfg.DISTILLATION_ALPHA,
+        mode: str = dist_cfg.DISTILLATION_MODE,
         use_attention_transfer: bool = False,
         attention_layer_names: Optional[list] = None,
         name: str = "distiller",
@@ -150,8 +237,10 @@ class Distiller(tf.keras.Model):
         """Single training step."""
         x, y = data
         
-        # Get teacher predictions (frozen) — returns softmax probabilities
-        teacher_probs = self.teacher(x, training=False)
+        # Get teacher predictions (frozen) — may be logits, softmax, or multi-output
+        teacher_raw = self.teacher(x, training=False)
+        # CRITICAL FIX: normalise to softmax probabilities
+        teacher_probs = _extract_teacher_probs(self.teacher, teacher_raw)
 
         # Temperature scheduling
         temp = self.temperature
@@ -200,7 +289,8 @@ class Distiller(tf.keras.Model):
         x, y = data
         
         # Get teacher predictions for distillation loss calculation in validation
-        teacher_probs = self.teacher(x, training=False)
+        teacher_raw = self.teacher(x, training=False)
+        teacher_probs = _extract_teacher_probs(self.teacher, teacher_raw)
         student_probs = self.student(x, training=False)
 
         # Temperature

@@ -91,3 +91,12 @@ DISTILLATION_ACCUMULATION_STEPS = 4
 DISTILLATION_USE_STOCHASTIC_WEIGHT_AVERAGING = False
 DISTILLATION_USE_CYCLICAL_LEARNING_RATE = False
 DISTILLATION_USE_LEARNING_RATE_FINDER = False
+
+# ==============================================================================
+# Progressive distillation schedule
+# ==============================================================================
+
+PROGRESSIVE_FINAL_TEMP_RATIO = 0.5       # final_T = initial_T × this
+PROGRESSIVE_MIN_FINAL_TEMP = 1.0         # floor for final_T
+PROGRESSIVE_FINAL_ALPHA_SHIFT = 0.3      # final_alpha = initial_alpha + this
+PROGRESSIVE_MAX_FINAL_ALPHA = 0.9        # ceiling for final_alpha
