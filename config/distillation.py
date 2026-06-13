@@ -100,3 +100,18 @@ PROGRESSIVE_FINAL_TEMP_RATIO = 0.5       # final_T = initial_T × this
 PROGRESSIVE_MIN_FINAL_TEMP = 1.0         # floor for final_T
 PROGRESSIVE_FINAL_ALPHA_SHIFT = 0.3      # final_alpha = initial_alpha + this
 PROGRESSIVE_MAX_FINAL_ALPHA = 0.9        # ceiling for final_alpha
+
+# ==============================================================================
+# Super-student training (train_super_student.py)
+# ==============================================================================
+
+SUPER_STUDENT_INITIAL_TEMP_100CLS = 4.0  # Starting T for 100-class super student
+SUPER_STUDENT_INITIAL_ALPHA_100CLS = 0.5 # Starting α for 100-class
+SUPER_STUDENT_INITIAL_TEMP_10CLS = 8.0   # Starting T for 10-class super student
+SUPER_STUDENT_INITIAL_ALPHA_10CLS = 0.3  # Starting α for 10-class
+SUPER_STUDENT_WEIGHT_DECAY = 0.01        # AdamW weight decay
+SUPER_STUDENT_LR_PATIENCE = 10           # ReduceLROnPlateau patience
+SUPER_STUDENT_LR_FACTOR = 0.5            # LR reduction factor
+SUPER_STUDENT_LR_MIN = 1e-7              # Minimum LR
+SUPER_STUDENT_EARLY_STOP_PATIENCE = 30   # EarlyStopping patience
+SUPER_STUDENT_EARLY_STOP_MIN_DELTA = 5e-4  # EarlyStopping min delta
