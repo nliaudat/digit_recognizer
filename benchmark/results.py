@@ -56,7 +56,7 @@ except ImportError:
 def test_model_on_dataset(model_path, num_test_images=0, debug=False,
                           use_all_datasets=True, collect_failed=False,
                           model_name=None, tolerance=0.1,
-                          simulate_esp32=True):
+                          simulate_esp32=False):
     """Test a model on random images from dataset and return accuracy and performance metrics.
 
     Args:
@@ -591,7 +591,7 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
                     subfolder=None, input_dir=None, exclude_model=None,
                     override_classes=None, override_color=None,
                     model_list=None, tolerance=0.1, update_csv=False,
-                    iot_compat=True, simulate_esp32=True):
+                    iot_compat=True, simulate_esp32=False):
     """Test all valid models with optional subfolder filtering and model exclusion."""
     from .data import get_all_models, configure_parameters_for_model
 
