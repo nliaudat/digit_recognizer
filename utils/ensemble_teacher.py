@@ -160,16 +160,18 @@ class EnsembleTeacher(tf.keras.Model):
             raw = teacher(inputs, training=training)
             probs = _normalize_to_softmax(teacher, raw)
             normalized_outputs.append(probs)
-            logger.debug(f"  Teacher {i} output: raw type={type(raw).__name__} → probs shape={probs.shape}, "
-                         f"range=[{tf.reduce_min(probs):.4f}, {tf.reduce_max(probs):.4f}]")
+            # NOTE: use tf.shape for graph-mode symbolic tensors; avoid
+            # format-specs (.4f) on symbolic tensors since Python's str.format
+            # cannot handle them.  tf.print or assignment to a concrete eager
+            # tensor would be needed for numeric logging at runtime.
+            logger.debug(f"  Teacher {i}: raw type={type(raw).__name__} → probs shape={probs.shape}")
 
         # Step 2: weighted average of softmax probabilities
         weighted = tf.zeros_like(normalized_outputs[0])
         for probs, weight in zip(normalized_outputs, self.teacher_weights):
             weighted += weight * probs
 
-        logger.debug(f"Ensemble output shape: {weighted.shape}, "
-                     f"range=[{tf.reduce_min(weighted):.4f}, {tf.reduce_max(weighted):.4f}]")
+        logger.debug(f"Ensemble output shape: {weighted.shape}")
         return weighted
 
     @property
