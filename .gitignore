@@ -37,3 +37,4 @@ repair_int8.py
 repair_tflite_qat.py
 export_v33_tflite.py
 .clinerules
+/exported_models
