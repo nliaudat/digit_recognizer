@@ -54,7 +54,13 @@ class ConversionStrategy(abc.ABC):
 
     def _apply_xnnpack_fix(self, converter: tf.lite.TFLiteConverter,
                            quantize: bool = False) -> tf.lite.TFLiteConverter:
-        """Apply XNNPACK delegate fix (TFLITE_BUILTINS_INT8 for full int8)."""
+        """Apply TFLite ops fix based on config flags.
+
+        Priority:
+          1. USE_TFLITE_BUILTINS_INT8_ONLY  → int8 I/O (ESP-DL SDK path)
+          2. USE_TFLITE_BUILTINS_UINT8_ONLY → uint8 I/O (TFLite Micro path, default)
+          3. DISABLE_XNNPACK                → TFLITE_BUILTINS fallback
+        """
         if quantize and getattr(params, 'USE_TFLITE_BUILTINS_INT8_ONLY', False):
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
             if not hasattr(converter, 'representative_dataset') or converter.representative_dataset is None:
@@ -63,6 +69,11 @@ class ConversionStrategy(abc.ABC):
                 )
             converter.inference_input_type = tf.int8
             converter.inference_output_type = tf.int8
+        elif quantize and getattr(params, 'USE_TFLITE_BUILTINS_UINT8_ONLY', True):
+            # uint8 I/O: use TFLITE_BUILTINS with explicit uint8 I/O types
+            converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+            converter.inference_input_type = tf.uint8
+            converter.inference_output_type = tf.uint8
         elif getattr(params, 'DISABLE_XNNPACK', True):
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
         return converter
