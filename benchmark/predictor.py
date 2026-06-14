@@ -163,6 +163,9 @@ class TFLiteDigitPredictor:
             # Model accepts raw camera bytes
             if input_data.dtype == np.float32 and input_data.max() <= 1.0:
                 input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
+            elif input_data.dtype == np.int8:
+                # int8 [-128,127] → uint8 [0,255]  (modulo cast is wrong!)
+                input_data = (input_data.astype(np.int32) + 128).astype(np.uint8)
             else:
                 input_data = input_data.astype(np.uint8)
             # Inject sensor noise (±1 on uint8)
@@ -173,6 +176,9 @@ class TFLiteDigitPredictor:
             # Model expects int8 [-128, 127] (ESP-DL path)
             if input_data.dtype == np.float32 and input_data.max() <= 1.0:
                 input_uint8 = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
+            elif input_data.dtype == np.int8:
+                # int8 [-128,127] → uint8 [0,255]  (modulo cast is wrong!)
+                input_uint8 = (input_data.astype(np.int32) + 128).astype(np.uint8)
             else:
                 input_uint8 = input_data.astype(np.uint8)
             # Inject sensor noise (±1 on uint8)
