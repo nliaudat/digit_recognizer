@@ -47,6 +47,39 @@ This project focuses on training deep learning models for water meter digit reco
 - Ratios, thresholds, and clipping boundaries must be config constants.
 - See `.clinerules` (project root) for the definitive rule and a checklist of common violations.
 
-### 6. Advanced Training Routines
+### 6. TFLite Export & ESP32 Deployment
+
+#### Pipeline Output Files
+The TQT pipeline in `quantize_espdl.py` produces exactly 3 TFLite files:
+- `*_quantized_integer_quant_uint8.tflite` — **ESP32 deployment** (uint8 I/O, TQT-quality weights)
+- `*_quantized_integer_quant_float32.tflite` — internal intermediate (required to create saved_model/)
+- `*_quantized_float32.tflite` — PC benchmarking (float32 I/O)
+
+No float16, dynamic_range, or int16_act variants are generated (no production use).
+
+#### Root Directory Organization
+After each training run, `organize_output_folder()` leaves only these files at root:
+- `*_integer_quant_uint8.tflite` — deploy this to ESP32
+- `*_float32.tflite` — use this for PC benchmarking
+- `.keras`, `.onnx` — source artifacts for retraining
+
+Everything else (`.espdl`, `*_integer_quant_float32.tflite`, per-chip variants, legacy names) is moved to `full_models/`.
+
+#### Generation Order (tflite_suite_export)
+1. Run integer_quant_float32 FIRST (this creates saved_model/ via onnx2tf)
+2. **Immediately** convert saved_model/ → integer_quant_uint8 with `TFLiteConverter.from_saved_model()` + `inference_input_type=tf.uint8`
+3. Run the float32 variant (saved_model/ may be overwritten, uint8 is done)
+4. `organize_output_folder()` moves non-essential files to full_models/
+Calibration uses 500 samples.
+
+#### Benchmarking
+- `bench_predict.py` defaults to `--simulate-esp32` ON (real uint8 I/O + sensor noise)
+- Model priority in `benchmark/data.py`: `*_integer_quant_uint8.tflite` > `*_integer_quant_float32.tflite` > `*_full_integer_quant.tflite`
+- Use `--no-simulate-esp32` for faster PC-only benchmarking
+
+#### Existing Exports
+`fix_existing_outputs.py` renames legacy ambiguous filenames and generates uint8 variants on existing exports. Run it once after pulling updates if you have old model directories.
+
+### 7. Advanced Training Routines
 - The codebase uses custom loss controllers (`IntelligentFocalLossController`) and dynamic learning rate schedulers to tackle difficult datasets. Updates to the loss or fitting loop should respect these adaptive training routines.
 - Data augmentation is configured centrally in `parameters.py`. When adding new augmentation layers, ensure they can be bypassed for standard validation or evaluation flows.
