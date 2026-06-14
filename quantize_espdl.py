@@ -350,6 +350,9 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
     the conversion and produces un-quantized (float32-size) output.
     """
     output_dir = os.path.dirname(espdl_path)
+    # Normalize: if espdl is in full_models/, output to parent (root) directory
+    if os.path.basename(output_dir) == "full_models":
+        output_dir = os.path.dirname(output_dir)
     model_base_name = os.path.basename(espdl_path).replace(".espdl", "")
     
     # Detect TQT-quantized ONNX (produced by the TQT worker)
@@ -374,11 +377,14 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
         onnx2tf_calib.append(sample)
     np.save(calib_npy_path, np.concatenate(onnx2tf_calib, axis=0))
     
+    # Only produce float32 (PC benchmark). float16, dynamic_range, int16_act
+    # have no production use on ESP32 and are removed from the pipeline.
+    # Retained as comments for reference:
+    #   ("_float16",            {"output_float16_quantized_tflite": True}),
+    #   ("_dynamic_range_quant", {"output_dynamic_range_quantized_tflite": True}),
+    #   ("_integer_quant_with_int16_act", {"output_integer_quantized_tflite": True, "quant_spec": {"quant_spec_conv_activation": "int16"}}),
     variants = [
         ("_float32",            {"output_integer_quantized_tflite": False}),
-        ("_float16",            {"output_float16_quantized_tflite": True}),
-        ("_dynamic_range_quant", {"output_dynamic_range_quantized_tflite": True}),
-        ("_integer_quant_with_int16_act", {"output_integer_quantized_tflite": True, "quant_spec": {"quant_spec_conv_activation": "int16"}}),
     ]
     
     print(f"📦 Generating TFLite variant suite for {args.target} in {output_dir}...")
@@ -406,12 +412,14 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
                     shutil.move(src, int_quant_target)
                 found = True; break
         if not found:
-            for root, _, files in os.walk(output_dir):
-                for f in files:
-                    if f.endswith(".tflite") and all(x not in f for x in ["quantized", "espdl"]):
-                        shutil.move(os.path.join(root, f), int_quant_target)
-                        found = True; break
-                if found: break
+            # Scan only the top-level directory; never reach into full_models/
+            for f in os.listdir(output_dir):
+                if not f.endswith(".tflite"):
+                    continue
+                src = os.path.join(output_dir, f)
+                if os.path.isfile(src) and all(x not in f for x in ["quantized", "espdl"]):
+                    shutil.move(src, int_quant_target)
+                    found = True; break
         if found:
             print(f"   ✅ Saved: {os.path.basename(int_quant_target)}")
     except Exception as e:
@@ -469,7 +477,7 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
                 overwrite_input_shape=["input", 1, params.INPUT_CHANNELS, params.INPUT_HEIGHT, params.INPUT_WIDTH],
                 **flags
             )
-            patterns = ["model_integer_only.tflite", "model_float16.tflite", "model_dynamic_range_quant.tflite", "model.tflite"]
+            patterns = ["model_integer_only.tflite", "model.tflite"]
             found = False
             for p in patterns:
                 src = os.path.join(output_dir, p)
@@ -478,12 +486,14 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
                         shutil.move(src, target_path)
                     found = True; break
             if not found:
-                for root, _, files in os.walk(output_dir):
-                    for f in files:
-                        if f.endswith(".tflite") and all(x not in f for x in ["quantized", "espdl"]):
-                            shutil.move(os.path.join(root, f), target_path)
-                            found = True; break
-                    if found: break
+                # Scan only the top-level directory; never reach into full_models/
+                for f in os.listdir(output_dir):
+                    if not f.endswith(".tflite"):
+                        continue
+                    src = os.path.join(output_dir, f)
+                    if os.path.isfile(src) and all(x not in f for x in ["quantized", "espdl"]):
+                        shutil.move(src, target_path)
+                        found = True; break
             if found: print(f"   ✅ Saved: {os.path.basename(target_path)}")
         except Exception as e:
             print(f"   ⚠️ Variant {suffix} failed: {e}")
@@ -494,36 +504,98 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
         if os.path.exists(p): shutil.rmtree(p)
 
 def organize_output_folder(output_dir):
-    """Clean root directory keeping ONLY essential artifacts.
+    """Clean root directory keeping ONLY production-essential artifacts.
     
-    Keeps at root:
-      - *integer_quant_uint8.tflite  (the only file useful for ESP32 TFLite Micro)
-      - .espdl, .keras, .onnx        (source artifacts)
+    Two-pass operation:
     
-    Moves everything else to full_models/:
-      - *integer_quant_float32.tflite (per-chip and main, float32 I/O)
-      - _float32, _float16, _dynamic_range_quant, _int16_act variants
-      - Any other .tflite not matching the keep pattern
+    Pass 1 (pull) — Scan full_models/ and pull root-level artifacts back to root:
+      - *integer_quant_uint8.tflite  (ESP32 TFLite Micro — uint8 I/O)
+      - *float32.tflite             (PC benchmarking — float32)
+      - Clean up onnx2tf intermediates (fingerprint.pb, saved_model.pb, variables/, assets/)
+    
+    Pass 2 (push) — Scan root directory, move remaining .tflite/.espdl to full_models/:
+      - .espdl (ESP-DL SDK binaries — not needed at root)
+      - *integer_quant_float32.tflite (intermediate, kept for reference)
+      - Any other .tflite (legacy names, never produced by current pipeline)
+    
+    Keeps at root after both passes:
+      - *integer_quant_uint8.tflite
+      - *float32.tflite
+      - .keras, .onnx
     """
     full_models_dir = os.path.join(output_dir, "full_models")
     if not os.path.exists(full_models_dir):
         os.makedirs(full_models_dir)
     print(f"Organizing: {output_dir}")
 
+    # ── Pass 1: Pull root-level artifacts back from full_models/ ──────────
+    for f in sorted(os.listdir(full_models_dir)):
+        src = os.path.join(full_models_dir, f)
+        if os.path.isdir(src) or f.startswith('.'):
+            continue
+
+        # Pull production files back to root (never pull per-chip _quantized_float32)
+        if f.endswith("_integer_quant_uint8.tflite") or \
+           (f.endswith("_float32.tflite") and "_quantized_" not in f):
+            dst = os.path.join(output_dir, f)
+            if os.path.exists(dst):
+                os.remove(dst)
+            try:
+                shutil.move(src, dst)
+                print(f"   ⬆ Pulled back: {f}")
+            except Exception as e:
+                print(f"   Warning: could not pull {f}: {e}")
+            continue
+
+    # Clean garbage from full_models/
+    # — onnx2tf intermediates
+    for entry in ["fingerprint.pb", "saved_model.pb"]:
+        p = os.path.join(full_models_dir, entry)
+        if os.path.isfile(p):
+            os.remove(p)
+            print(f"   🗑️ Deleted: {entry}")
+    for entry in ["variables", "assets"]:
+        p = os.path.join(full_models_dir, entry)
+        if os.path.isdir(p):
+            shutil.rmtree(p, ignore_errors=True)
+            print(f"   🗑️ Deleted dir: {entry}")
+    # — legacy .tflite variants no longer produced by the pipeline
+    for f in sorted(os.listdir(full_models_dir)):
+        if not f.endswith(".tflite"):
+            continue
+        # These naming patterns were from old pipeline runs and are never regenerated
+        if ("_full_integer_quant" in f or
+            "_integer_quant_with_int16" in f or
+            f.endswith("_integer_quant.tflite")):
+            try:
+                os.remove(os.path.join(full_models_dir, f))
+                print(f"   🗑️ Deleted legacy: {f}")
+            except Exception as e:
+                print(f"   Warning: could not delete legacy {f}: {e}")
+
+    # ── Pass 2: Push non-essential files from root to full_models/ ────────
     for f in sorted(os.listdir(output_dir)):
         src = os.path.join(output_dir, f)
         if os.path.isdir(src) or f.startswith('.'):
             continue
 
-        # Always keep uint8 I/O variant, espdl, keras, onnx at root
+        # Keep these at root (never keep per-chip _quantized_float32)
         if (f.endswith("_integer_quant_uint8.tflite") or
-            f.endswith(".espdl") or f.endswith(".keras") or f.endswith(".onnx")):
+            (f.endswith("_float32.tflite") and "_quantized_" not in f) or
+            f.endswith(".keras") or f.endswith(".onnx")):
             continue
 
-        # Everything else (including per-chip float32 variants, float16,
-        # dynamic_range, int16_act, legacy integer_quant names) goes to full_models/
-        if f.endswith(".tflite"):
-            # Delete stale destination first, then move
+        # Delete known onnx2tf intermediates found at root
+        if f in ("fingerprint.pb", "saved_model.pb"):
+            try:
+                os.remove(src)
+                print(f"   🗑️ Deleted: {f}")
+            except Exception as e:
+                print(f"   Warning: could not delete {f}: {e}")
+            continue
+
+        # Push everything else
+        if f.endswith(".tflite") or f.endswith(".espdl"):
             dst = os.path.join(full_models_dir, f)
             if os.path.exists(dst):
                 os.remove(dst)

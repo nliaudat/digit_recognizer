@@ -31,31 +31,46 @@ _cached_test_data = None
 _cached_test_data_params = None
 
 
-# ── TFLite Model Selection Helper ──────────────────────────────────────────
+# ── TFLite Model Pairing Helper ────────────────────────────────────────────
 
-def _select_best_tflite_files(dir_path):
-    """Get TFLite model files from a directory, preferring uint8 I/O quantized models.
+def _get_paired_tflite_files(dir_path):
+    """Find float32 + uint8 TFLite file pairs in a directory.
 
-    Priority:
-    1. *_integer_quant_uint8.tflite  (ESP32: uint8 I/O, matches raw camera bytes)
-    2. *_integer_quant_float32.tflite (float32 I/O, PC benchmarking)
-    3. *_full_integer_quant.tflite   (legacy ambiguous name, kept for backward compat)
-    4. Any other *.tflite as fallback
+    Returns a dict with keys 'uint8' and 'float32' (each may be None if
+    that variant is not found). Also adds 'all' for backward-compat listing.
+
+    Recognised patterns:
+      - uint8:   *_integer_quant_uint8.tflite
+      - float32: *_float32.tflite  or  *_integer_quant_float32.tflite
+      - legacy:  *_full_integer_quant.tflite  (treated as float32 if no better match)
     """
-    all_tflite = [f for f in os.listdir(dir_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
-    # 1. uint8 I/O variant (preferred — matches ESP32 camera bytes directly)
-    uint8_quant = [f for f in all_tflite if f.endswith('_integer_quant_uint8.tflite')]
-    if uint8_quant:
-        return uint8_quant
-    # 2. float32 I/O variant (PC benchmark quality)
-    float32_quant = [f for f in all_tflite if f.endswith('_integer_quant_float32.tflite')]
-    if float32_quant:
-        return float32_quant
-    # 3. Legacy ambiguous name (backward compat)
-    full_integer_quant = [f for f in all_tflite if f.endswith('_full_integer_quant.tflite')]
-    if full_integer_quant:
-        return full_integer_quant
-    return all_tflite
+    all_tflite = [f for f in os.listdir(dir_path)
+                  if f.endswith('.tflite') and not f.endswith('_float.tflite')]
+
+    result = {'uint8': None, 'float32': None, 'all': sorted(all_tflite)}
+
+    # uint8 variant
+    uint8_candidates = [f for f in all_tflite if f.endswith('_integer_quant_uint8.tflite')]
+    if uint8_candidates:
+        result['uint8'] = uint8_candidates[0]
+
+    # float32 variant (prefer new *_float32.tflite, fall back to legacy patterns)
+    float32_candidates = (
+        [f for f in all_tflite if f.endswith('_float32.tflite')] +
+        [f for f in all_tflite if f.endswith('_integer_quant_float32.tflite')] +
+        [f for f in all_tflite if f.endswith('_full_integer_quant.tflite')]
+    )
+    # Deduplicate while preserving order
+    seen = set()
+    float32_unique = []
+    for f in float32_candidates:
+        if f not in seen:
+            seen.add(f)
+            float32_unique.append(f)
+    if float32_unique:
+        result['float32'] = float32_unique[0]
+
+    return result
 
 
 # ── Model Path Finding ────────────────────────────────────────────────────
@@ -85,8 +100,8 @@ def find_model_path(model_name=None, input_dir=None):
     training_dirs = []
     for dir_name in all_dirs:
         dir_path = os.path.join(input_dir, dir_name)
-        tflite_files = _select_best_tflite_files(dir_path)
-        if tflite_files and not dir_name.startswith('test_results'):
+        paired = _get_paired_tflite_files(dir_path)
+        if (paired['uint8'] is not None or paired['float32'] is not None) and not dir_name.startswith('test_results'):
             training_dirs.append(dir_name)
 
     if not training_dirs:
@@ -108,15 +123,21 @@ def find_model_path(model_name=None, input_dir=None):
                 best_match = matching_dirs[0]
 
             training_path = os.path.join(input_dir, best_match)
-            tflite_files = _select_best_tflite_files(training_path)
-            if tflite_files:
-                return os.path.join(training_path, tflite_files[0])
+            paired = _get_paired_tflite_files(training_path)
+            # Return the uint8 path (preferred for ESP32), but also carry float32 info
+            if paired['uint8']:
+                return os.path.join(training_path, paired['uint8'])
+            if paired['float32']:
+                return os.path.join(training_path, paired['float32'])
 
         # If no directory match, search for specific model files
         for training_dir in sorted(training_dirs, reverse=True):
             training_path = os.path.join(input_dir, training_dir)
-            tflite_files = _select_best_tflite_files(training_path)
-            for model_file in tflite_files:
+            paired = _get_paired_tflite_files(training_path)
+            for variant_key in ('uint8', 'float32'):
+                model_file = paired[variant_key]
+                if model_file is None:
+                    continue
                 model_file_clean = model_file.replace('.tflite', '')
                 if (model_name_clean == model_file_clean or
                     model_name_clean in model_file_clean or
@@ -130,9 +151,11 @@ def find_model_path(model_name=None, input_dir=None):
         # Default: latest training directory
         latest_training = sorted(training_dirs)[-1]
         latest_dir_path = os.path.join(input_dir, latest_training)
-        tflite_files = _select_best_tflite_files(latest_dir_path)
-        if tflite_files:
-            return os.path.join(latest_dir_path, tflite_files[0])
+        paired = _get_paired_tflite_files(latest_dir_path)
+        if paired['uint8']:
+            return os.path.join(latest_dir_path, paired['uint8'])
+        if paired['float32']:
+            return os.path.join(latest_dir_path, paired['float32'])
 
         logger.error(f"No TFLite model found in: {latest_dir_path}")
         return None
@@ -162,8 +185,8 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None,
     training_dirs = []
     for dir_name in all_dirs:
         dir_path = os.path.join(input_dir, dir_name)
-        tflite_files = _select_best_tflite_files(dir_path)
-        if tflite_files and not dir_name.startswith('test_results'):
+        paired = _get_paired_tflite_files(dir_path)
+        if (paired['uint8'] is not None or paired['float32'] is not None) and not dir_name.startswith('test_results'):
             training_dirs.append(dir_name)
 
     # Filter by subfolder if specified
@@ -182,74 +205,84 @@ def get_all_models(quantized_only=False, subfolder=None, input_dir=None,
 
     for training_dir in training_dirs:
         training_path = os.path.join(input_dir, training_dir)
-        tflite_files = _select_best_tflite_files(training_path)
+        paired = _get_paired_tflite_files(training_path)
 
-        for model_file in tflite_files:
-            # Skip excluded models
-            if exclude_model:
-                exclude_list = [exclude_model] if isinstance(exclude_model, str) else exclude_model
-                if any(excl in model_file or excl in training_dir for excl in exclude_list):
-                    if debug:
-                        logger.info(f"Skipping excluded model: {training_dir}/{model_file}")
-                    continue
+        uint8_file = paired['uint8']
+        float32_file = paired['float32']
 
-            # Filter by model_list
-            if model_list:
-                full_model_path = f"{training_dir}/{model_file}"
-                match_found = any(
-                    item == model_file or item == training_dir or item in full_model_path
-                    for item in model_list
-                )
-                if not match_found:
-                    continue
+        # Determine which variant to use as the "primary" for listing / metadata
+        # Prefer uint8 for model card, fall back to float32
+        primary_file = uint8_file or float32_file
+        if primary_file is None:
+            continue  # no usable tflite in this directory
 
-            model_path = os.path.join(training_path, model_file)
+        primary_path = os.path.join(training_path, primary_file)
+        float32_path = os.path.join(training_path, float32_file) if float32_file else None
+        uint8_path = os.path.join(training_path, uint8_file) if uint8_file else None
 
-            # Skip if file doesn't exist or is empty
-            if not os.path.exists(model_path) or os.path.getsize(model_path) == 0:
+        # Skip excluded models (by directory name)
+        if exclude_model:
+            exclude_list = [exclude_model] if isinstance(exclude_model, str) else exclude_model
+            if any(excl in training_dir for excl in exclude_list):
+                if debug:
+                    logger.info(f"Skipping excluded model directory: {training_dir}")
                 continue
 
-            # Verify the model can be loaded
-            if not is_valid_tflite_model(model_path):
+        # Filter by model_list
+        if model_list:
+            match_found = any(
+                item == primary_file or item == training_dir or item in f"{training_dir}/{primary_file}"
+                for item in model_list
+            )
+            if not match_found:
                 continue
 
-            try:
-                model_size = os.path.getsize(model_path) / 1024
-                model_type, parameters_count = get_model_metadata(model_path)
+        # Skip if primary file doesn't exist or is empty
+        if not os.path.exists(primary_path) or os.path.getsize(primary_path) == 0:
+            continue
 
-                # Filter by IoT compatibility if requested
-                if iot_compat:
-                    name_lower = (model_file + " " + training_dir).lower()
-                    if "float32" in name_lower or "dynamic_range" in name_lower:
-                        if debug:
-                            logger.info(f"Skipping non-IoT model: {training_dir}/{model_file}")
-                        continue
+        # Verify the primary model can be loaded
+        if not is_valid_tflite_model(primary_path):
+            continue
 
-                # Filter by quantization if requested
-                if quantized_only and "(quant)" not in model_type:
-                    continue
+        try:
+            model_size = os.path.getsize(primary_path) / 1024
+            model_type, parameters_count = get_model_metadata(primary_path)
 
-                all_models.append({
-                    'path': model_path,
-                    'name': model_file,
-                    'directory': training_dir,
-                    'size_kb': model_size,
-                    'type': model_type,
-                    'parameters': parameters_count,
-                })
+            # IoT compatibility: flag based on whether uint8 is available
+            is_iot_compat = (uint8_file is not None)
 
-            except Exception as e:
-                logger.warning(f"Error processing model {training_dir}/{model_file}: {e}")
+            # Filter by IoT compatibility if requested
+            if iot_compat and not is_iot_compat:
+                if debug:
+                    logger.info(f"Skipping non-IoT model (no uint8 variant): {training_dir}")
                 continue
 
-    # Remove duplicates
-    unique_models = {}
-    for model in all_models:
-        key = f"{model['directory']}/{model['name']}"
-        if key not in unique_models:
-            unique_models[key] = model
+            # Filter by quantization if requested
+            if quantized_only and "(quant)" not in model_type:
+                continue
 
-    return list(unique_models.values())
+            # Build the model name from primary
+            model_entry = {
+                'path': primary_path,
+                'path_uint8': uint8_path,
+                'path_float32': float32_path,
+                'name': primary_file,
+                'uint8_name': uint8_file,
+                'float32_name': float32_file,
+                'directory': training_dir,
+                'size_kb': model_size,
+                'type': model_type,
+                'parameters': parameters_count,
+            }
+
+            all_models.append(model_entry)
+
+        except Exception as e:
+            logger.warning(f"Error processing model {training_dir}: {e}")
+            continue
+
+    return all_models
 
 
 # ── Dataset Loading ───────────────────────────────────────────────────────
