@@ -34,13 +34,24 @@ _cached_test_data_params = None
 # ── TFLite Model Selection Helper ──────────────────────────────────────────
 
 def _select_best_tflite_files(dir_path):
-    """Get TFLite model files from a directory, preferring full_integer_quant models.
-    
+    """Get TFLite model files from a directory, preferring uint8 I/O quantized models.
+
     Priority:
-    1. *_full_integer_quant.tflite (if any exist)
-    2. Any *.tflite (excluding *_float.tflite) as fallback
+    1. *_integer_quant_uint8.tflite  (ESP32: uint8 I/O, matches raw camera bytes)
+    2. *_integer_quant_float32.tflite (float32 I/O, PC benchmarking)
+    3. *_full_integer_quant.tflite   (legacy ambiguous name, kept for backward compat)
+    4. Any other *.tflite as fallback
     """
     all_tflite = [f for f in os.listdir(dir_path) if f.endswith('.tflite') and not f.endswith('_float.tflite')]
+    # 1. uint8 I/O variant (preferred — matches ESP32 camera bytes directly)
+    uint8_quant = [f for f in all_tflite if f.endswith('_integer_quant_uint8.tflite')]
+    if uint8_quant:
+        return uint8_quant
+    # 2. float32 I/O variant (PC benchmark quality)
+    float32_quant = [f for f in all_tflite if f.endswith('_integer_quant_float32.tflite')]
+    if float32_quant:
+        return float32_quant
+    # 3. Legacy ambiguous name (backward compat)
     full_integer_quant = [f for f in all_tflite if f.endswith('_full_integer_quant.tflite')]
     if full_integer_quant:
         return full_integer_quant

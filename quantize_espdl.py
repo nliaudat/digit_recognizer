@@ -7,6 +7,7 @@ os.environ.setdefault("DIGIT_NB_CLASSES", "10")
 os.environ.setdefault("DIGIT_INPUT_CHANNELS", "3")
 
 import argparse
+import tensorflow as tf
 import numpy as np
 import torch
 import shutil
@@ -363,9 +364,12 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
         os.environ["TF_ENABLE_XNNPACK"] = "0"
         print("   🔧 XNNPACK delegate disabled for TFLite Micro compatibility")
     
+    # Number of calibration samples — more samples = better quantization range coverage
+    n_calib = min(len(calib_data), 500)
+    
     calib_npy_path = os.path.join(output_dir, "onnx2tf_calib_temp.npy")
     onnx2tf_calib = []
-    for i in range(min(len(calib_data), 100)):
+    for i in range(n_calib):
         sample = calib_data[i].numpy().transpose(0, 2, 3, 1) # NCHW -> NHWC
         onnx2tf_calib.append(sample)
     np.save(calib_npy_path, np.concatenate(onnx2tf_calib, axis=0))
@@ -374,25 +378,90 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
         ("_float32",            {"output_integer_quantized_tflite": False}),
         ("_float16",            {"output_float16_quantized_tflite": True}),
         ("_dynamic_range_quant", {"output_dynamic_range_quantized_tflite": True}),
-        ("_integer_quant",      {"output_integer_quantized_tflite": True}),
         ("_integer_quant_with_int16_act", {"output_integer_quantized_tflite": True, "quant_spec": {"quant_spec_conv_activation": "int16"}}),
     ]
     
     print(f"📦 Generating TFLite variant suite for {args.target} in {output_dir}...")
 
+    # ── Step 1: Run integer_quant_float32 variant FIRST ────────────────
+    # This creates saved_model/ which we need for the uint8 I/O variant.
+    int_quant_target = os.path.join(output_dir, f"{model_base_name}_quantized_integer_quant_float32.tflite")
+    print(f"   🚀 Exporting: {os.path.basename(int_quant_target)}")
+    try:
+        onnx2tf.convert(
+            input_onnx_file_path=onnx_path,
+            output_folder_path=output_dir,
+            custom_input_op_name_np_data_path=[["input", calib_npy_path, [0,0,0], [1,1,1]]],
+            not_use_onnxsim=True,
+            non_verbose=True,
+            overwrite_input_shape=["input", 1, params.INPUT_CHANNELS, params.INPUT_HEIGHT, params.INPUT_WIDTH],
+            output_integer_quantized_tflite=True,
+        )
+        patterns = ["model_integer_only.tflite", "model.tflite"]
+        found = False
+        for p in patterns:
+            src = os.path.join(output_dir, p)
+            if os.path.exists(src):
+                if os.path.abspath(src) != os.path.abspath(int_quant_target):
+                    shutil.move(src, int_quant_target)
+                found = True; break
+        if not found:
+            for root, _, files in os.walk(output_dir):
+                for f in files:
+                    if f.endswith(".tflite") and all(x not in f for x in ["quantized", "espdl"]):
+                        shutil.move(os.path.join(root, f), int_quant_target)
+                        found = True; break
+                if found: break
+        if found:
+            print(f"   ✅ Saved: {os.path.basename(int_quant_target)}")
+    except Exception as e:
+        print(f"   ⚠️ _integer_quant_float32 failed: {e}")
+
+    # ── Step 2: Generate uint8 I/O variant from saved_model ────────────
+    # onnx2tf may output saved_model/ dir OR saved_model.pb + variables/ at root.
+    saved_model_dir = os.path.join(output_dir, "saved_model")
+    if not os.path.exists(saved_model_dir):
+        # Check for root-level saved_model.pb + variables/
+        if os.path.exists(os.path.join(output_dir, "saved_model.pb")) and \
+           os.path.exists(os.path.join(output_dir, "variables")):
+            saved_model_dir = output_dir
+    if os.path.exists(saved_model_dir) and len(onnx2tf_calib) > 0:
+        # Strip chip suffix for the uint8 filename (shared across all chip targets)
+        uint8_base = model_base_name
+        for chip in ("_esp32", "_esp32s3", "_esp32p4"):
+            if uint8_base.endswith(chip):
+                uint8_base = uint8_base[: -len(chip)]
+                break
+        uint8_target = os.path.join(output_dir, f"{uint8_base}_quantized_integer_quant_uint8.tflite")
+        if not os.path.exists(uint8_target):
+            print(f"   🚀 Exporting: {os.path.basename(uint8_target)} (uint8 I/O)")
+            try:
+                converter = tf.lite.TFLiteConverter.from_saved_model(str(saved_model_dir))
+                converter.optimizations = [tf.lite.Optimize.DEFAULT]
+                def rep_gen():
+                    for sample in onnx2tf_calib:
+                        yield [sample]
+                converter.representative_dataset = rep_gen
+                converter.inference_input_type = tf.uint8
+                converter.inference_output_type = tf.uint8
+                converter.experimental_new_quantizer = True
+                uint8_tflite = converter.convert()
+                with open(uint8_target, "wb") as f:
+                    f.write(uint8_tflite)
+                print(f"   ✅ Saved: {os.path.basename(uint8_target)} ({len(uint8_tflite)/1024:.1f} KB)")
+            except Exception as e:
+                print(f"   ⚠️ UINT8 variant failed: {e}")
+        else:
+            print(f"   ⏭️  Already exists: {os.path.basename(uint8_target)}")
+
+    # ── Step 3: Run remaining variants ────────────────────────────────
+    # saved_model/ may be overwritten by these calls, but uint8 is done.
     for suffix, flags in variants:
         target_path = os.path.join(output_dir, f"{model_base_name}_quantized{suffix}.tflite")
         print(f"   🚀 Exporting: {os.path.basename(target_path)}")
-        
-        # Always use the original FP32 ONNX for TFLite conversion.
-        # onnx2tf does its own full-integer quantization from the FP32 model;
-        # feeding it the TQT-quantized ONNX (with Q/DQ nodes) breaks the
-        # conversion and produces an un-quantized (float32-size) output.
-        input_onnx = onnx_path
-        
         try:
             onnx2tf.convert(
-                input_onnx_file_path=input_onnx,
+                input_onnx_file_path=onnx_path,
                 output_folder_path=output_dir,
                 custom_input_op_name_np_data_path=[["input", calib_npy_path, [0,0,0], [1,1,1]]],
                 not_use_onnxsim=True,
@@ -400,7 +469,6 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
                 overwrite_input_shape=["input", 1, params.INPUT_CHANNELS, params.INPUT_HEIGHT, params.INPUT_WIDTH],
                 **flags
             )
-            
             patterns = ["model_integer_only.tflite", "model_float16.tflite", "model_dynamic_range_quant.tflite", "model.tflite"]
             found = False
             for p in patterns:
@@ -409,7 +477,6 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
                     if os.path.abspath(src) != os.path.abspath(target_path):
                         shutil.move(src, target_path)
                     found = True; break
-            
             if not found:
                 for root, _, files in os.walk(output_dir):
                     for f in files:
@@ -427,40 +494,43 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
         if os.path.exists(p): shutil.rmtree(p)
 
 def organize_output_folder(output_dir):
-    """Clean root directory keeping ONLY essential artifacts"""
+    """Clean root directory keeping ONLY essential artifacts.
+    
+    Keeps at root:
+      - *integer_quant_uint8.tflite  (the only file useful for ESP32 TFLite Micro)
+      - .espdl, .keras, .onnx        (source artifacts)
+    
+    Moves everything else to full_models/:
+      - *integer_quant_float32.tflite (per-chip and main, float32 I/O)
+      - _float32, _float16, _dynamic_range_quant, _int16_act variants
+      - Any other .tflite not matching the keep pattern
+    """
     full_models_dir = os.path.join(output_dir, "full_models")
-    if not os.path.exists(full_models_dir): os.makedirs(full_models_dir)
-    print(f"🧹 Organizing output folder: {output_dir}")
-    
-    # Move float variants to full_models — they're not useful on ESP32
-    to_move_patterns = ["_float32.tflite", "_float16.tflite", "_dynamic_range_quant.tflite"]
-    
-    for f in os.listdir(output_dir):
+    if not os.path.exists(full_models_dir):
+        os.makedirs(full_models_dir)
+    print(f"Organizing: {output_dir}")
+
+    for f in sorted(os.listdir(output_dir)):
         src = os.path.join(output_dir, f)
-        if os.path.isdir(src): continue
-        
-        move_needed = False
-        for pattern in to_move_patterns:
-            if f.endswith(pattern):
-                move_needed = True; break
-        
-        # Keep the best esp32 integer-quantized model at root for easy access.
-        # Float variants are bulkier and slower for the ESP32 without an FPU.
+        if os.path.isdir(src) or f.startswith('.'):
+            continue
+
+        # Always keep uint8 I/O variant, espdl, keras, onnx at root
+        if (f.endswith("_integer_quant_uint8.tflite") or
+            f.endswith(".espdl") or f.endswith(".keras") or f.endswith(".onnx")):
+            continue
+
+        # Everything else (including per-chip float32 variants, float16,
+        # dynamic_range, int16_act, legacy integer_quant names) goes to full_models/
         if f.endswith(".tflite"):
-            # Always keep integer-quantized variants at root
-            is_integer_quant = "_integer_quant" in f
-            # Always keep the _full_integer_quant* too (may exist from other flows)
-            is_full_integer_quant = "_full_integer_quant" in f
-            if not (is_integer_quant or is_full_integer_quant):
-                move_needed = True
-        
-        # ALSO: preserve espdl, keras, and onnx in root
-        if any(f.endswith(ext) for ext in [".espdl", ".keras", ".onnx"]):
-            move_needed = False
-            
-        if move_needed:
-            try: shutil.move(src, os.path.join(full_models_dir, f))
-            except: pass
+            # Delete stale destination first, then move
+            dst = os.path.join(full_models_dir, f)
+            if os.path.exists(dst):
+                os.remove(dst)
+            try:
+                shutil.move(src, dst)
+            except Exception as e:
+                print(f"   Warning: could not move {f}: {e}")
 
 if __name__ == "__main__":
     validate_full_config()
