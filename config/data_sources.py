@@ -84,14 +84,14 @@ DATA_SOURCES = [
         'weight': 1.0,  # 70 632 raw → ~70 632 effective (Synthetic — full weight, diverse coverage)
         'is_synthetic': True,
     },
-    # {
-    #     'name': 'static_augmentation_mixup',
-    #     'type': 'label_file', 
-    #     'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
-    #     'path': 'datasets/static_augmentation_mixup', 
-    #     'weight': 0.8,  # 11 301 raw → ~9 041 effective (Synthetic mixup)
-    #     'is_synthetic': True,
-    # },
+    {
+        'name': 'static_augmentation_mixup',
+        'type': 'label_file', 
+        'labels': f'labels_{NB_CLASSES}_shuffle.txt',  
+        'path': 'datasets/static_augmentation_mixup', 
+        'weight': 0.8,  # 11 301 raw → ~9 041 effective (Synthetic mixup)
+        'is_synthetic': True,
+    },
     {
         'name': f'GWF_watermeter',
         'type': 'label_file', 

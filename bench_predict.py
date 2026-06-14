@@ -180,10 +180,10 @@ def main():
                         help='Path to a .espdl file to inspect (size, header, quantization metadata).')
     parser.add_argument('--new', type=str,
                         help='Test a new model and update the existing CSV results.')
-    parser.add_argument('--simulate-esp32', action='store_true', default=False,
-                        help='Simulate ESP32 inference by adding quantization noise (default: False).')
     parser.add_argument('--no-simulate-esp32', action='store_false', dest='simulate_esp32',
                         help='Disable ESP32 simulation (faster benchmark, PC-only accuracy).')
+    parser.add_argument('--simulate-esp32', action='store_true', default=True,
+                        help='Simulate ESP32 inference with uint8 I/O + sensor noise (default: True).')
 
     args, unknown = parser.parse_known_args()
 

@@ -38,3 +38,5 @@ repair_tflite_qat.py
 export_v33_tflite.py
 .clinerules
 /exported_models
+analysis_esp32_confidence_regression.md
+re_export_all_esp32.py

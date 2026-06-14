@@ -106,8 +106,45 @@ _configure_quantization_mode()
 # Disable XNNPACK delegate for TFLite Micro compatibility
 DISABLE_XNNPACK = True
 
-# Force TFLITE_BUILTINS_INT8 as the only supported ops for all TFLite conversions
-USE_TFLITE_BUILTINS_INT8_ONLY = True
+# ==============================================================================
+# TFLite I/O data type: USE_TFLITE_BUILTINS_UINT8_ONLY vs INT8_ONLY
+# ==============================================================================
+#
+# These flags control whether exported ``*_full_integer_quant.tflite`` models
+# expect **uint8** or **int8** input/output data.
+#
+# Only ONE of the two should be True at any time.  If both are False the
+# converter falls back to DISABLE_XNNPACK → TFLITE_BUILTINS with no override.
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ USE_TFLITE_BUILTINS_UINT8_ONLY = True   ← DEFAULT (TFLite Micro path)  │
+# └─────────────────────────────────────────────────────────────────────────┘
+#   * Uses ``TFLITE_BUILTINS`` ops (no forced I/O type)
+#   * The exported model accepts **uint8 [0, 255]** — raw camera bytes
+#   * ✅ Works with TFLite Micro on ESP32 without any pixel conversion
+#   * ❌ NOT compatible with ESP-DL SDK (needs int8)
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ USE_TFLITE_BUILTINS_INT8_ONLY  = True   (ESP-DL path)                  │
+# └─────────────────────────────────────────────────────────────────────────┘
+#   * Forces ``TFLITE_BUILTINS_INT8`` ops + ``inference_input_type=tf.int8``
+#   * The exported model expects **int8 [-128, 127]**
+#   * ✅ Correct for ESP-DL SDK
+#   * ❌ Wrong for TFLite Micro — bytes get sign-misinterpreted
+#   * C++ code MUST convert:  pixel_int8 = pixel_uint8 - 128
+#
+# History:
+#   * Before April 2026: train_modelmanager.py always produced uint8 models
+#     → digit_recognizer_v23 and v17 from 04.04.2026 work on ESP32
+#   * April 2026: USE_TFLITE_BUILTINS_INT8_ONLY added for ESP-DL support
+#     → All models exported after April 5 showed "low confidence" on ESP32
+#   * June 2026: USE_TFLITE_BUILTINS_UINT8_ONLY added as default
+#     → Reverts to uint8 contract that matches TFLite Micro / raw camera
+#
+# The model architectures themselves never changed — only these flags.
+# ==============================================================================
+USE_TFLITE_BUILTINS_UINT8_ONLY = True   # Default: uint8 I/O for TFLite Micro
+USE_TFLITE_BUILTINS_INT8_ONLY  = False  # Set True for ESP-DL (mutual exclusion)
 
 # TQT Parameters (only relevant when USE_TQT_PIPELINE=True)
 TQT_NUM_BITS = 8

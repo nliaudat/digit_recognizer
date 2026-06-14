@@ -122,15 +122,25 @@ class TFLiteDigitPredictor:
             return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
 
     def predict_esp32(self, image, debug=False):
-        """Simulate ESP32 inference with quantization noise injection.
-        
-        ESP32 uses TFLite Micro with integer-only kernels. This simulation:
-        1. Quantizes input to INT8 and back (simulating camera + integer pipeline)
-        2. Runs inference through the same TFLite model
-        3. Adds quantization noise proportional to output scale on the logits
-        4. Applies softmax and returns prediction
+        """Simulate ESP32 TFLite Micro inference with real uint8/int8 I/O.
+
+        Unlike predict(), which feeds preprocessed float32 [0,1] and lets the
+        Python TFLite interpreter handle quantization transparently, this
+        method mimics what ESP32 firmware actually does:
+
+          1. Converts input to the EXACT integer dtype the model expects
+             (uint8 or int8) — just like the raw camera bytes + conversion on
+             the ESP32.
+          2. Optionally injects ±1 noise to simulate camera sensor noise
+             before the fixed-point conversion.
+          3. Feeds the raw integer tensor — no float32 round-trip.
+          4. Reads the raw integer output tensor and dequantizes it using
+             the model's scale/zero_point.
+          5. Applies softmax if the dequantized output is logits.
+
+        This gives a realistic benchmark of what the ESP32 would actually
+        produce, rather than the float32 performance of the same weights.
         """
-        # Preprocess image
         processed_image = preprocess_for_inference(image)
 
         # Handle channel mismatch
@@ -144,46 +154,38 @@ class TFLiteDigitPredictor:
         else:
             input_data = processed_image
 
-        # ── Step 1: Simulate ESP32 camera input quantization ──
         expected_dtype = self.input_details[0]['dtype']
 
-        if expected_dtype in [np.uint8, np.int8]:
-            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
-                input_uint8 = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
-                noise = np.random.randint(-1, 2, size=input_uint8.shape).astype(np.int16)
-                input_noisy = np.clip(input_uint8.astype(np.int16) + noise, 0, 255).astype(np.uint8)
-                input_data = input_noisy.astype(np.float32) / 255.0
-            elif input_data.dtype == np.uint8:
-                noise = np.random.randint(-1, 2, size=input_data.shape).astype(np.int16)
-                input_data = np.clip(input_data.astype(np.int16) + noise, 0, 255).astype(np.uint8)
-            elif input_data.dtype == np.int8:
-                noise = np.random.randint(-1, 2, size=input_data.shape).astype(np.int16)
-                input_data = np.clip(input_data.astype(np.int16) + noise, -128, 127).astype(np.int8)
-        else:
-            noise_std = 1.0 / 255.0
-            input_data = input_data.astype(np.float32) + np.random.normal(0, noise_std, size=input_data.shape)
-            if input_data.max() > 1.0:
-                input_data = input_data / 255.0
-
-        # ── Step 2: Prepare input for the model ──
+        # ── Stage 1: Convert to the exact integer dtype the model expects ──
+        # ESP32 camera produces uint8 [0,255]. If the model expects uint8,
+        # feed it directly. If it expects int8, subtract 128.
         if expected_dtype == np.uint8:
+            # Model accepts raw camera bytes
             if input_data.dtype == np.float32 and input_data.max() <= 1.0:
-                input_data = (input_data * 255.0).astype(np.uint8)
+                input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
             else:
                 input_data = input_data.astype(np.uint8)
-        elif expected_dtype == np.int8:
-            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
-                input_data = (input_data * 255.0 - 128).astype(np.int8)
-            elif input_data.dtype == np.uint8:
-                input_data = (input_data.astype(np.int32) - 128).astype(np.int8)
-            else:
-                input_data = input_data.astype(np.int8)
-        else:
-            input_data = input_data.astype(np.float32)
-            if input_data.max() > 1.0:
-                input_data = input_data / 255.0
+            # Inject sensor noise (±1 on uint8)
+            noise = np.random.randint(-1, 2, size=input_data.shape, dtype=np.int16)
+            input_data = np.clip(input_data.astype(np.int16) + noise, 0, 255).astype(np.uint8)
 
-        # Verify shape matches expected input shape
+        elif expected_dtype == np.int8:
+            # Model expects int8 [-128, 127] (ESP-DL path)
+            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+                input_uint8 = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
+            else:
+                input_uint8 = input_data.astype(np.uint8)
+            # Inject sensor noise (±1 on uint8)
+            noise = np.random.randint(-1, 2, size=input_uint8.shape, dtype=np.int16)
+            input_uint8 = np.clip(input_uint8.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+            input_data = (input_uint8.astype(np.int32) - 128).astype(np.int8)
+
+        else:
+            # Float model — just add small noise
+            noise_std = 1.0 / 255.0
+            input_data = input_data.astype(np.float32) + np.random.normal(0, noise_std, size=input_data.shape)
+
+        # Verify shape
         expected_shape = self.input_details[0]['shape']
         if input_data.shape != tuple(expected_shape):
             if input_data.size == np.prod(expected_shape):
@@ -192,19 +194,15 @@ class TFLiteDigitPredictor:
                 return -1, 0.0, np.zeros(self.output_details[0]['shape'][-1], dtype=np.float32)
 
         try:
+            # ── Stage 2: Run inference ──
             self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
             self.interpreter.invoke()
             output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
 
-            # ── Step 3: Add output quantization noise ──
+            # ── Stage 3: Dequantize output ──
             if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
                 output_scale, output_zero_point = self.output_details[0]['quantization']
                 output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
-                noise_scale = output_scale * 0.5
-                output_data += np.random.normal(0, noise_scale, size=output_data.shape)
-            else:
-                noise_scale = 1e-4
-                output_data += np.random.normal(0, noise_scale, size=output_data.shape)
 
             # Autodetect if output is logits or softmax
             output_vector = output_data[0]
