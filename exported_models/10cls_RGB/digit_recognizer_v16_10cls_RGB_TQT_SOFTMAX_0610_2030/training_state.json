@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "optimizer_weights_file": "training_state_optimizer.npy",
+  "controller_states": {
+    "IntelligentFocalLossController": {
+      "current_gamma": 0.0,
+      "alpha": [
+        0.44960842187966094,
+        0.4487535342574962,
+        0.4502682218227156,
+        0.4492087363201578,
+        0.44890080893959183,
+        0.4497331972967226,
+        0.45010012444605985,
+        0.44940572431155995,
+        0.45059796852036604,
+        0.45342326220566964
+      ],
+      "last_switch_epoch": 99,
+      "threshold_reached_epoch": {},
+      "_ramp_start_epoch": -1,
+      "_ramp_start_gamma": 0.0,
+      "_ramp_target_gamma": 0.0,
+      "best_acc": 0.9906285405158997,
+      "plateau_count": 5,
+      "current_alpha": [
+        0.44960842187966094,
+        0.4487535342574962,
+        0.4502682218227156,
+        0.4492087363201578,
+        0.44890080893959183,
+        0.4497331972967226,
+        0.45010012444605985,
+        0.44940572431155995,
+        0.45059796852036604,
+        0.45342326220566964
+      ]
+    },
+    "DynamicSchedulerController": {
+      "current_phase": 1,
+      "epoch_offset": 68,
+      "phase_switched_epoch": {
+        "0.985": 67
+      }
+    }
+  }
+}

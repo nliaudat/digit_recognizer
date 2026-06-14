@@ -230,13 +230,58 @@ def main():
         x_train_raw=x_train_raw[:100]
     )
     
-    history = model.fit(
-        train_dataset,
-        validation_data=val_dataset,
-        epochs=args.epochs,
-        callbacks=callbacks
-    )
-    
+    interrupted = False
+    try:
+        history = model.fit(
+            train_dataset,
+            validation_data=val_dataset,
+            epochs=args.epochs,
+            callbacks=callbacks
+        )
+    except KeyboardInterrupt:
+        print("\n⚠️  Fine-tuning interrupted by user (KeyboardInterrupt)")
+        interrupted = True
+        history = getattr(model, "history", None)
+        if history is None or not history.history:
+            history = type("obj", (object,), {"history": {}})()
+
+    # ── Handle keyboard interrupt ───────────────────────────────────────
+    if interrupted:
+        print()
+        while True:
+            choice = input(
+                "⚡ Training interrupted by user.\n"
+                "  [F] Finish gracefully — save model, evaluate, export TFLite\n"
+                "  [C] Continue training (resume)\n"
+                "  [A] Abort — exit immediately (no save)\n"
+                "  Choose [F/C/A]: "
+            ).strip().upper()
+
+            if choice == "F":
+                print("→ Finishing gracefully...")
+                break
+            elif choice == "C":
+                print("→ Resuming training...")
+                interrupted = False
+                try:
+                    history = model.fit(
+                        train_dataset,
+                        validation_data=val_dataset,
+                        epochs=args.epochs,
+                        callbacks=callbacks
+                    )
+                except KeyboardInterrupt:
+                    print("\n⚠️  Training interrupted again.")
+                    interrupted = True
+                    continue
+                if not interrupted:
+                    break
+            elif choice == "A":
+                print("→ Aborting. No model saved.")
+                sys.exit(1)
+            else:
+                print("  ❌ Invalid choice. Please enter F, C, or A.")
+
     print("\n✅ Fine-tuning complete!")
     
     final_keras_name = f"retrained_{params.MODEL_ARCHITECTURE}.keras"

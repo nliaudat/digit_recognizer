@@ -47,7 +47,7 @@ except ImportError:
 def export_keras_to_onnx(
     model_or_path: str | object,
     onnx_path: str,
-    opset: int = 13,
+    opset: int = 15,
     simplify: bool = False,
     inputs_as_nchw: bool = True,
     input_name: str = "input_1",

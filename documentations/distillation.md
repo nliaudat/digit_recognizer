@@ -10,7 +10,17 @@ This repository features a comprehensive distillation pipeline that supports sta
 *   **Student Model:** An extreme-edge IoT architecture (e.g., v4, v15, v16) designed specifically to run quickly and fit within the memory limits of the ESP32.
 *   **Distillation Process:** The student model learns by imitating the "soft targets" (predicted probability distributions) produced by the teacher model(s). Soft targets provide rich information about the relationships between different digits, allowing the student to train faster and reach a higher accuracy ceiling.
 
-## Training Entry Point: `train_distill.py`
+## Entry Points Overview
+
+Three scripts serve different distillation needs:
+
+| Script | Purpose |
+|--------|---------|
+| `train_distill.py` | Full manual control — phases, teacher training, single/multi-teacher ensemble |
+| `distill_best.py` | Auto-selects the **single best** teacher from the benchmark CSV and distills into one student |
+| `distill_all.py` | Auto-selects **all** models from the benchmark CSV and generates one `train_distill.py` command per student — each student is trained with every other model as a teacher ensemble |
+
+## Manual Entry Point: `train_distill.py`
 
 The script `train_distill.py` acts as the primary orchestrator for the distillation workflow.
 
@@ -31,6 +41,59 @@ The pipeline operates in three distinct phases, controlled by the `--phase` argu
 *   `--alpha`: Balances the distillation loss against the standard cross-entropy loss against the true labels (0.0 means 100% teacher guidance; 1.0 means 100% hard label guidance).
 *   `--classes`: Defines how many output classes to train against (10 or 100).
 *   `--color`: Defines the color space (`rgb` or `gray`).
+
+## Automated Entry Points
+
+### `distill_best.py` — Best single-teacher distillation
+
+Reads the ``model_comparison.csv``, picks the highest-accuracy teacher with an available `.keras` file, and distills it into a compact student.
+
+```bash
+# Auto-select best teacher, distill into v4
+python distill_best.py --student v4 --classes 100 --color rgb
+
+# Specify teacher explicitly
+python distill_best.py --teacher v24 --student v15 --classes 100 --color rgb
+
+# Dry run — show what would be done without training
+python distill_best.py --student v4 --classes 100 --color rgb --dry-run
+
+# Full pipeline with TQT (ESP-DL quantization)
+python distill_best.py --student v4 --classes 100 --color rgb --tqt
+```
+
+See `python distill_best.py --help` for full options.
+
+### `distill_all.py` — Multi-teacher ensemble for ALL students
+
+Reads the ``model_comparison.csv`` for a given ``(classes, color)`` combination, collects all model directories that contain a valid ``.keras`` file, and generates **one command per student variant**. For each student, **all** models (including the student's own version) serve as the teacher ensemble — this is a form of **self-distillation** where the frozen pre-trained checkpoint of the student architecture contributes its soft targets alongside every other model.
+
+```bash
+# Generate commands for ALL models as students (8 models → 8 commands)
+python distill_all.py --classes 10 --color rgb
+
+# Generate + execute all sequentially
+python distill_all.py --classes 10 --color rgb --execute
+
+# Only a specific student (one command)
+python distill_all.py --classes 10 --color rgb --student v4
+
+# Custom hyper-parameters for all students
+python distill_all.py --cls 10 --color rgb --temperature 8.0 --alpha 0.7 --epochs 200
+```
+
+Output example:
+```
+🎯  Distill all INTO student:  v23
+    Teachers (8): v16, v19, v18, v15, v24, v4, v3, v23
+──────────────────────────────────────────────────────────────────────
+$ python train_distill.py --phase student --teachers v16 v19 v18 v15 v24 v4 v3 v23 --student v23 ...
+──────────────────────────────────────────────────────────────────────
+```
+
+Note that `v23` itself appears in the teacher list — the frozen pre-trained v23 checkpoint contributes its soft targets alongside the other architectures. This **self-distillation** helps the fresh student converge to a better solution by combining self-consistency signals with diverse cross-architecture knowledge.
+
+The printed command is directly copy-pasteable. Use `--execute` to run all commands sequentially.
 
 ## Example Workflows
 
@@ -55,13 +118,15 @@ python train_distill.py --phase student \
     --color rgb
 ```
 
-### 3. Ensemble Distillation (Multi-Teacher)
+### 3. Ensemble Distillation (Multi-Teacher) — Manual & Automatic
+
+**Manual ensemble distillation** is done via `train_distill.py` by specifying multiple teacher types:
 
 Ensemble distillation allows the student model to learn from the aggregated wisdom of multiple different teacher architectures. This prevents the student from memorizing the specific biases of a single teacher architecture and frequently improves final generalization.
 
 Our pipeline features an **`EnsembleTeacher`** that automatically freezes all contributing teachers and seamlessly combines their outputs. It supports computing weighted averages of either probabilities or logits to create a consolidated "soft target" for the student.
 
-To run ensemble distillation, specify multiple teacher types. Optionally, provide custom weights indicating their relative importance:
+To run manual ensemble distillation, specify multiple teacher types. Optionally, provide custom weights indicating their relative importance:
 
 ```bash
 python train_distill.py --phase student \
@@ -76,6 +141,8 @@ python train_distill.py --phase student \
 In the background, the pipeline wraps these models inside the `EnsembleTeacher` class dynamically, ensuring smooth integration with Keras loss routines.
 
 *Note: You can also utilize pre-built "super-teacher" models, such as the `v32` family (`v32_small`, `v32_medium`, `v32_large`, `v32_xl`), which themselves were trained via ensemble distillation.*
+
+**Automatic ensemble distillation** is handled by `distill_all.py`. It scans the benchmark CSV and builds one command per student, using all available models (including the student's own version) as the ensemble teacher — no manual teacher listing required.
 
 ### 4. Retraining Existing Models with a Teacher
 

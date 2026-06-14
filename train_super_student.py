@@ -59,12 +59,14 @@ import numpy as np
 import tensorflow as tf
 
 import config as params
+import config.distillation as dist_cfg
 from config.validation import validate_full_config
 from models.model_factory import create_model_by_name, resolve_model_name
 from utils import get_data_splits
 from utils.preprocess import preprocess_for_training
 from utils.distiller import ProgressiveDistiller, DistillationProgressCallback
 from utils.ensemble_teacher import EnsembleTeacher
+from utils.model_distiller_utils import load_teacher_from_checkpoint
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
@@ -185,7 +187,11 @@ def discover_teachers(
 
 def load_teacher_model(keras_path: str) -> Optional[tf.keras.Model]:
     """
-    Load a teacher model from a .keras file.
+    Load a teacher model from a .keras file using the project's standard
+    checkpoint loader which handles custom losses (DynamicSparseFocalLoss)
+    and multi-output architectures via architecture reconstruction +
+    weight extraction (see load_teacher_from_checkpoint).
+
     Returns None if loading fails.
     """
     logger.info(f"  📦 Loading teacher from: {keras_path}")
@@ -194,13 +200,37 @@ def load_teacher_model(keras_path: str) -> Optional[tf.keras.Model]:
         logger.warning(f"  ⚠️  File not found: {keras_path}")
         return None
 
+    # First, try the direct load_model (works for simple architectures)
     try:
         model = tf.keras.models.load_model(keras_path, compile=False)
-        logger.info(f"     ✅ Loaded: {model.name} ({model.count_params():,} params)")
+        logger.info(f"     ✅ Loaded directly: {model.name} ({model.count_params():,} params)")
         return model
-    except Exception as e:
-        logger.warning(f"  ⚠️  Failed to load {keras_path}: {e}")
-        return None
+    except Exception as direct_err:
+        logger.warning(f"  ⚠️  Direct load failed ({direct_err}) — trying checkpoint loader...")
+
+        # Fallback: use load_teacher_from_checkpoint which reconstructs
+        # architecture from source code and extracts weights from the .keras
+        # zip archive (handles custom layers/losses like DynamicSparseFocalLoss).
+        try:
+            # Infer model short name from the path
+            path_stem = Path(keras_path).parent.name
+            # Try to extract a short model name like "v16" from the folder name
+            import re
+            m = re.search(r'(v\d+)', path_stem)
+            model_name = m.group(1) if m else path_stem
+
+            import config as params
+            model = load_teacher_from_checkpoint(
+                model_name=model_name,
+                checkpoint_path=keras_path,
+                num_classes=params.NB_CLASSES,
+                input_shape=params.INPUT_SHAPE,
+            )
+            logger.info(f"     ✅ Loaded via checkpoint loader: {model.name} ({model.count_params():,} params)")
+            return model
+        except Exception as fallback_err:
+            logger.warning(f"  ⚠️  Checkpoint loader also failed: {fallback_err}")
+            return None
 
 
 def build_ensemble_teacher(
@@ -383,53 +413,80 @@ def run_super_student_training(
     os.makedirs(output_dir, exist_ok=True)
 
     # ── Build the ProgressiveDistiller ────────────────────────────────────
-    # Start with high temperature (8) to soften teacher signals,
-    # alpha=0.3 (more teacher influence early on)
+    if num_classes > 10:
+        initial_temperature = dist_cfg.SUPER_STUDENT_INITIAL_TEMP_100CLS
+        initial_alpha = dist_cfg.SUPER_STUDENT_INITIAL_ALPHA_100CLS
+    else:
+        initial_temperature = dist_cfg.SUPER_STUDENT_INITIAL_TEMP_10CLS
+        initial_alpha = dist_cfg.SUPER_STUDENT_INITIAL_ALPHA_10CLS
+
+    # Compute final values from config ratios (same as train_distill_helper)
+    final_temperature = max(
+        dist_cfg.PROGRESSIVE_MIN_FINAL_TEMP,
+        initial_temperature * dist_cfg.PROGRESSIVE_FINAL_TEMP_RATIO
+    )
+    final_alpha = min(
+        dist_cfg.PROGRESSIVE_MAX_FINAL_ALPHA,
+        initial_alpha + dist_cfg.PROGRESSIVE_FINAL_ALPHA_SHIFT
+    )
+
+    logger.info(f"   [{'100cls' if num_classes > 10 else '10cls'}] "
+                f"initial T={initial_temperature} α={initial_alpha} "
+                f"→ final T={final_temperature} α={final_alpha}")
+
     distiller = ProgressiveDistiller(
         student=student,
         teacher=ensemble,
-        temperature=8.0,
-        alpha=0.3,
+        initial_temperature=initial_temperature,
+        final_temperature=final_temperature,
+        initial_alpha=initial_alpha,
+        final_alpha=final_alpha,
         total_epochs=epochs,
         name="super_student_distiller",
     )
 
-    # ── Compile with AdamW ────────────────────────────────────────────────
-    try:
-        import tensorflow_addons as tfa
-        optimizer = tfa.optimizers.AdamW(
-            learning_rate=learning_rate,
-            weight_decay=0.01,
-            beta_1=0.9,
-            beta_2=0.999,
-        )
-    except ImportError:
-        logger.warning("⚠️  tensorflow-addons not available, using Adam")
-        optimizer = tf.keras.optimizers.Adam(
-            learning_rate=learning_rate,
-            beta_1=0.9,
-            beta_2=0.999,
-        )
+    # ── Compile with optimizer from config ────────────────────────────────
+    lr = learning_rate
+    opt_type = params.OPTIMIZER_TYPE
+    if opt_type == "nadam":
+        optimizer = tf.keras.optimizers.Nadam(learning_rate=lr)
+    elif opt_type == "adam" or opt_type == "adamw":
+        # AdamW needs tensorflow-addons; fall back to Adam if unavailable
+        try:
+            import tensorflow_addons as tfa
+            optimizer = tfa.optimizers.AdamW(
+                learning_rate=lr,
+                weight_decay=dist_cfg.SUPER_STUDENT_WEIGHT_DECAY,
+                beta_1=0.9, beta_2=0.999,
+            )
+        except ImportError:
+            optimizer = tf.keras.optimizers.Adam(learning_rate=lr, beta_1=0.9, beta_2=0.999)
+    elif opt_type == "rmsprop":
+        optimizer = tf.keras.optimizers.RMSprop(learning_rate=lr)
+    elif opt_type == "sgd":
+        optimizer = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True)
+    else:
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
     distiller.compile(
         optimizer=optimizer,
         metrics=["accuracy"],
     )
 
-    # ── Callbacks ─────────────────────────────────────────────────────────
+    # ── Callbacks (all values from config/distillation.py) ────────────────
     callbacks = [
         DistillationProgressCallback(),
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor="val_loss",
-            factor=0.5,
-            patience=10,
-            min_lr=1e-7,
+            factor=dist_cfg.SUPER_STUDENT_LR_FACTOR,
+            patience=dist_cfg.SUPER_STUDENT_LR_PATIENCE,
+            min_lr=dist_cfg.SUPER_STUDENT_LR_MIN,
             verbose=1,
         ),
         tf.keras.callbacks.EarlyStopping(
             monitor="val_accuracy",
-            patience=30,
-            min_delta=5e-4,
+            patience=dist_cfg.SUPER_STUDENT_EARLY_STOP_PATIENCE,
+            min_delta=dist_cfg.SUPER_STUDENT_EARLY_STOP_MIN_DELTA,
             restore_best_weights=True,
             verbose=1,
         ),

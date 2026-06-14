@@ -100,7 +100,7 @@ def save_training_state(filepath, controller_callbacks, model):
     # 1. Optimizer weights
     if model is not None and model.optimizer is not None:
         try:
-            opt_weights = [v.numpy() for v in model.optimizer.variables]
+            opt_weights = np.array([v.numpy() for v in model.optimizer.variables], dtype=object)
             opt_path = filepath.replace('.json', '_optimizer.npy')
             np.save(opt_path, opt_weights, allow_pickle=True)
             state['optimizer_weights_file'] = os.path.basename(opt_path)
@@ -162,9 +162,21 @@ def load_training_state(filepath, controller_callbacks, model):
         if os.path.exists(opt_path):
             try:
                 saved_weights = np.load(opt_path, allow_pickle=True)
-                for var, w in zip(model.optimizer.variables, saved_weights):
-                    var.assign(w)
-                print(f"   ✅ Optimizer weights restored from {opt_file}")
+                # Force init of optimizer variables if lazily not yet created
+                # (TF/Keras delays variable creation until first training step)
+                if not model.optimizer.variables:
+                    if hasattr(model.optimizer, 'build'):
+                        model.optimizer.build(model.trainable_variables)
+                    elif hasattr(model.optimizer, '_create_all_weights'):
+                        model.optimizer._create_all_weights(model.trainable_variables)
+                # Validate count matches before restoring
+                if len(saved_weights) != len(model.optimizer.variables):
+                    print(f"   ⚠️  Optimizer variable count mismatch: "
+                          f"saved={len(saved_weights)}, current={len(model.optimizer.variables)} — skipping restore")
+                else:
+                    for var, w in zip(model.optimizer.variables, saved_weights):
+                        var.assign(w)
+                    print(f"   ✅ Optimizer weights restored from {opt_file}")
             except Exception as exc:
                 print(f"   ⚠️  Could not restore optimizer weights: {exc}")
         else:

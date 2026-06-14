@@ -559,7 +559,7 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                         loss_obj.alpha.assign(self.alpha)
                     else:
                         nb_classes = getattr(params, 'NB_CLASSES', 10)
-                        scalar_val = tf.reshape(self.alpha, [])
+                        scalar_val = tf.reduce_mean(self.alpha)
                         loss_obj.alpha.assign(tf.ones(nb_classes, dtype=tf.float32) * tf.cast(scalar_val, tf.float32))
                 else:
                     nb_classes = getattr(params, 'NB_CLASSES', 10)
@@ -648,7 +648,7 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                         target_loss.alpha.assign(self.alpha)
                     else:
                         nb_classes = params.NB_CLASSES
-                        scalar_val = tf.reshape(self.alpha, [])
+                        scalar_val = tf.reduce_mean(self.alpha)
                         target_loss.alpha.assign(tf.ones(nb_classes, dtype=tf.float32) * tf.cast(scalar_val, tf.float32))
                 else:
                     nb_classes = params.NB_CLASSES
@@ -667,7 +667,7 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                         target_loss.alpha.assign(self.alpha)
                     else:
                         nb_classes = params.NB_CLASSES
-                        scalar_val = tf.reshape(self.alpha, [])
+                        scalar_val = tf.reduce_mean(self.alpha)
                         target_loss.alpha.assign(tf.ones(nb_classes, dtype=tf.float32) * tf.cast(scalar_val, tf.float32))
                 else:
                     nb_classes = params.NB_CLASSES

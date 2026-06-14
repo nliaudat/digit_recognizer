@@ -79,6 +79,7 @@ def create_digit_recognizer_v34_super_student_100(
         x = convnext_block(
             x, dim=128,
             drop_path_rate=0.0,
+            layer_scale_init=1.0,
             name=f"stage1_block{i}",
         )
 
@@ -90,6 +91,7 @@ def create_digit_recognizer_v34_super_student_100(
         x = convnext_block(
             x, dim=256,
             drop_path_rate=0.1,
+            layer_scale_init=1.0,
             name=f"stage2_block{i}",
         )
 
@@ -102,6 +104,7 @@ def create_digit_recognizer_v34_super_student_100(
         x = convnext_block(
             x, dim=512,
             drop_path_rate=0.2,
+            layer_scale_init=1.0,
             name=f"stage3_block{i}",
         )
 
@@ -113,6 +116,7 @@ def create_digit_recognizer_v34_super_student_100(
         x = convnext_block(
             x, dim=1024,
             drop_path_rate=0.3,
+            layer_scale_init=1.0,
             name=f"stage4_block{i}",
         )
 
