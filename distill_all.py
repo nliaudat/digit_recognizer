@@ -45,6 +45,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import config.distillation as dist_cfg
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -341,6 +343,25 @@ def main() -> None:
         )
         sys.exit(1)
 
+    # ── Apply class-aware defaults if CLI didn't override ────────────────
+    # distill_all.py default values are 6.0/0.5 (see parse_args).  If the
+    # user didn't pass --temperature / --alpha explicitly, those defaults
+    # are set.  Replace them with class-appropriate values from config.
+    temperature = args.temperature
+    alpha = args.alpha
+    if args.classes == 100:
+        if temperature == 6.0:  # user didn't override
+            temperature = dist_cfg.DISTILLATION_TEMPERATURE_100CLS
+            logger.info(f"   Auto-selected 100cls T={temperature}")
+        if alpha == 0.5:       # user didn't override
+            alpha = dist_cfg.DISTILLATION_ALPHA_100CLS
+            logger.info(f"   Auto-selected 100cls α={alpha}")
+    else:
+        if temperature == 6.0:
+            temperature = dist_cfg.DISTILLATION_TEMPERATURE_10CLS
+        if alpha == 0.5:
+            alpha = dist_cfg.DISTILLATION_ALPHA_10CLS
+
     # ── Determine which students to process ───────────────────────────────
     if args.student:
         # Single student — validate it exists
@@ -368,8 +389,8 @@ def main() -> None:
             student=sv,
             classes=args.classes,
             color=args.color,
-            temperature=args.temperature,
-            alpha=args.alpha,
+            temperature=temperature,
+            alpha=alpha,
             epochs=args.epochs,
             mode=args.mode,
             progressive=args.progressive,
