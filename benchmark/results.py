@@ -1049,7 +1049,7 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
             f.write(f"- **Test Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"- **Models Tested**: {len(df)} {'quantized' if quantized_only else 'all'} models\n")
             f.write(f"- **Best IoT Model**: **{best_iot['Model']}** ({best_iot['Size_KB']:.1f}KB, "
-                    f"{best_iot['Accuracy']:.3f} acc, {best_iot['Inferences_per_second']:.0f} inf/s)\n")
+                    f"{best_iot['Float32_Accuracy']:.3f} acc, {best_iot['Inferences_per_second']:.0f} inf/s)\n")
             f.write(f"- **Best Float32 Accuracy**: **{best_accuracy['Model']}** ({best_accuracy['Float32_Accuracy']:.3f})\n")
             f.write(f"- **Fastest Model**: **{fastest['Model']}** ({fastest['Inferences_per_second']:.0f} inf/s)\n")
             f.write(f"- **Smallest Model**: **{smallest['Model']}** ({smallest['Size_KB']:.1f} KB)\n\n")

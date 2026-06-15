@@ -75,9 +75,19 @@ class TFLiteDigitPredictor:
             else:
                 input_data = input_data.astype(np.int8)
         else:
-            input_data = input_data.astype(np.float32)
-            if input_data.max() > 1.0:
-                input_data = input_data / 255.0
+            # Model expects float32 input. The preprocessor may have returned
+            # uint8 [0,255] or int8 [-128,127] depending on global config flags
+            # (QUANTIZE_MODEL, ESP_DL_QUANTIZE). Convert correctly to [0,1].
+            if input_data.dtype == np.int8:
+                # ESP-DL preprocessed: int8 [-128,127] → float32 [0,1]
+                input_data = (input_data.astype(np.float32) + 128.0) / 255.0
+            elif input_data.dtype == np.uint8:
+                # Standard quant preprocessed: uint8 [0,255] → float32 [0,1]
+                input_data = input_data.astype(np.float32) / 255.0
+            else:
+                input_data = input_data.astype(np.float32)
+                if input_data.max() > 1.0:
+                    input_data = input_data / 255.0
 
         # Verify shape matches expected input shape
         expected_shape = self.input_details[0]['shape']
