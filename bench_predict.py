@@ -17,6 +17,7 @@ import argparse
 import logging
 import os
 import sys
+from pathlib import Path
 
 # ── Environment Setup ──────────────────────────────────────────────────────
 # Pre-parse classes and color mode to set env-vars BEFORE config is imported.
@@ -44,6 +45,8 @@ from benchmark import (
     test_single_model,
     test_all_models,
 )
+
+from benchmark.data import configure_parameters_for_model
 
 try:
     from tabulate import tabulate
@@ -206,15 +209,61 @@ def main():
     # Handle --new model
     if args.new:
         print(f"🚀 Benchmarking new model and updating CSV: {args.new}")
+
+        # Resolve the model directory: if the argument is a bare directory name,
+        # look for it inside the resolved input_dir. If it's an absolute or
+        # relative path, use it directly.
+        # (Note: args.input_dir has already been resolved from 'exported_models'
+        #  to params.OUTPUT_DIR at this point.)
+        input_dir = Path(args.input_dir)
+        new_path = Path(args.new)
+        if new_path.is_dir():
+            model_dir = new_path
+        else:
+            candidate = input_dir / args.new
+            if candidate.is_dir():
+                model_dir = candidate
+            else:
+                # Search recursively under input_dir
+                matches = sorted(input_dir.rglob(args.new))
+                matches = [m for m in matches if m.is_dir()]
+                if matches:
+                    model_dir = matches[0]
+                else:
+                    print(f"❌ Model directory '{args.new}' not found under {input_dir}")
+                    sys.exit(1)
+
+        # ── Validate that .tflite files exist in/under the model directory ──
+        tflite_files = sorted(model_dir.rglob("*.tflite"))
+        if not tflite_files:
+            print(f"❌ No .tflite files found in {model_dir}")
+            print(f"   The model has been trained but not yet exported to TFLite.")
+            print(f"   Run `python quantize_espdl.py {model_dir.name}` or")
+            print(f"   `python export_tflite.py {model_dir.name}` first.")
+            sys.exit(1)
+
+        print(f"   Found {len(tflite_files)} TFLite file(s) — proceeding with benchmark.")
+
+        # Configure dataset params for this model (important: sets NB_CLASSES,
+        # INPUT_CHANNELS etc. based on directory naming and CLI overrides)
+        configure_parameters_for_model(
+            str(model_dir),
+            override_classes=args.classes,
+            override_color=args.color,
+        )
+
+        # For --new, force iot_compat=False so that float32-only models
+        # (that haven't yet been converted to uint8) are still benchmarkable.
+        # The user explicitly asked for this specific model — don't filter it out.
         test_all_models(
             num_test_images=args.test_images, quantized_only=args.quantized,
             debug=args.debug, use_all_datasets=args.all_datasets,
             list_failed=args.list_failed, save_failed=args.save_failed,
-            subfolder=args.subfolder, input_dir=args.input_dir,
+            subfolder=args.subfolder, input_dir=str(input_dir),
             exclude_model=args.exclude_model,
             override_classes=args.classes, override_color=args.color,
             model_list=[args.new], tolerance=args.tolerance,
-            update_csv=True, iot_compat=args.iot_compat,
+            update_csv=True, iot_compat=False,
             simulate_esp32=args.simulate_esp32,
         )
         return
