@@ -292,25 +292,27 @@ def train_student_distillation(
     mode: str = "soft",
     use_progressive: bool = False,
     checkpoint_dir: str = "checkpoints",
+    student_checkpoint: Optional[str] = None,
 ) -> Tuple[Distiller, Dict]:
     """
     Train a student model via knowledge distillation from a frozen teacher.
 
     Args:
-        teacher:          Pre-trained frozen teacher model.
-        student_variant:  Key from STUDENTS dict, e.g. 'v30_medium'.
-        num_classes:      10 or 100.
-        color_mode:       'gray' or 'rgb'.
-        x_train/y_train:  Training data (preprocessed).
-        x_val/y_val:      Validation data (preprocessed).
-        epochs:           Max training epochs.
-        batch_size:       Batch size.
-        learning_rate:    Initial LR for Adam.
-        temperature:      KL softening temperature.
-        alpha:            Hard-label weight (0 = all teacher, 1 = all hard).
-        mode:             'soft' | 'hard' | 'hybrid'.
-        use_progressive:  Use ProgressiveDistiller (dynamic T and alpha).
-        checkpoint_dir:   Directory to save student checkpoints.
+        teacher:            Pre-trained frozen teacher model.
+        student_variant:    Key from STUDENTS dict, e.g. 'v30_medium'.
+        num_classes:        10 or 100.
+        color_mode:         'gray' or 'rgb'.
+        x_train/y_train:    Training data (preprocessed).
+        x_val/y_val:        Validation data (preprocessed).
+        epochs:             Max training epochs.
+        batch_size:         Batch size.
+        learning_rate:      Initial LR for Adam.
+        temperature:        KL softening temperature.
+        alpha:              Hard-label weight (0 = all teacher, 1 = all hard).
+        mode:               'soft' | 'hard' | 'hybrid'.
+        use_progressive:    Use ProgressiveDistiller (dynamic T and alpha).
+        checkpoint_dir:     Directory to save student checkpoints.
+        student_checkpoint: Path to existing student weights, or None for auto-discover.
 
     Returns:
         (distiller, history_dict)
@@ -336,6 +338,31 @@ def train_student_distillation(
         student = create_qat_model(student)
     logger.info(f"Student parameters: {student.count_params():,}")
     logger.info(f"Estimated INT8 size: {get_model_size_kb(student):.1f} KB")
+
+    # ── Auto-discover pre-trained student weights ─────────────────────────
+    # If no explicit student_checkpoint was passed, search for an existing
+    # direct-trained model in exported_models/ that matches this student
+    # variant, class count, and color mode.
+    actual_student_path = student_checkpoint
+    if actual_student_path is None:
+        try:
+            from utils.retrain_with_teacher import find_best_checkpoint
+            actual_student_path = find_best_checkpoint(student_variant, num_classes, color_mode)
+        except Exception:
+            actual_student_path = None
+
+    if actual_student_path and os.path.exists(actual_student_path):
+        logger.info(f"📦 Found pre-trained student weights: {actual_student_path}")
+        try:
+            # Use load_weights (architecture is already built above)
+            student.load_weights(actual_student_path)
+            logger.info("   ✅ Weights loaded — student starts from existing knowledge.")
+            logger.info("   📊 Distillation will refine, not teach from scratch.")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Could not load weights: {e}")
+            logger.info("   Training student from random initialization instead.")
+    else:
+        logger.info("   No pre-trained student found — training from random weights.")
 
     # ── Build distiller ────────────────────────────────────────────────────
     
@@ -564,6 +591,7 @@ def run_distillation_pipeline(
     alpha: float = 0.7,
     mode: str = "soft",
     use_progressive: bool = False,
+    student_checkpoint: Optional[str] = None,
     # Infrastructure
     batch_size: int = 32,
     checkpoint_dir: str = "checkpoints",
@@ -764,6 +792,7 @@ def run_distillation_pipeline(
         mode=mode,
         use_progressive=use_progressive,
         checkpoint_dir=actual_checkpoint_dir,
+        student_checkpoint=student_checkpoint,
     )
 
     student = distiller.get_student()
