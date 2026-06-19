@@ -193,7 +193,7 @@ class Distiller(tf.keras.Model):
         # ── Validate teacher output format ─────────────────────────────
         try:
             dummy_shape = self.teacher.input_shape
-            if None not in dummy_shape[1:]:
+            if isinstance(dummy_shape, tuple) and None not in dummy_shape[1:]:
                 dummy_input = tf.zeros((1,) + dummy_shape[1:], dtype=tf.float32)
                 dummy_raw = self.teacher(dummy_input, training=False)
                 dummy_probs = _extract_teacher_probs(self.teacher, dummy_raw)
@@ -335,7 +335,7 @@ class Distiller(tf.keras.Model):
         # (CSVLogger, ReduceLROnPlateau, EarlyStopping) can find the key
         # regardless of Keras version.
         acc = tf.reduce_mean(
-            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), y), tf.float32)
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), tf.reshape(y, [-1])), tf.float32)
         )
         results = {
             "loss": self.loss_tracker.result(),
@@ -804,7 +804,7 @@ class MixedInputDistiller(Distiller):
         
         # Same policy as Distiller.test_step(): manual accuracy + val_accuracy
         acc = tf.reduce_mean(
-            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), y), tf.float32)
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), tf.reshape(y, [-1])), tf.float32)
         )
         results = {
             "loss": self.loss_tracker.result(),

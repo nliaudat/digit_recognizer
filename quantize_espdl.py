@@ -450,6 +450,7 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
                     for sample in onnx2tf_calib:
                         yield [sample]
                 converter.representative_dataset = rep_gen
+                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
                 converter.inference_input_type = tf.uint8
                 converter.inference_output_type = tf.uint8
                 converter.experimental_new_quantizer = True
