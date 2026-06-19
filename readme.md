@@ -131,6 +131,70 @@ The project includes a robust distillation framework in `utils/distiller.py`.
 - **Logit/Softmax Autodetection**: Automatically handles diverse model output types.
 - **Mixed Input Support**: Distill from RGB teachers into efficient Grayscale students.
 
+## Quantization & Deployment
+
+The project supports multiple quantization strategies, all controlled by a single master switch in `config/quantization.py`:
+
+```python
+QUANTIZATION_MODE = "tqt"  # Options: "none", "ptq", "qat", "tqt", "auto"
+```
+
+Each mode automatically configures all underlying flags (QAT, TQT, ESP-DL, TFLite I/O types, XNNPACK) — no manual flag flipping needed.
+
+| Mode     | Description                                                                 |
+|----------|-----------------------------------------------------------------------------|
+| `none`   | Float32 training & inference. Reference baseline.                           |
+| `ptq`    | Standard Post-Training Quantization (TFLite full-integer uint8).            |
+| `qat`    | Quantization-Aware Training — must be set **before** training starts.       |
+| `tqt`    | **Recommended** — Trainable Quantization Thresholds via ESP-DL pipeline.    |
+| `auto`   | Automatically picks TQT for deployable models, float32 for teacher models.  |
+
+### TQT Pipeline (Trainable Quantization Thresholds) — Recommended for ESP32
+
+TQT is a post-training refinement that learns optimal per-channel quantization thresholds instead of using heuristic min/max ranges. It runs after normal training and takes minutes, not hours.
+
+- **No retraining needed**: Tune any pre-trained FP32 model for deployment.
+- **Per-chip hyperparameters**: Each target chip has dedicated settings in `config/quantization.py`:
+
+| Chip      | Steps | Learning Rate | Block Size | Integer Lambda |
+|-----------|-------|---------------|------------|----------------|
+| `esp32`   | 200   | 1e-6          | 2          | 0.10           |
+| `esp32s3` | 200   | 1e-6          | 2          | 0.05           |
+| `esp32p4` | 200   | 1e-6          | 2          | 0.0            |
+
+- **Calibration**: 300 steps at batch size 1 over 22,000 samples to estimate activation ranges.
+- **Multi-chip export**: Set `TQT_EXPORT_ALL_TARGETS = True` to produce optimized models for all three targets in a single run.
+
+#### Output Artifacts
+
+The TQT pipeline produces 3 TFLite files per model:
+
+| File | Purpose |
+|------|---------|
+| `*_quantized_integer_quant_float32.tflite` | Internal intermediate (creates saved_model/ for uint8 conversion) |
+| `*_quantized_integer_quant_uint8.tflite`   | **ESP32 TFLite Micro** — uint8 I/O, TQT-quality weights |
+| `*_quantized_float32.tflite`               | PC benchmarking — float32 I/O |
+
+Root directory stores the two deployment-ready files: `*_integer_quant_uint8.tflite` and `*_float32.tflite`. All other pipeline artifacts go to `full_models/`.
+
+#### uint8 I/O Contract
+
+TFLite Micro on ESP32 expects raw camera bytes in `[0, 255]` (uint8). The pipeline defaults to `USE_TFLITE_BUILTINS_UINT8_ONLY = True`. If targeting the ESP-DL SDK (which expects int8), set `USE_TFLITE_BUILTINS_INT8_ONLY = True` instead — the model will require pixel conversion in C++ code (`pixel_int8 = pixel_uint8 - 128`).
+
+#### Quick Workflow
+
+1. Set `QUANTIZATION_MODE = "tqt"` in `config/quantization.py` (already the default).
+2. Train normally: `python train.py --model digit_recognizer_v4 --classes 10 --color gray`
+3. Quantize & export: `python quantize_espdl.py --keras path/to/model.keras --target esp32`
+4. Deploy the resulting `*_integer_quant_uint8.tflite` to your ESP32.
+
+### Notes on TFLite Micro & ESP-DL Compatibility
+
+- Certain ops (e.g., `relu6`) are suppressed for ESP-DL compatibilty.
+- TFLite output size roughly doubles the tensor arena needed in inference RAM.
+- XNNPACK delegate is automatically disabled (`DISABLE_XNNPACK = True`) for TFLite Micro compatibility.
+- RGB vs grayscale: Conv2D flattens all input channels, so the kernel weights are comparable. However, RGB triples the pre-processing time and input tensor memory on IoT devices. Grayscale is strongly recommended for constrained microcontrollers.
+
 ## Documentation
 
 For detailed guides analyzing how to train, benchmark, and debug the models within this repository, refer to the guides in the [`documentations/`](documentations/) folder:
@@ -138,20 +202,9 @@ For detailed guides analyzing how to train, benchmark, and debug the models with
 - [Benchmarking & Prediction](documentations/benchmarking_and_prediction.md)
 - [Analysis & Debugging](documentations/analysis_and_debugging.md)
 - [Augmentation Strategy](documentations/augmentation_strategy.md)
+- [TFLite Quantization Guide](documentations/TFLite_Quantization_Guide.md)
 
-## Results
-
-The project demonstrates that :
-
- - Using training [Quantization aware training](https://www.tensorflow.org/model_optimization/guide/quantization/training) can lead to better results
- - tlite-micro or esp-dl compabilities suppress model operators (like relu6)
- - There is major differences between training efficiency and real tests
- - Model size "double" the tensor arena needed in memory
- - CPU operations must be also taken into parameters for IOT
- - RGB or grayscale has very same benchmark results, but the processing is not the same as in parameters needed. It also needs a lot of more cpu and memory to process
- - **Adaptive Loss Strategies**: Using `IntelligentFocalLossController` allows the model to master basic features with Cross-Entropy before focusing on hard-to-distinguish digits using Focal Loss.
- 
- ## RGB vs Grayscale Model Comparison
+## RGB vs Grayscale Model Comparison
 
  If the model uses Conv2D (first layer), it flattens all channels, which is why the theoretical benchmark results (accuracy and raw inference speed) are very similar between RGB and grayscale variants. 
 
