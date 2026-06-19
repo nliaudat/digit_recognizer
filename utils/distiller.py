@@ -328,18 +328,14 @@ class Distiller(tf.keras.Model):
         self.loss_tracker.update_state(loss)
         
         # Compute accuracy manually as a scalar for reliable logging.
-        # Keras 3 auto-prefixes custom keys (loss, student_loss, distill_loss)
-        # with "val_" in validation logs but does NOT prefix compiled metrics
-        # (accuracy).  We return BOTH bare and val_accuracy so callbacks
-        # (CSVLogger, ReduceLROnPlateau, EarlyStopping) can find the key
-        # regardless of Keras version.
+        # Keras 3 auto-prefixes every key in test_step with "val_".
+        # We return ONLY bare names — Keras produces the val_ variants.
         acc = tf.reduce_mean(
-            tf.cast(tf.equal(tf.cast(tf.argmax(student_probs, axis=-1), tf.int32), tf.reshape(y, [-1])), tf.float32)
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), y), tf.float32)
         )
         results = {
             "loss": self.loss_tracker.result(),
             "accuracy": acc,
-            "val_accuracy": acc,
             "student_loss": student_loss,
             "distill_loss": distill_loss,
         }
@@ -800,14 +796,13 @@ class MixedInputDistiller(Distiller):
 
         self.loss_tracker.update_state(loss)
         
-        # Same policy as Distiller.test_step(): manual accuracy + val_accuracy
+        # Same policy as Distiller.test_step(): bare names only; Keras prefixes.
         acc = tf.reduce_mean(
-            tf.cast(tf.equal(tf.cast(tf.argmax(student_probs, axis=-1), tf.int32), tf.reshape(y, [-1])), tf.float32)
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), y), tf.float32)
         )
         results = {
             "loss": self.loss_tracker.result(),
             "accuracy": acc,
-            "val_accuracy": acc,
             "student_loss": student_loss,
             "distill_loss": distill_loss,
         }
