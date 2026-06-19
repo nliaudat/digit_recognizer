@@ -330,8 +330,9 @@ class Distiller(tf.keras.Model):
         # Compute accuracy manually as a scalar for reliable logging.
         # Keras 3 auto-prefixes every key in test_step with "val_".
         # We return ONLY bare names — Keras produces the val_ variants.
+        # Cast to common type: y is int32, argmax returns int64 by default.
         acc = tf.reduce_mean(
-            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), y), tf.float32)
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1, output_type=tf.int32), y), tf.float32)
         )
         results = {
             "loss": self.loss_tracker.result(),
@@ -797,8 +798,9 @@ class MixedInputDistiller(Distiller):
         self.loss_tracker.update_state(loss)
         
         # Same policy as Distiller.test_step(): bare names only; Keras prefixes.
+        # argmax cast to int32 to match y dtype.
         acc = tf.reduce_mean(
-            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), y), tf.float32)
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1, output_type=tf.int32), y), tf.float32)
         )
         results = {
             "loss": self.loss_tracker.result(),
