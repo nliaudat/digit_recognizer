@@ -328,27 +328,22 @@ class Distiller(tf.keras.Model):
         self.compiled_metrics.update_state(y, student_probs)
         self.loss_tracker.update_state(loss)
         
-        # Keras 3 auto-prefixes: loss, student_loss, distill_loss → val_loss,
-        # val_student_loss, val_distill_loss BUT does NOT prefix compiled
-        # metrics (accuracy). We return bare names + explicit val_accuracy.
-        results = {}
-        results["loss"] = self.loss_tracker.result()
-        
-        # accuracy — explicit val_ since Keras won't prefix compiled metrics
-        if hasattr(self.compiled_metrics, 'metrics'):
-            for m in self.compiled_metrics.metrics:
-                results[m.name] = m.result()
-                results[f"val_{m.name}"] = m.result()  # only explicit val_ needed
-        else:
-            for m in self.metrics:
-                if isinstance(m, tf.keras.metrics.Mean) and m.name == "loss":
-                    continue
-                results[m.name] = m.result()
-                results[f"val_{m.name}"] = m.result()
-        
-        # Custom loss keys — Keras auto-prefixes these, so bare names only
-        results["student_loss"] = student_loss
-        results["distill_loss"] = distill_loss
+        # Compute accuracy manually as a scalar for reliable logging.
+        # Keras 3 auto-prefixes custom keys (loss, student_loss, distill_loss)
+        # with "val_" in validation logs but does NOT prefix compiled metrics
+        # (accuracy).  We return BOTH bare and val_accuracy so callbacks
+        # (CSVLogger, ReduceLROnPlateau, EarlyStopping) can find the key
+        # regardless of Keras version.
+        acc = tf.reduce_mean(
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), y), tf.float32)
+        )
+        results = {
+            "loss": self.loss_tracker.result(),
+            "accuracy": acc,
+            "val_accuracy": acc,
+            "student_loss": student_loss,
+            "distill_loss": distill_loss,
+        }
         
         return results
 
@@ -807,23 +802,17 @@ class MixedInputDistiller(Distiller):
         self.compiled_metrics.update_state(y, student_probs)
         self.loss_tracker.update_state(loss)
         
-        # Same policy as Distiller.test_step()
-        results = {}
-        results["loss"] = self.loss_tracker.result()
-        
-        if hasattr(self.compiled_metrics, 'metrics'):
-            for m in self.compiled_metrics.metrics:
-                results[m.name] = m.result()
-                results[f"val_{m.name}"] = m.result()
-        else:
-            for m in self.metrics:
-                if isinstance(m, tf.keras.metrics.Mean) and m.name == "loss":
-                    continue
-                results[m.name] = m.result()
-                results[f"val_{m.name}"] = m.result()
-        
-        results["student_loss"] = student_loss
-        results["distill_loss"] = distill_loss
+        # Same policy as Distiller.test_step(): manual accuracy + val_accuracy
+        acc = tf.reduce_mean(
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), y), tf.float32)
+        )
+        results = {
+            "loss": self.loss_tracker.result(),
+            "accuracy": acc,
+            "val_accuracy": acc,
+            "student_loss": student_loss,
+            "distill_loss": distill_loss,
+        }
         
         return results
 
