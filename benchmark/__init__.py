@@ -25,7 +25,7 @@ from .data import (
     get_all_models,
     load_test_dataset_with_labels,
     configure_parameters_for_model,
-    _select_best_tflite_files,
+    _get_paired_tflite_files,
 )
 
 from .results import (
@@ -53,7 +53,7 @@ __all__ = [
     "get_all_models",
     "load_test_dataset_with_labels",
     "configure_parameters_for_model",
-    "_select_best_tflite_files",
+    "_get_paired_tflite_files",
     "test_model_on_dataset",
     "test_all_models",
     "generate_confusion_matrix",

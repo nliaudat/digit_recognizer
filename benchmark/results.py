@@ -56,20 +56,41 @@ except ImportError:
 def test_model_on_dataset(model_path, num_test_images=0, debug=False,
                           use_all_datasets=True, collect_failed=False,
                           model_name=None, tolerance=0.1,
-                          simulate_esp32=False):
+                          simulate_esp32=False, model_path_float32=None,
+                          model_path_uint8=None):
     """Test a model on random images from dataset and return accuracy and performance metrics.
+
+    When both model_path_float32 and model_path_uint8 are provided:
+      - Float32 accuracy: predict() on the float32 model (true PC inference)
+      - Uint8 accuracy:    predict_esp32() on the uint8 model (ESP32 simulation)
+    Otherwise falls back to using model_path for both (legacy behaviour).
 
     Args:
         simulate_esp32: If True, also run ESP32-simulated inference and return its accuracy.
     Returns:
-        (accuracy, total_tested, avg_inference_time, inferences_per_second,
-         failed_predictions, all_predictions_lite, esp32_accuracy, accuracy_real_only)
+        (float32_accuracy, total_tested, avg_inference_time, inferences_per_second,
+         failed_predictions, all_predictions_lite, uint8_accuracy, accuracy_real_only,
+         float32_accuracy_raw, uint8_accuracy_raw)
     """
+    # Determine which models to use for each inference path
+    path_predict = model_path_float32 or model_path      # predict() on float32 if available
+    path_esp32 = model_path_uint8 or model_path          # predict_esp32() on uint8 if available
+
     try:
-        predictor = TFLiteDigitPredictor(model_path)
+        predictor_pc = TFLiteDigitPredictor(path_predict)
     except Exception as e:
-        logger.error(f"Skipping model {model_path}: {e}")
-        return 0.0, 0, 0.0, 0.0, [], [], 0.0
+        logger.error(f"Skipping model {path_predict}: {e}")
+        return 0.0, 0, 0.0, 0.0, [], [], 0.0, 0.0, 0.0, 0.0
+
+    predictor_esp = None
+    if simulate_esp32 and path_esp32 != path_predict:
+        try:
+            predictor_esp = TFLiteDigitPredictor(path_esp32)
+        except Exception as e:
+            logger.warning(f"Could not load uint8 model for ESP32 sim: {path_esp32}: {e}")
+            predictor_esp = predictor_pc  # fallback
+    elif simulate_esp32:
+        predictor_esp = predictor_pc
 
     correct_predictions = 0
     total_tested = 0
@@ -81,7 +102,7 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False,
     correct_real = 0
     total_real = 0
 
-    # ESP32 simulation counters
+    # ESP32 simulation counters (runs on uint8 model)
     esp32_correct = 0
     esp32_predictions_lite = []
 
@@ -90,14 +111,14 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False,
 
     if not test_data:
         logger.error("No test data available")
-        return 0.0, 0, 0.0, 0.0, [], [], 0.0, 0.0, 0.0
+        return 0.0, 0, 0.0, 0.0, [], [], 0.0, 0.0, 0.0, 0.0
 
-    # Warm-up run
+    # Warm-up runs
     if len(test_data) > 0:
         warmup_image, _, _, _ = test_data[0]
         if warmup_image is not None:
             try:
-                predictor.predict(warmup_image, debug=False)
+                predictor_pc.predict(warmup_image, debug=False)
             except:
                 pass
 
@@ -114,14 +135,15 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False,
             continue
 
         try:
+            # ── Float32 inference path ──
             start_time = time.perf_counter()
-            prediction, confidence, _ = predictor.predict(image, debug=debug)
+            prediction, confidence, _ = predictor_pc.predict(image, debug=debug)
             end_time = time.perf_counter()
 
             inference_time = (end_time - start_time) * 1000
             total_inference_time += inference_time
 
-            model_scale = predictor.num_classes / 10.0
+            model_scale = predictor_pc.num_classes / 10.0
             pred_digit = float(prediction) / model_scale
             true_digit = float(true_label) / model_scale
 
@@ -133,10 +155,10 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False,
                 if not is_augmented:
                     correct_real += 1
                 if debug:
-                    print(f"✓ Correct: {pred_digit:.1f} (true: {true_digit:.1f}, confidence: {confidence:.3f})")
+                    print(f"✓ Float32 Correct: {pred_digit:.1f} (true: {true_digit:.1f}, confidence: {confidence:.3f})")
             else:
                 if debug:
-                    print(f"✗ Wrong: {prediction} (true: {true_label}, confidence: {confidence:.3f})")
+                    print(f"✗ Float32 Wrong: {prediction} (true: {true_label}, confidence: {confidence:.3f})")
                 failed_predictions.append({
                     'image': image,
                     'true_label': true_label,
@@ -145,7 +167,7 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False,
                     'model': model_name or os.path.basename(model_path),
                     'image_source': 'dataset',
                     'original_fname': original_fname,
-                    'num_classes': predictor.num_classes,
+                    'num_classes': predictor_pc.num_classes,
                 })
 
             if not is_augmented:
@@ -155,14 +177,15 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False,
                 'true_label': true_label,
                 'predicted_label': prediction,
                 'model': model_name or os.path.basename(model_path),
-                'num_classes': predictor.num_classes,
+                'num_classes': predictor_pc.num_classes,
                 'tolerance': tolerance,
             })
 
-            # ESP32 simulation pass
-            if simulate_esp32:
-                esp32_prediction, esp32_confidence, _ = predictor.predict_esp32(image, debug=debug)
-                esp32_pred_digit = float(esp32_prediction) / model_scale
+            # ── Uint8 (ESP32) inference path ──
+            if simulate_esp32 and predictor_esp is not None:
+                esp32_prediction, esp32_confidence, _ = predictor_esp.predict_esp32(image, debug=debug)
+                esp32_model_scale = predictor_esp.num_classes / 10.0
+                esp32_pred_digit = float(esp32_prediction) / esp32_model_scale
                 esp32_diff = abs(true_digit - esp32_pred_digit) % 10.0
                 esp32_circular_diff = min(esp32_diff, 10.0 - esp32_diff)
 
@@ -173,7 +196,7 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False,
                     'true_label': true_label,
                     'predicted_label': esp32_prediction,
                     'model': (model_name or os.path.basename(model_path)) + "_esp32",
-                    'num_classes': predictor.num_classes,
+                    'num_classes': predictor_esp.num_classes,
                     'tolerance': tolerance,
                 })
 
@@ -185,11 +208,11 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False,
             continue
 
     # Calculate metrics
-    accuracy = correct_predictions / total_tested if total_tested > 0 else 0.0
+    float32_accuracy = correct_predictions / total_tested if total_tested > 0 else 0.0
     avg_inference_time = total_inference_time / total_tested if total_tested > 0 else 0.0
     inferences_per_second = 1000 / avg_inference_time if avg_inference_time > 0 else 0.0
-    accuracy_real_only = correct_real / total_real if total_real > 0 else 0.0
-    esp32_accuracy = esp32_correct / total_tested if total_tested > 0 and simulate_esp32 else 0.0
+    float32_accuracy_real_only = correct_real / total_real if total_real > 0 else 0.0
+    uint8_accuracy = esp32_correct / total_tested if total_tested > 0 and simulate_esp32 else 0.0
 
     # Verify failed count
     expected_failed = total_tested - correct_predictions
@@ -199,16 +222,17 @@ def test_model_on_dataset(model_path, num_test_images=0, debug=False,
         print(f"   Actual failed collected: {len(failed_predictions)}")
 
     if debug:
-        print(f"Final accuracy: {accuracy:.3f} ({correct_predictions}/{total_tested})")
-        print(f"Real-only accuracy: {accuracy_real_only:.3f} ({correct_real}/{total_real})")
+        print(f"Float32 accuracy: {float32_accuracy:.3f} ({correct_predictions}/{total_tested})")
+        print(f"Real-only accuracy: {float32_accuracy_real_only:.3f} ({correct_real}/{total_real})")
         if simulate_esp32:
-            print(f"ESP32-sim accuracy: {esp32_accuracy:.3f} ({esp32_correct}/{total_tested})")
+            print(f"Uint8 (ESP32-sim) accuracy: {uint8_accuracy:.3f} ({esp32_correct}/{total_tested})")
         print(f"Failed predictions: {len(failed_predictions)}")
         print(f"Average inference time: {avg_inference_time:.2f} ms")
         print(f"Inferences per second: {inferences_per_second:.0f}")
 
-    return (accuracy, total_tested, avg_inference_time, inferences_per_second,
-            failed_predictions, all_predictions_lite, esp32_accuracy, accuracy_real_only)
+    return (float32_accuracy, total_tested, avg_inference_time, inferences_per_second,
+            failed_predictions, all_predictions_lite, uint8_accuracy, float32_accuracy_real_only,
+            float32_accuracy, uint8_accuracy)
 
 
 # ── Results Presentation ──────────────────────────────────────────────────
@@ -326,10 +350,10 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
     quant_suffix = "quantized" if quantized_only else "all"
     dataset_suffix = "full" if use_all_datasets else "sampled"
 
-    # Prepare data
+    # Prepare data (use Float32_Accuracy for main accuracy graphs)
     plot_data = []
     for result in results:
-        accuracy = float(result['Accuracy'])
+        accuracy = float(result['Float32_Accuracy'])
         inferences_per_second = float(result['Inf/s'])
         if accuracy > 0 and inferences_per_second > 0:
             dir_name = result['Directory']
@@ -350,14 +374,14 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
                 'parameters_million': params_val / 1_000_000,
             })
 
-    # ESP32 plot data
+    # Uint8 (ESP32) plot data
     esp32_plot_data = []
     if simulate_esp32:
         for result in results:
-            esp32_acc = float(result.get('ESP32_Accuracy', 0.0))
-            pc_acc = float(result['Accuracy'])
+            uint8_acc = float(result.get('Uint8_Accuracy', 0.0))
+            pc_acc = float(result['Float32_Accuracy'])
             inferences_per_second = float(result['Inf/s'])
-            if esp32_acc > 0 and inferences_per_second > 0:
+            if uint8_acc > 0 and inferences_per_second > 0:
                 dir_name = result['Directory']
                 model_name = result['Model']
                 label = f"{dir_name}\n{model_name.replace('.tflite', '')}"
@@ -370,7 +394,7 @@ def generate_comparison_graphs(results, quantized_only=True, use_all_datasets=Tr
                     params_val = float(params_str)
                 esp32_plot_data.append({
                     'label': label, 'directory': dir_name, 'model_name': model_name,
-                    'accuracy': esp32_acc * 100, 'pc_accuracy': pc_acc * 100,
+                    'accuracy': uint8_acc * 100, 'pc_accuracy': pc_acc * 100,
                     'inferences_per_second': inferences_per_second,
                     'size_kb': float(result['Size (KB)']),
                     'parameters_million': params_val / 1_000_000,
@@ -645,6 +669,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
             model_name=model_info['name'],
             tolerance=tolerance,
             simulate_esp32=simulate_esp32,
+            model_path_float32=model_info.get('path_float32'),
+            model_path_uint8=model_info.get('path_uint8'),
         )
 
         if results_data is None or results_data[1] == 0:
@@ -652,8 +678,9 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
                 print(f"⚠️  Skipping results for {model_info['name']} due to failure")
             continue
 
-        (accuracy, tested_count, avg_inference_time, inferences_per_second,
-         failed_predictions, all_predictions_lite, esp32_accuracy, accuracy_real_only) = results_data
+        (float32_accuracy, tested_count, avg_inference_time, inferences_per_second,
+         failed_predictions, all_predictions_lite, uint8_accuracy, float32_accuracy_real_only,
+         _, _) = results_data
 
         all_predictions.extend(all_predictions_lite)
         for failure in failed_predictions:
@@ -676,12 +703,12 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
             'Params_Raw': params_count,
             'Size (KB)': f"{model_info['size_kb']:.1f}",
             'Size_Raw': model_info['size_kb'],
-            'Accuracy': f"{accuracy:.4f}",
-            'Accuracy_Raw': accuracy,
-            'Accuracy_RealOnly': f"{accuracy_real_only:.4f}",
-            'Accuracy_RealOnly_Raw': accuracy_real_only,
-            'ESP32_Accuracy': f"{esp32_accuracy:.4f}",
-            'ESP32_Accuracy_Raw': esp32_accuracy,
+            'Float32_Accuracy': f"{float32_accuracy:.4f}",
+            'Float32_Accuracy_Raw': float32_accuracy,
+            'Float32_Accuracy_RealOnly': f"{float32_accuracy_real_only:.4f}",
+            'Float32_Accuracy_RealOnly_Raw': float32_accuracy_real_only,
+            'Uint8_Accuracy': f"{uint8_accuracy:.4f}",
+            'Uint8_Accuracy_Raw': uint8_accuracy,
             'Inf Time (ms)': f"{avg_inference_time:.2f}",
             'Inf Time_Raw': avg_inference_time,
             'Inf/s': f"{inferences_per_second:.0f}",
@@ -691,7 +718,7 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
         })
 
         if debug:
-            print(f"✅ Completed: {model_info['directory']}/{model_info['name']} - Accuracy: {accuracy:.3f}")
+            print(f"✅ Completed: {model_info['directory']}/{model_info['name']} - Float32 Accuracy: {float32_accuracy:.3f}")
 
     # Handle failed predictions
     if list_failed and all_failed_predictions:
@@ -699,8 +726,8 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
     if save_failed and all_failed_predictions:
         save_failed_images(all_failed_predictions, input_dir)
 
-    # Sort by accuracy descending
-    results.sort(key=lambda x: x['Accuracy_Raw'], reverse=True)
+    # Sort by float32 accuracy descending
+    results.sort(key=lambda x: x['Float32_Accuracy_Raw'], reverse=True)
 
     # Print summary table
     print(f"\n{'='*80}")
@@ -720,36 +747,36 @@ def test_all_models(num_test_images=0, quantized_only=False, debug=False,
     print(f"{'='*80}")
 
     if simulate_esp32:
-        headers = ['Directory', 'Model', 'Type', 'Params', 'Size', 'Accuracy',
-                    'RealOnly', 'ESP32', 'Gap', 'Inf/s', 'Images', 'Failed']
+        headers = ['Directory', 'Model', 'Type', 'Params', 'Size', 'Float32',
+                    'RealOnly', 'Uint8', 'Gap', 'Inf/s', 'Images', 'Failed']
     else:
-        headers = ['Directory', 'Model', 'Type', 'Params', 'Size', 'Accuracy',
+        headers = ['Directory', 'Model', 'Type', 'Params', 'Size', 'Float32',
                     'RealOnly', 'Inf/s', 'Images', 'Failed']
     table_data = []
     for result in results:
         row = [
             result['Directory'], result['Model'], result['Type'], result['Params'],
-            result['Size (KB)'], f"{float(result['Accuracy']):.3f}",
-            f"{float(result['Accuracy_RealOnly']):.3f}",
+            result['Size (KB)'], f"{float(result['Float32_Accuracy']):.3f}",
+            f"{float(result['Float32_Accuracy_RealOnly']):.3f}",
         ]
         if simulate_esp32:
-            esp32_acc = float(result['ESP32_Accuracy'])
-            gap = (float(result['Accuracy']) - esp32_acc) * 100
-            row.append(f"{esp32_acc:.3f}")
+            uint8_acc = float(result['Uint8_Accuracy'])
+            gap = (float(result['Float32_Accuracy']) - uint8_acc) * 100
+            row.append(f"{uint8_acc:.3f}")
             row.append(f"{gap:+.1f}%")
         row.extend([result['Inf/s'], result['Tested'], result['Failed_Count']])
         table_data.append(row)
     print(tabulate(table_data, headers=headers, tablefmt='simple_grid', stralign='right'))
 
     # Best models
-    if results and results[0]['Accuracy_Raw'] > 0:
-        best_accuracy = max(results, key=lambda x: x['Accuracy_Raw'])
+    if results and results[0]['Float32_Accuracy_Raw'] > 0:
+        best_accuracy = max(results, key=lambda x: x['Float32_Accuracy_Raw'])
         fastest_model = max(results, key=lambda x: x['Inf/s_Raw'])
-        print(f"\n🏆 BEST BY ACCURACY: {best_accuracy['Directory']}/{best_accuracy['Model']}")
-        print(f"   Accuracy: {float(best_accuracy['Accuracy']):.3f}, Speed: {best_accuracy['Inf/s']} inf/s")
+        print(f"\n🏆 BEST BY FLOAT32 ACCURACY: {best_accuracy['Directory']}/{best_accuracy['Model']}")
+        print(f"   Float32 Acc: {float(best_accuracy['Float32_Accuracy']):.3f}, Speed: {best_accuracy['Inf/s']} inf/s")
         if simulate_esp32:
-            best_esp32 = max(results, key=lambda x: x['ESP32_Accuracy_Raw'])
-            print(f"\n🔌 BEST ESP32-SIM: {best_esp32['Directory']}/{best_esp32['Model']}")
+            best_esp32 = max(results, key=lambda x: x['Uint8_Accuracy_Raw'])
+            print(f"\n🔌 BEST UINT8 (ESP32-SIM): {best_esp32['Directory']}/{best_esp32['Model']}")
         print(f"⚡ FASTEST MODEL: {fastest_model['Directory']}/{fastest_model['Model']}")
 
     # Generate graphs
@@ -811,9 +838,9 @@ def save_results_to_csv(results, quantized_only=True, use_all_images=True,
             'Type': result['Type'],
             'Parameters': int(params_count),
             'Size_KB': float(result['Size (KB)']),
-            'Accuracy': float(result['Accuracy']),
-            'Accuracy_RealOnly': float(result.get('Accuracy_RealOnly', 0.0)),
-            'ESP32_Accuracy': float(result.get('ESP32_Accuracy', 0.0)),
+            'Float32_Accuracy': float(result['Float32_Accuracy']),
+            'Float32_Accuracy_RealOnly': float(result.get('Float32_Accuracy_RealOnly', 0.0)),
+            'Uint8_Accuracy': float(result.get('Uint8_Accuracy', 0.0)),
             'Inference_Time_ms': float(result['Inf Time (ms)']),
             'Inferences_per_second': float(result['Inf/s']),
             'Tested_Images': result['Tested'],
@@ -837,7 +864,7 @@ def save_results_to_csv(results, quantized_only=True, use_all_images=True,
 
     with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
         fieldnames = ['Model', 'Directory', 'Type', 'Parameters', 'Size_KB',
-                      'Accuracy', 'Accuracy_RealOnly', 'ESP32_Accuracy',
+                      'Float32_Accuracy', 'Float32_Accuracy_RealOnly', 'Uint8_Accuracy',
                       'Inference_Time_ms', 'Inferences_per_second', 'Tested_Images']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
@@ -851,40 +878,44 @@ def save_results_to_csv(results, quantized_only=True, use_all_images=True,
 # ── IoT Model Analysis ────────────────────────────────────────────────────
 
 def calculate_best_iot_model(df, accuracy_weight=0.5, size_weight=0.3, speed_weight=0.2):
-    """Dynamically calculate the best IoT model based on weighted criteria."""
+    """Dynamically calculate the best IoT model based on weighted criteria.
+
+    Works with CSV data that has Float32_Accuracy, Uint8_Accuracy columns.
+    Uses Float32_Accuracy for the base accuracy metric.
+    """
     df = df.copy()
-    df = df[(df['Accuracy'] > 0) & (df['Inferences_per_second'] > 0) & (df['Size_KB'] > 0)].copy()
+    df = df[(df['Float32_Accuracy'] > 0) & (df['Inferences_per_second'] > 0) & (df['Size_KB'] > 0)].copy()
 
     if df.empty:
         return {
             'best_overall': None, 'best_accuracy_small': None,
             'best_speed_small': None, 'smallest_adequate': None,
-            'all_scores': pd.DataFrame(columns=['Model', 'Accuracy', 'Size_KB',
+            'all_scores': pd.DataFrame(columns=['Model', 'Float32_Accuracy', 'Size_KB',
                                                   'Inferences_per_second', 'iot_score',
                                                   'accuracy_per_kb']),
             'weights_used': {'accuracy': accuracy_weight, 'size': size_weight, 'speed': speed_weight},
         }
 
-    df['accuracy_norm'] = df['Accuracy'] / df['Accuracy'].max()
+    df['accuracy_norm'] = df['Float32_Accuracy'] / df['Float32_Accuracy'].max()
     df['size_norm'] = (1 / df['Size_KB']) / (1 / df['Size_KB']).max()
     df['speed_norm'] = df['Inferences_per_second'] / df['Inferences_per_second'].max()
     df['iot_score'] = (df['accuracy_norm'] * accuracy_weight +
                        df['size_norm'] * size_weight +
                        df['speed_norm'] * speed_weight)
     best_iot_model = df.loc[df['iot_score'].idxmax()]
-    df['accuracy_per_kb'] = df['Accuracy'] / df['Size_KB']
+    df['accuracy_per_kb'] = df['Float32_Accuracy'] / df['Size_KB']
     if 'Parameters' in df.columns:
-        df['accuracy_per_param'] = df['Accuracy'] / df['Parameters']
+        df['accuracy_per_param'] = df['Float32_Accuracy'] / df['Parameters']
     else:
         df['accuracy_per_param'] = 0
 
     small_models = df[df['Size_KB'] <= 100]
-    accurate_models = df[df['Accuracy'] >= 0.90]
-    best_accuracy_small = small_models.loc[small_models['Accuracy'].idxmax()] if not small_models.empty else df.loc[df['Size_KB'].idxmin()]
+    accurate_models = df[df['Float32_Accuracy'] >= 0.90]
+    best_accuracy_small = small_models.loc[small_models['Float32_Accuracy'].idxmax()] if not small_models.empty else df.loc[df['Size_KB'].idxmin()]
     best_speed_small = small_models.loc[small_models['Inferences_per_second'].idxmax()] if not small_models.empty else df.loc[df['Inferences_per_second'].idxmax()]
-    smallest_adequate = accurate_models.loc[accurate_models['Size_KB'].idxmin()] if not accurate_models.empty else df.loc[df['Accuracy'].idxmax()]
+    smallest_adequate = accurate_models.loc[accurate_models['Size_KB'].idxmin()] if not accurate_models.empty else df.loc[df['Float32_Accuracy'].idxmax()]
 
-    result_columns = ['Model', 'Accuracy', 'Size_KB', 'Inferences_per_second', 'iot_score', 'accuracy_per_kb']
+    result_columns = ['Model', 'Float32_Accuracy', 'Size_KB', 'Inferences_per_second', 'iot_score', 'accuracy_per_kb']
     if 'Parameters' in df.columns:
         result_columns.append('Parameters')
     if 'accuracy_per_param' in df.columns:
@@ -923,15 +954,15 @@ def generate_iot_recommendation_section(f, df):
     f.write("#### 🎯 Best Overall for ESP32\n")
     f.write(f"- **Model**: **{best_model['Model']}**\n")
     f.write(f"- **IoT Score**: {best_model['iot_score']:.3f}\n")
-    f.write(f"- **Accuracy**: {best_model['Accuracy']:.3f}\n")
+    f.write(f"- **Float32 Accuracy**: {best_model['Float32_Accuracy']:.3f}\n")
     f.write(f"- **Size**: {best_model['Size_KB']:.1f} KB\n")
     f.write(f"- **Speed**: {best_model['Inferences_per_second']:.0f} inf/s\n")
-    accuracy_per_kb = best_model.get('accuracy_per_kb', best_model['Accuracy'] / best_model['Size_KB'])
+    accuracy_per_kb = best_model.get('accuracy_per_kb', best_model['Float32_Accuracy'] / best_model['Size_KB'])
     f.write(f"- **Efficiency**: {accuracy_per_kb:.4f} accuracy per KB\n\n")
 
     f.write("#### 📊 IoT Model Comparison (Under 100KB)\n")
-    f.write("| Model | Accuracy | Size | Speed | IoT Score | Use Case |\n")
-    f.write("|-------|----------|------|-------|-----------|----------|\n")
+    f.write("| Model | Float32 Acc | Size | Speed | IoT Score | Use Case |\n")
+    f.write("|-------|-------------|------|-------|-----------|----------|\n")
     small_models = df_with_scores[df_with_scores['Size_KB'] <= 100].nlargest(5, 'iot_score')
     if small_models.empty:
         f.write("| *No models under 100KB* | - | - | - | - | - |\n")
@@ -946,23 +977,23 @@ def generate_iot_recommendation_section(f, df):
                 use_case = "⚡ Fastest"
             elif smallest_adequate is not None and model['Model'] == smallest_adequate['Model']:
                 use_case = "💾 Smallest Adequate"
-            f.write(f"| {model['Model']} | {model['Accuracy']:.3f} | {model['Size_KB']:.1f}KB | "
+            f.write(f"| {model['Model']} | {model['Float32_Accuracy']:.3f} | {model['Size_KB']:.1f}KB | "
                     f"{model['Inferences_per_second']:.0f}/s | {model['iot_score']:.3f} | {use_case} |\n")
 
     f.write("\n")
     f.write("#### 🔧 Alternative IoT Scenarios\n\n")
     if best_accuracy_small is not None:
         f.write(f"**For Accuracy-Critical IoT:** Choice: {best_accuracy_small['Model']}, "
-                f"Accuracy: {best_accuracy_small['Accuracy']:.3f}, "
+                f"Float32 Acc: {best_accuracy_small['Float32_Accuracy']:.3f}, "
                 f"Trade-off: {best_accuracy_small['Size_KB']:.1f}KB\n\n")
     if best_speed_small is not None:
         f.write(f"**For Speed-Critical IoT:** Choice: {best_speed_small['Model']}, "
                 f"Speed: {best_speed_small['Inferences_per_second']:.0f} inf/s, "
-                f"Trade-off: {best_speed_small['Accuracy']:.3f} accuracy\n\n")
+                f"Trade-off: {best_speed_small['Float32_Accuracy']:.3f} accuracy\n\n")
     if smallest_adequate is not None:
         f.write(f"**For Memory-Constrained IoT:** Choice: {smallest_adequate['Model']}, "
                 f"Size: {smallest_adequate['Size_KB']:.1f}KB, "
-                f"Trade-off: {smallest_adequate['Accuracy']:.3f} accuracy\n\n")
+                f"Trade-off: {smallest_adequate['Float32_Accuracy']:.3f} accuracy\n\n")
 
 
 def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True,
@@ -982,22 +1013,21 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
         f.write("# Digit Recognition Benchmark Report\n\n")
 
         # ESP32 Section
-        if simulate_esp32 and 'ESP32_Accuracy' in df.columns:
+        if simulate_esp32 and 'Uint8_Accuracy' in df.columns:
             f.write("## 🔌 ESP32 Hardware Simulation\n\n")
-            f.write("> **What this is**: Each model was also tested through an ESP32-simulated inference "
-                    "pipeline that adds quantization noise to simulate the integer-only arithmetic of "
-                    "TFLite Micro on ESP32. Models with a smaller gap between PC and ESP32 accuracy "
+            f.write("> **What this is**: Each model was tested on both float32 (PC) and uint8 (ESP32-sim) "
+                    "inference. Models with a smaller gap between Float32 and Uint8 accuracy "
                     "are more robust for real hardware deployment.\n\n")
-            f.write("| Model | PC Accuracy | ESP32 Sim. | Gap | Verdict |\n")
-            f.write("|-------|-------------|------------|-----|---------|\n")
-            esp32_df = df[df['ESP32_Accuracy'] > 0].sort_values('ESP32_Accuracy', ascending=False)
-            for _, row in esp32_df.iterrows():
-                gap = (row['Accuracy'] - row['ESP32_Accuracy']) * 100
+            f.write("| Model | Float32 Acc | Uint8 (ESP32) | Gap | Verdict |\n")
+            f.write("|-------|-------------|---------------|-----|---------|\n")
+            uint8_df = df[df['Uint8_Accuracy'] > 0].sort_values('Uint8_Accuracy', ascending=False)
+            for _, row in uint8_df.iterrows():
+                gap = (row['Float32_Accuracy'] - row['Uint8_Accuracy']) * 100
                 if gap < 0.5: verdict = "✅ Excellent (robust)"
                 elif gap < 1.5: verdict = "⚠️ Good (minor loss)"
                 elif gap < 3.0: verdict = "⚠️ Moderate loss"
                 else: verdict = "❌ Significant loss"
-                f.write(f"| {row['Model']} | {row['Accuracy']:.3f} | {row['ESP32_Accuracy']:.3f} | "
+                f.write(f"| {row['Model']} | {row['Float32_Accuracy']:.3f} | {row['Uint8_Accuracy']:.3f} | "
                         f"{gap:+.1f}% | {verdict} |\n")
             f.write("\n")
             quant_suffix = "quantized" if quantized_only else "all"
@@ -1013,14 +1043,14 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
         iot_analysis = calculate_best_iot_model(df)
         if iot_analysis['best_overall'] is not None:
             best_iot = iot_analysis['best_overall']
-            best_accuracy = df.loc[df['Accuracy'].idxmax()]
+            best_accuracy = df.loc[df['Float32_Accuracy'].idxmax()]
             fastest = df.loc[df['Inferences_per_second'].idxmax()]
             smallest = df.loc[df['Size_KB'].idxmin()]
             f.write(f"- **Test Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"- **Models Tested**: {len(df)} {'quantized' if quantized_only else 'all'} models\n")
             f.write(f"- **Best IoT Model**: **{best_iot['Model']}** ({best_iot['Size_KB']:.1f}KB, "
-                    f"{best_iot['Accuracy']:.3f} acc, {best_iot['Inferences_per_second']:.0f} inf/s)\n")
-            f.write(f"- **Best Accuracy**: **{best_accuracy['Model']}** ({best_accuracy['Accuracy']:.3f})\n")
+                    f"{best_iot['Float32_Accuracy']:.3f} acc, {best_iot['Inferences_per_second']:.0f} inf/s)\n")
+            f.write(f"- **Best Float32 Accuracy**: **{best_accuracy['Model']}** ({best_accuracy['Float32_Accuracy']:.3f})\n")
             f.write(f"- **Fastest Model**: **{fastest['Model']}** ({fastest['Inferences_per_second']:.0f} inf/s)\n")
             f.write(f"- **Smallest Model**: **{smallest['Model']}** ({smallest['Size_KB']:.1f} KB)\n\n")
         else:
@@ -1035,12 +1065,12 @@ def generate_markdown_report(csv_path, graph_paths, results, quantized_only=True
 
         # Detailed Results
         f.write("## 📋 Detailed Results\n\n")
-        f.write("| Model | Size (KB) | Accuracy | Inf/s | Parameters | IoT Score |\n")
-        f.write("|-------|-----------|----------|-------|------------|-----------|\n")
+        f.write("| Model | Size (KB) | Float32 Acc | Inf/s | Parameters | IoT Score |\n")
+        f.write("|-------|-----------|-------------|-------|------------|-----------|\n")
         scored_df = iot_analysis['all_scores']
         for _, row in scored_df.iterrows():
             parameters = row.get('Parameters', 'N/A')
-            f.write(f"| {row['Model']} | {row['Size_KB']:.1f} | {row['Accuracy']:.3f} | "
+            f.write(f"| {row['Model']} | {row['Size_KB']:.1f} | {row['Float32_Accuracy']:.3f} | "
                     f"{row['Inferences_per_second']:.0f} | {parameters} | {row['iot_score']:.3f} |\n")
         f.write("\n")
 

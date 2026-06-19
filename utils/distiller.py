@@ -186,9 +186,28 @@ class Distiller(tf.keras.Model):
         # Detect output format for teacher and student
         self.teacher_is_logit = self._is_logit_output(self.teacher)
         self.student_is_logit = self._is_logit_output(self.student)
-        
+
         logger.info(f"Distiller initialized: mode={mode}, temperature={temperature}, alpha={alpha}")
         logger.info(f"Format detection: teacher_is_logit={self.teacher_is_logit}, student_is_logit={self.student_is_logit}")
+
+        # ── Validate teacher output format ─────────────────────────────
+        try:
+            dummy_shape = self.teacher.input_shape
+            if None not in dummy_shape[1:]:
+                dummy_input = tf.zeros((1,) + dummy_shape[1:], dtype=tf.float32)
+                dummy_raw = self.teacher(dummy_input, training=False)
+                dummy_probs = _extract_teacher_probs(self.teacher, dummy_raw)
+                prob_sum = tf.reduce_sum(dummy_probs, axis=-1)
+                mean_sum = tf.reduce_mean(prob_sum).numpy()
+                if abs(mean_sum - 1.0) > 0.5:
+                    logger.warning(
+                        f"⚠️ Teacher output probabilities sum to {mean_sum:.4f} (expected ~1.0). "
+                        f"Format detection (teacher_is_logit={self.teacher_is_logit}) may be wrong."
+                    )
+                else:
+                    logger.debug(f"Teacher format validated: prob_sum={mean_sum:.4f}")
+        except Exception as e:
+            logger.debug(f"Teacher format validation skipped (non-deterministic shape?): {e}")
     
     def compile(
         self,
@@ -309,35 +328,23 @@ class Distiller(tf.keras.Model):
         self.compiled_metrics.update_state(y, student_probs)
         self.loss_tracker.update_state(loss)
         
-        # Start with default metrics (e.g. loss_tracker → "loss")
-        results = {m.name: m.result() for m in self.metrics}
-        
-        # Explicitly include compiled metrics (e.g. accuracy) — Keras should prefix
-        # these with "val_" in the validation logs, but some versions do not prefix
-        # subclass-model custom test_step results consistently.  We add both bare
-        # and prefixed keys so callbacks (EarlyStopping, ModelCheckpoint, CSVLogger)
-        # can find whichever key the runtime produces.
-        # Keras 3 compatibility: self.compiled_metrics may be DeprecatedCompiledMetric
-        # which does not have a .metrics attribute — fall back to self.metrics.
-        if hasattr(self.compiled_metrics, 'metrics'):
-            _metric_list = self.compiled_metrics.metrics
-        else:
-            # Filter out the loss tracker (Mean metric named "loss")
-            _metric_list = [m for m in self.metrics if not isinstance(m, tf.keras.metrics.Mean)]
-        for m in _metric_list:
-            if m.name not in results:
-                results[m.name] = m.result()
-            results[f"val_{m.name}"] = m.result()
-        
-        results.update({
+        # Compute accuracy manually as a scalar for reliable logging.
+        # Keras 3 auto-prefixes custom keys (loss, student_loss, distill_loss)
+        # with "val_" in validation logs but does NOT prefix compiled metrics
+        # (accuracy).  We return BOTH bare and val_accuracy so callbacks
+        # (CSVLogger, ReduceLROnPlateau, EarlyStopping) can find the key
+        # regardless of Keras version.
+        acc = tf.reduce_mean(
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), y), tf.float32)
+        )
+        results = {
             "loss": self.loss_tracker.result(),
-            "val_loss": self.loss_tracker.result(),
+            "accuracy": acc,
+            "val_accuracy": acc,
             "student_loss": student_loss,
             "distill_loss": distill_loss,
-        })
-        # Also add prefixed versions for the custom losses
-        results["val_student_loss"] = student_loss
-        results["val_distill_loss"] = distill_loss
+        }
+        
         return results
 
     def call(self, inputs: tf.Tensor, training: bool = False) -> tf.Tensor:
@@ -795,25 +802,18 @@ class MixedInputDistiller(Distiller):
         self.compiled_metrics.update_state(y, student_probs)
         self.loss_tracker.update_state(loss)
         
-        results = {m.name: m.result() for m in self.metrics}
-        # Keras 3 compatibility: self.compiled_metrics may be DeprecatedCompiledMetric
-        if hasattr(self.compiled_metrics, 'metrics'):
-            _metric_list = self.compiled_metrics.metrics
-        else:
-            _metric_list = [m for m in self.metrics if not isinstance(m, tf.keras.metrics.Mean)]
-        for m in _metric_list:
-            if m.name not in results:
-                results[m.name] = m.result()
-            results[f"val_{m.name}"] = m.result()
-        
-        results.update({
+        # Same policy as Distiller.test_step(): manual accuracy + val_accuracy
+        acc = tf.reduce_mean(
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), y), tf.float32)
+        )
+        results = {
             "loss": self.loss_tracker.result(),
-            "val_loss": self.loss_tracker.result(),
+            "accuracy": acc,
+            "val_accuracy": acc,
             "student_loss": student_loss,
             "distill_loss": distill_loss,
-        })
-        results["val_student_loss"] = student_loss
-        results["val_distill_loss"] = distill_loss
+        }
+        
         return results
 
     def get_config(self) -> Dict[str, Any]:

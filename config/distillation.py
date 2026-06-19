@@ -21,6 +21,7 @@ DISTILLATION_ALPHA_10CLS = 0.5          # Balanced for 10 classes
 DISTILLATION_BETA = 0.3                 # Weight of intermediate feature loss (hints)
 DISTILLATION_LOSS_WEIGHT = 0.7          # Overall distillation loss weight
 DISTILLATION_STRATEGY = "logit"         # "logit" | "feature" | "hybrid"
+DISTILLATION_USE_FOCAL_LOSS = True     # Use DynamicSparseFocalLoss for hard-label branch
 DISTILLATION_MODE = "soft"              # "soft" | "hard" | "hybrid"
 USE_PROGRESSIVE_DISTILLATION = False    # Dynamic temperature + alpha scheduling
 

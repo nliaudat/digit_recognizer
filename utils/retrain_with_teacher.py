@@ -27,6 +27,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import config as params
+import config.distillation as dist_cfg
 from utils.distiller import (
     DistillationProgressCallback, Distiller, MixedInputDistiller,
     ProgressiveDistiller
@@ -371,13 +372,26 @@ def retrain_with_teacher(
                 mode=args.mode,
             )
         else:
+            # Derive final values from config (config/distillation.py).
+            progressive_final_temp = max(
+                dist_cfg.PROGRESSIVE_MIN_FINAL_TEMP,
+                args.temperature * dist_cfg.PROGRESSIVE_FINAL_TEMP_RATIO
+            )
+            progressive_final_alpha = min(
+                dist_cfg.PROGRESSIVE_MAX_FINAL_ALPHA,
+                args.alpha + dist_cfg.PROGRESSIVE_FINAL_ALPHA_SHIFT
+            )
+            logger.info(
+                f"ProgressiveDistiller: initial T={args.temperature} α={args.alpha} "
+                f"→ final T={progressive_final_temp} α={progressive_final_alpha}"
+            )
             distiller = ProgressiveDistiller(
                 student=model,
                 teacher=teacher,
-                initial_temperature=8.0,
-                final_temperature=2.0,
-                initial_alpha=0.3,
-                final_alpha=0.8,
+                initial_temperature=args.temperature,
+                final_temperature=progressive_final_temp,
+                initial_alpha=args.alpha,
+                final_alpha=progressive_final_alpha,
                 total_epochs=args.epochs,
                 mode=args.mode,
             )

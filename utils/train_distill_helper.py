@@ -45,6 +45,9 @@ from models.model_factory import create_model_by_name
 from utils import (
     get_data_splits, preprocess_for_inference, preprocess_for_training
 )
+from utils.augmentation import (
+    setup_augmentation_for_training, print_augmentation_summary
+)
 from utils.distiller import (
     DistillationProgressCallback, Distiller, MixedInputDistiller,
     ProgressiveDistiller
@@ -232,14 +235,19 @@ def train_teacher(
         ),
     ]
 
-    history = teacher.fit(
-        x_train, y_train,
-        validation_data=(x_val, y_val),
-        epochs=epochs,
-        batch_size=batch_size,
-        callbacks=callbacks,
-        verbose=2,
-    )
+    try:
+        history = teacher.fit(
+            x_train, y_train,
+            validation_data=(x_val, y_val),
+            epochs=epochs,
+            batch_size=batch_size,
+            callbacks=callbacks,
+            verbose=2,
+        )
+    except KeyboardInterrupt:
+        logger.info("\n⚠️  Teacher training interrupted by user (KeyboardInterrupt)")
+        logger.info("   Saving best weights and continuing...")
+        history = teacher.history if hasattr(teacher, 'history') else None
     
     monitor.save_training_plots()
     
@@ -284,25 +292,27 @@ def train_student_distillation(
     mode: str = "soft",
     use_progressive: bool = False,
     checkpoint_dir: str = "checkpoints",
+    student_checkpoint: Optional[str] = None,
 ) -> Tuple[Distiller, Dict]:
     """
     Train a student model via knowledge distillation from a frozen teacher.
 
     Args:
-        teacher:          Pre-trained frozen teacher model.
-        student_variant:  Key from STUDENTS dict, e.g. 'v30_medium'.
-        num_classes:      10 or 100.
-        color_mode:       'gray' or 'rgb'.
-        x_train/y_train:  Training data (preprocessed).
-        x_val/y_val:      Validation data (preprocessed).
-        epochs:           Max training epochs.
-        batch_size:       Batch size.
-        learning_rate:    Initial LR for Adam.
-        temperature:      KL softening temperature.
-        alpha:            Hard-label weight (0 = all teacher, 1 = all hard).
-        mode:             'soft' | 'hard' | 'hybrid'.
-        use_progressive:  Use ProgressiveDistiller (dynamic T and alpha).
-        checkpoint_dir:   Directory to save student checkpoints.
+        teacher:            Pre-trained frozen teacher model.
+        student_variant:    Key from STUDENTS dict, e.g. 'v30_medium'.
+        num_classes:        10 or 100.
+        color_mode:         'gray' or 'rgb'.
+        x_train/y_train:    Training data (preprocessed).
+        x_val/y_val:        Validation data (preprocessed).
+        epochs:             Max training epochs.
+        batch_size:         Batch size.
+        learning_rate:      Initial LR for Adam.
+        temperature:        KL softening temperature.
+        alpha:              Hard-label weight (0 = all teacher, 1 = all hard).
+        mode:               'soft' | 'hard' | 'hybrid'.
+        use_progressive:    Use ProgressiveDistiller (dynamic T and alpha).
+        checkpoint_dir:     Directory to save student checkpoints.
+        student_checkpoint: Path to existing student weights, or None for auto-discover.
 
     Returns:
         (distiller, history_dict)
@@ -328,6 +338,31 @@ def train_student_distillation(
         student = create_qat_model(student)
     logger.info(f"Student parameters: {student.count_params():,}")
     logger.info(f"Estimated INT8 size: {get_model_size_kb(student):.1f} KB")
+
+    # ── Auto-discover pre-trained student weights ─────────────────────────
+    # If no explicit student_checkpoint was passed, search for an existing
+    # direct-trained model in exported_models/ that matches this student
+    # variant, class count, and color mode.
+    actual_student_path = student_checkpoint
+    if actual_student_path is None:
+        try:
+            from utils.retrain_with_teacher import find_best_checkpoint
+            actual_student_path = find_best_checkpoint(student_variant, num_classes, color_mode)
+        except Exception:
+            actual_student_path = None
+
+    if actual_student_path and os.path.exists(actual_student_path):
+        logger.info(f"📦 Found pre-trained student weights: {actual_student_path}")
+        try:
+            # Use load_weights (architecture is already built above)
+            student.load_weights(actual_student_path)
+            logger.info("   ✅ Weights loaded — student starts from existing knowledge.")
+            logger.info("   📊 Distillation will refine, not teach from scratch.")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Could not load weights: {e}")
+            logger.info("   Training student from random initialization instead.")
+    else:
+        logger.info("   No pre-trained student found — training from random weights.")
 
     # ── Build distiller ────────────────────────────────────────────────────
     
@@ -413,9 +448,26 @@ def train_student_distillation(
         optimizer = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True)
     else:
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+    # ── Student loss function ────────────────────────────────────────────
+    student_loss_for_compile = None
+    if dist_cfg.DISTILLATION_USE_FOCAL_LOSS:
+        from utils.losses import DynamicSparseFocalLoss
+        import config.losses as loss_cfg
+        student_loss_for_compile = DynamicSparseFocalLoss(
+            gamma=loss_cfg.FOCAL_GAMMA,
+            alpha=loss_cfg.FOCAL_ALPHA,
+            nb_classes=num_classes,
+            from_logits=params.USE_LOGITS,
+        )
+        logger.info(
+            f"🎯 Using DynamicSparseFocalLoss for student hard-label branch "
+            f"(γ={loss_cfg.FOCAL_GAMMA}, α={loss_cfg.FOCAL_ALPHA})"
+        )
+
     distiller.compile(
         optimizer=optimizer,
         metrics=["accuracy"],
+        student_loss_fn=student_loss_for_compile,
     )
     
     # Build to initialize weights and avoid warnings
@@ -429,19 +481,17 @@ def train_student_distillation(
     )
     callbacks = [
         DistillationProgressCallback(),  # Sync current_epoch for schedules
-        # ReduceLROnPlateau monitors val_loss (smoother signal than val_accuracy
-        # at high accuracy, where accuracy is pure noise ±0.003).
         tf.keras.callbacks.ReduceLROnPlateau(
-            monitor="val_loss",
+            monitor="val_accuracy",
             factor=getattr(params, 'LR_SCHEDULER_FACTOR', 0.5),
             patience=getattr(params, 'LR_SCHEDULER_PATIENCE', 5),
             min_lr=getattr(params, 'LR_SCHEDULER_MIN_LR', 1e-6),
             verbose=1
         ),
         tf.keras.callbacks.EarlyStopping(
-            monitor="val_loss",
-            min_delta=getattr(params, 'DISTILLATION_MIN_DELTA', 0.0001),
-            patience=getattr(params, 'DISTILLATION_EARLY_STOPPING_PATIENCE', 20),
+            monitor="val_accuracy",
+            min_delta=dist_cfg.DISTILLATION_MIN_DELTA,
+            patience=dist_cfg.DISTILLATION_EARLY_STOPPING_PATIENCE,
             restore_best_weights=True,
             verbose=1
         ),
@@ -466,23 +516,55 @@ def train_student_distillation(
     # Add tqdm progress bar (same as train.py)
     callbacks.append(TQDMProgressBar(total_epochs=epochs, monitor=monitor))
 
-    # ── Train ──────────────────────────────────────────────────────────────
-    history = distiller.fit(
-        x_train, y_train,
-        validation_data=(x_val, y_val),
-        epochs=epochs,
-        batch_size=batch_size,
-        callbacks=callbacks,
-        verbose=2,
-    )
+    # ── Augmentation: Build tf.data pipeline if enabled ───────────────────
+    use_aug = dist_cfg.DISTILLATION_USE_DATA_AUGMENTATION
+
+    def _do_fit():
+        if use_aug:
+            logger.info("🔄 Enabling inline data augmentation for student distillation...")
+            train_dataset, val_dataset, _ = setup_augmentation_for_training(
+                x_train, y_train, x_val, y_val, debug=False
+            )
+            return distiller.fit(
+                train_dataset,
+                epochs=epochs,
+                validation_data=val_dataset,
+                callbacks=callbacks,
+                verbose=2,
+            )
+        else:
+            return distiller.fit(
+                x_train, y_train,
+                validation_data=(x_val, y_val),
+                epochs=epochs,
+                batch_size=batch_size,
+                callbacks=callbacks,
+                verbose=2,
+            )
+
+    try:
+        history = _do_fit()
+    except KeyboardInterrupt:
+        logger.info("\n⚠️  Training interrupted by user (KeyboardInterrupt)")
+        logger.info("   Saving best weights and continuing with export...")
+        # Keras fit() returns a partial History on interrupt with whatever
+        # epochs completed. EarlyStopping(restore_best_weights=True) has already
+        # restored the best weights on the distiller, and ModelCheckpoint has
+        # saved the best model to ckpt_path.
+        history = distiller.history if hasattr(distiller, 'history') else None
 
     monitor.save_training_plots()
 
-    best_val_acc = max(history.history.get("val_accuracy", [0.0]))
+    if history is not None and hasattr(history, 'history'):
+        best_val_acc = max(history.history.get("val_accuracy", [0.0]))
+    elif history is not None and isinstance(history, dict):
+        best_val_acc = max(history.get("val_accuracy", [0.0]))
+    else:
+        best_val_acc = 0.0
     logger.info(f"Student best val_accuracy: {best_val_acc:.4f}")
     logger.info(f"Student checkpoint saved → {ckpt_path}")
 
-    return distiller, history.history
+    return distiller, (history.history if hasattr(history, 'history') else history or {})
 
 
 # ---------------------------------------------------------------------------
@@ -509,6 +591,7 @@ def run_distillation_pipeline(
     alpha: float = 0.7,
     mode: str = "soft",
     use_progressive: bool = False,
+    student_checkpoint: Optional[str] = None,
     # Infrastructure
     batch_size: int = 32,
     checkpoint_dir: str = "checkpoints",
@@ -709,6 +792,7 @@ def run_distillation_pipeline(
         mode=mode,
         use_progressive=use_progressive,
         checkpoint_dir=actual_checkpoint_dir,
+        student_checkpoint=student_checkpoint,
     )
 
     student = distiller.get_student()

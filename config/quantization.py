@@ -39,39 +39,53 @@ USE_TQT_FOR_TFLITE = False
 def _configure_quantization_mode():
     """Configure quantization flags based on QUANTIZATION_MODE"""
     global QUANTIZE_MODEL, ESP_DL_QUANTIZE, USE_QAT, USE_TQT_PIPELINE, USE_TQT_FOR_TFLITE
-    
+    global USE_TFLITE_BUILTINS_UINT8_ONLY, USE_TFLITE_BUILTINS_INT8_ONLY
+
     if QUANTIZATION_MODE is None:
         return
     
     mode = QUANTIZATION_MODE.lower()
     
     if mode == "none":
+        # Float32 — no quantization, no I/O type override needed
         QUANTIZE_MODEL = False
         ESP_DL_QUANTIZE = False
         USE_QAT = False
         USE_TQT_PIPELINE = False
-        USE_TQT_FOR_TFLITE = False   
+        USE_TQT_FOR_TFLITE = False
+        USE_TFLITE_BUILTINS_UINT8_ONLY = False
+        USE_TFLITE_BUILTINS_INT8_ONLY  = False
         
     elif mode == "ptq":
+        # Post-Training Quantization → TFLite Micro default (uint8 I/O for raw camera bytes)
         QUANTIZE_MODEL = True
         ESP_DL_QUANTIZE = False
         USE_QAT = False
         USE_TQT_PIPELINE = False
-        USE_TQT_FOR_TFLITE = False   
+        USE_TQT_FOR_TFLITE = False
+        USE_TFLITE_BUILTINS_UINT8_ONLY = True
+        USE_TFLITE_BUILTINS_INT8_ONLY  = False
         
     elif mode == "qat":
+        # Quantization Aware Training → TFLite Micro default (uint8 I/O)
         QUANTIZE_MODEL = True
         ESP_DL_QUANTIZE = False
         USE_QAT = True
         USE_TQT_PIPELINE = False
-        USE_TQT_FOR_TFLITE = False   
+        USE_TQT_FOR_TFLITE = False
+        USE_TFLITE_BUILTINS_UINT8_ONLY = True
+        USE_TFLITE_BUILTINS_INT8_ONLY  = False
         
     elif mode == "tqt":
+        # TQT pipeline → uint8 I/O for TFLite Micro
+        # ESP-DL int8 variant is forced internally by the TQT pipeline, not by this flag
         QUANTIZE_MODEL = True
         ESP_DL_QUANTIZE = True
         USE_QAT = False
         USE_TQT_PIPELINE = True
-        USE_TQT_FOR_TFLITE = True   
+        USE_TQT_FOR_TFLITE = True
+        USE_TFLITE_BUILTINS_UINT8_ONLY = True
+        USE_TFLITE_BUILTINS_INT8_ONLY  = False
         
     elif mode == "auto":
         _auto_configure_quantization()
@@ -83,6 +97,7 @@ def _configure_quantization_mode():
 def _auto_configure_quantization():
     """Automatically select quantization mode based on model and target hardware"""
     global QUANTIZE_MODEL, ESP_DL_QUANTIZE, USE_QAT, USE_TQT_PIPELINE, USE_TQT_FOR_TFLITE
+    global USE_TFLITE_BUILTINS_UINT8_ONLY, USE_TFLITE_BUILTINS_INT8_ONLY
     from config import AVAILABLE_MODELS, MODEL_ARCHITECTURE
     
     esp_compatible_models = [m for m in AVAILABLE_MODELS if not m.endswith("_teacher")]
@@ -93,12 +108,16 @@ def _auto_configure_quantization():
         USE_QAT = False
         USE_TQT_PIPELINE = True
         USE_TQT_FOR_TFLITE = True
+        USE_TFLITE_BUILTINS_UINT8_ONLY = True
+        USE_TFLITE_BUILTINS_INT8_ONLY  = False
     else:
         QUANTIZE_MODEL = False
         ESP_DL_QUANTIZE = False
         USE_QAT = False
         USE_TQT_PIPELINE = False
         USE_TQT_FOR_TFLITE = False
+        USE_TFLITE_BUILTINS_UINT8_ONLY = False
+        USE_TFLITE_BUILTINS_INT8_ONLY  = False
 
 # Apply configuration
 _configure_quantization_mode()
