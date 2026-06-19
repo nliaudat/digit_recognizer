@@ -324,8 +324,7 @@ class Distiller(tf.keras.Model):
         # Combined loss (matches train_step logic for consistency)
         loss = self.alpha * student_loss + (1 - self.alpha) * distill_loss
 
-        # Update metrics — compiled_metrics tracks accuracy (passed via compile())
-        self.compiled_metrics.update_state(y, student_probs)
+        # Track combined loss for logging.
         self.loss_tracker.update_state(loss)
         
         # Compute accuracy manually as a scalar for reliable logging.
@@ -799,7 +798,6 @@ class MixedInputDistiller(Distiller):
         
         loss = self.alpha * student_loss + (1 - self.alpha) * distill_loss
 
-        self.compiled_metrics.update_state(y, student_probs)
         self.loss_tracker.update_state(loss)
         
         # Same policy as Distiller.test_step(): manual accuracy + val_accuracy
