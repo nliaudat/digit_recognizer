@@ -450,6 +450,7 @@ def tflite_suite_export(onnx_path, calib_data, args, espdl_path):
                     for sample in onnx2tf_calib:
                         yield [sample]
                 converter.representative_dataset = rep_gen
+                converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
                 converter.inference_input_type = tf.uint8
                 converter.inference_output_type = tf.uint8
                 converter.experimental_new_quantizer = True
@@ -534,9 +535,9 @@ def organize_output_folder(output_dir):
         if os.path.isdir(src) or f.startswith('.'):
             continue
 
-        # Pull production files back to root (never pull per-chip _quantized_float32)
+        # Pull production files back to root (never pull intermediate _integer_quant_float32)
         if f.endswith("_integer_quant_uint8.tflite") or \
-           (f.endswith("_float32.tflite") and "_quantized_" not in f):
+           (f.endswith("_float32.tflite") and "_integer_quant_float32" not in f):
             dst = os.path.join(output_dir, f)
             if os.path.exists(dst):
                 os.remove(dst)
@@ -579,9 +580,12 @@ def organize_output_folder(output_dir):
         if os.path.isdir(src) or f.startswith('.'):
             continue
 
-        # Keep these at root (never keep per-chip _quantized_float32)
+        # Keep these at root:
+        #   *_integer_quant_uint8.tflite  — ESP32 deploy target
+        #   *_quantized_float32.tflite    — PC benchmark (from Step 3)
+        #   *_integer_quant_float32.tflite is an intermediate — push to full_models/
         if (f.endswith("_integer_quant_uint8.tflite") or
-            (f.endswith("_float32.tflite") and "_quantized_" not in f) or
+            (f.endswith("_float32.tflite") and "_integer_quant_float32" not in f) or
             f.endswith(".keras") or f.endswith(".onnx")):
             continue
 

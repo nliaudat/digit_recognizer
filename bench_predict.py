@@ -262,7 +262,7 @@ def main():
             subfolder=args.subfolder, input_dir=str(input_dir),
             exclude_model=args.exclude_model,
             override_classes=args.classes, override_color=args.color,
-            model_list=[args.new], tolerance=args.tolerance,
+            model_list=[model_dir.name], tolerance=args.tolerance,
             update_csv=True, iot_compat=False,
             simulate_esp32=args.simulate_esp32,
         )

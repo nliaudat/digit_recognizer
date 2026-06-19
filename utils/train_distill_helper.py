@@ -247,7 +247,7 @@ def train_teacher(
     except KeyboardInterrupt:
         logger.info("\n⚠️  Teacher training interrupted by user (KeyboardInterrupt)")
         logger.info("   Saving best weights and continuing...")
-        history = teacher.history if hasattr(teacher, 'history') else None
+        history = teacher.history if (hasattr(teacher, 'history') and teacher.history is not None) else type('DummyHistory', (object,), {'history': {}})()
     
     monitor.save_training_plots()
     
@@ -265,7 +265,14 @@ def train_teacher(
     except Exception as e:
         logger.warning(f"⚠️ Teacher analysis failed: {e}")
 
-    best_val_acc = max(history.history.get("val_accuracy", [0.0]))
+    if history is not None and hasattr(history, 'history'):
+        val_accs = history.history.get("val_accuracy", [])
+        best_val_acc = max(val_accs) if val_accs else 0.0
+    elif history is not None and isinstance(history, dict):
+        val_accs = history.get("val_accuracy", [])
+        best_val_acc = max(val_accs) if val_accs else 0.0
+    else:
+        best_val_acc = 0.0
     logger.info(f"Teacher best val_accuracy: {best_val_acc:.4f}")
     logger.info(f"Teacher checkpoint saved → {ckpt_path}")
     return teacher
