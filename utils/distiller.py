@@ -193,7 +193,7 @@ class Distiller(tf.keras.Model):
         # ── Validate teacher output format ─────────────────────────────
         try:
             dummy_shape = self.teacher.input_shape
-            if isinstance(dummy_shape, tuple) and None not in dummy_shape[1:]:
+            if isinstance(dummy_shape, (tuple, list, tf.TensorShape)) and None not in dummy_shape[1:]:
                 dummy_input = tf.zeros((1,) + dummy_shape[1:], dtype=tf.float32)
                 dummy_raw = self.teacher(dummy_input, training=False)
                 dummy_probs = _extract_teacher_probs(self.teacher, dummy_raw)
