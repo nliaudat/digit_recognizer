@@ -24,71 +24,34 @@ The exported models in the `exported_models/` directory are organized by classif
 - `100cls_GRAY` and `100cls_RGB`: Stress-test models trained on 100 classes (0-99).
 - `10cls_GRAY` and `10cls_RGB`: Standard digits models trained on 10 classes (0-9).
 
-## Benchmark on 10 Classes (Standard Digits [0-9])
+## Benchmark on 10 Classes (Standard Digits [0-9]) — TQT RGB Models
 
-The primary use case is 10-class recognition. The models perform exceptionally well on grayscale images, offering high accuracy for IoT deployment.
+The RGB models now use **Trainable Quantization Thresholds (TQT)** for ESP32 deployment. Only three architectures proved significant for RGB: `v16` (maximum accuracy), `v24` (best balance), and `v3` (maximum throughput).
 
-| Model                          | Parameters | Size (KB) | Accuracy (RGB) | Inferences/sec |
+The primary use case remains 10-class recognition. The models perform exceptionally well on grayscale images, offering high accuracy for IoT deployment.
+
+| Model                          | Parameters | Size (KB) | Accuracy (TQT) | Inferences/sec |
 | ------------------------------ | ---------- | --------- | -------------- | -------------- |
-| **retrained_v23_10cls_RGB**    | **145800** | **61.8**  | **0.993**      | **3632**       |
-| digit_recognizer_v16_10cls_RGB | 262300     | 128.8     | 0.992          | 2140           |
-| digit_recognizer_v4_10cls_RGB  | 171900     | 78.3      | 0.985          | 3231           |
-| digit_recognizer_v18_10cls_RGB | 228500     | 97.4      | 0.984          | 2374           |
-| digit_recognizer_v15_10cls_RGB | 254800     | 100.0     | 0.984          | 2429           |
-| digit_recognizer_v19_10cls_RGB | 302700     | 132.2     | 0.983          | 1779           |
-| digit_recognizer_v17_10cls_RGB | 191200     | 71.0      | 0.980          | 2656           |
-| digit_recognizer_v3_10cls_RGB  | 112600     | 38.4      | 0.966          | 3456           |
-| digit_recognizer_v7_10cls_RGB  | 111300     | 47.2      | 0.966          | 4139           |
-| original_haverland_10cls_RGB   | 324700     | 203.8     | 0.960          | 2751           |
-| digit_recognizer_v6_10cls_RGB  | 195800     | 46.9      | 0.954          | 2329           |
+| digit_recognizer_v16_10cls_RGB | 262500     | 128.1     | 0.995          | 1087           |
+| digit_recognizer_v24_10cls_RGB | 158100     | 69.0      | 0.989          | 3404           |
+| digit_recognizer_v3_10cls_RGB  | 95300      | 37.4      | 0.980          | 4557           |
 
-### Pareto-Optimal Choices: `v23`, `v16` and `v4` vs `original_haverland`
+### Pareto-Optimal Choices: `v16`, `v24` and `v3`
 
-The `retrained_v23` model currently represents the state-of-the-art for this repository, offering the best balance between size, speed, and accuracy:
+**For Maximum Accuracy (`v16`):**
+1.  **Robust Accuracy**: `v16` achieves **99.5%** TQT accuracy, making it the most accurate quantized model in the repository.
+2.  **Stable Quantization**: The gap between float32 (0.995) and uint8 (0.995) is negligible — excellent for real hardware deployment.
+3.  **Trade-off**: At **128.1 KB** and **1087 inf/s**, it's the largest and slowest of the three, suited for accuracy-critical applications where memory permits.
 
-**The New Gold Standard (`v23`):**
-1.  **Extreme Accuracy**: `v23` achieves **99.29%** accuracy, slightly outperforming even the high-capacity `v16` (**99.18%**) and significantly beating the original's **96.0%**.
-2.  **Ultra Compact**: At only **61.8 KB**, it is **3.3x smaller** than the original baseline (**203.8 KB**).
-3.  **Blazing Speed**: Processes **3632 inferences/second**, making it **32% faster** than the original benchmark.
+**For Best All-Round Balance (`v24`):**
+1.  **High Accuracy**: `v24` achieves **98.9%** TQT accuracy — within 0.6% of `v16` while being nearly half the size.
+2.  **Compact Footprint**: At only **69.0 KB**, it fits comfortably in constrained ESP32-S3 boards.
+3.  **Fast Inference**: Processes **3404 inferences/second**, making it an excellent default choice for most deployments.
 
-**For Maximum Accuracy Scaling (`v16`):**
-1.  **Robust Accuracy**: `v16` maintains **99.2%** accuracy and is particularly stable under varied lighting conditions.
-2.  **Efficient Scaling**: Despite being larger than `v23`, it is still **1.6x smaller** than the original.
-
-**For Maximum Throughput (`v4`):**
-1.  **High Accuracy**: `v4` achieves **98.5%** accuracy with an extremely efficient architecture.
-2.  **Memory King**: Only **78.3 KB**, making it a perfect fit for even the most resource-constrained ESP32-S3 boards.
-3.  **Maximum Speed**: Processes over **3200** inferences per second on average.
-
-## Benchmark on 56375 real images (100 Classes [0-99])
-
-To ensure a fair and comprehensive comparison between architectures under stress, the following benchmark utilizes the 100 classes (`0` to `99`) dataset, which represents a significantly harder classification task than the simple 0-9 digits.
-
-| Model                          | Parameters | Size (KB) | Accuracy (RGB) | Inferences/sec |
-| ------------------------------ | ---------- | --------- | -------------- | -------------- |
-| digit_recognizer_v16_100cls_RGB| 271300     | 139.7     | 0.934          | 2026           |
-| digit_recognizer_v19_100cls_RGB| 314600     | 146.0     | 0.914          | 1753           |
-| digit_recognizer_v4_100cls_RGB | 178800     | 87.1      | 0.907          | 3247           |
-| digit_recognizer_v15_100cls_RGB| 260200     | 107.4     | 0.905          | 2343           |
-| digit_recognizer_v6_100cls_RGB | 460900     | 160.8     | 0.895          | 1076           |
-| digit_recognizer_v18_100cls_RGB| 238900     | 109.7     | 0.894          | 2278           |
-| digit_recognizer_v17_100cls_RGB| 198700     | 80.5      | 0.875          | 2487           |
-| original_haverland_100cls_RGB  | 348100     | 228.8     | 0.838          | 2714           |
-| digit_recognizer_v3_100cls_RGB | 117300     | 45.1      | 0.825          | 3330           |
-| digit_recognizer_v7_100cls_RGB | 118200     | 56.0      | 0.797          | 4151           |
-
-### Performance under Stress: `v16` and `v4` vs `original_haverland` (100-Class)
-
-Even on the harder dataset (RGB), both `v16` and `v4` maintain their strong edge over `original_haverland`:
-
-**`v16` under stress:**
-1.  **Higher Accuracy**: `v16` achieves **93.4%** accuracy compared to the original's **83.8%**.
-2.  **Smaller Memory Footprint**: `v16` drops to **139.7 KB** while the original is **228.8 KB**.
-
-**`v4` under stress:**
-1.  **Higher Accuracy**: `v4` achieves **90.7%** accuracy compared to the original's **83.8%**.
-2.  **Dramatically Smaller Memory Footprint**: `v4` drops to **87.1 KB** while the original is **228.8 KB**.
-3.  **Faster Inference**: `v4` processes **3247 inferences/second**, beating the original's **2714 inferences/second**.
+**For Maximum Throughput (`v3`):**
+1.  **Smallest & Fastest**: At just **37.4 KB** and **4557 inf/s**, `v3` is the speed king.
+2.  **Solid Accuracy**: **98.0%** TQT accuracy is still well above the original baseline (96.0%).
+3.  **Ultra-Light IoT**: Perfect for memory-constrained ESP32 boards where every KB counts.
 
 ## Usage
 
@@ -131,6 +94,70 @@ The project includes a robust distillation framework in `utils/distiller.py`.
 - **Logit/Softmax Autodetection**: Automatically handles diverse model output types.
 - **Mixed Input Support**: Distill from RGB teachers into efficient Grayscale students.
 
+## Quantization & Deployment
+
+The project supports multiple quantization strategies, all controlled by a single master switch in `config/quantization.py`:
+
+```python
+QUANTIZATION_MODE = "tqt"  # Options: "none", "ptq", "qat", "tqt", "auto"
+```
+
+Each mode automatically configures all underlying flags (QAT, TQT, ESP-DL, TFLite I/O types, XNNPACK) — no manual flag flipping needed.
+
+| Mode     | Description                                                                 |
+|----------|-----------------------------------------------------------------------------|
+| `none`   | Float32 training & inference. Reference baseline.                           |
+| `ptq`    | Standard Post-Training Quantization (TFLite full-integer uint8).            |
+| `qat`    | Quantization-Aware Training — must be set **before** training starts.       |
+| `tqt`    | **Recommended** — Trainable Quantization Thresholds via ESP-DL pipeline.    |
+| `auto`   | Automatically picks TQT for deployable models, float32 for teacher models.  |
+
+### TQT Pipeline (Trainable Quantization Thresholds) — Recommended for ESP32
+
+TQT is a post-training refinement that learns optimal per-channel quantization thresholds instead of using heuristic min/max ranges. It runs after normal training and takes minutes, not hours.
+
+- **No retraining needed**: Tune any pre-trained FP32 model for deployment.
+- **Per-chip hyperparameters**: Each target chip has dedicated settings in `config/quantization.py`:
+
+| Chip      | Steps | Learning Rate | Block Size | Integer Lambda |
+|-----------|-------|---------------|------------|----------------|
+| `esp32`   | 200   | 1e-6          | 2          | 0.10           |
+| `esp32s3` | 200   | 1e-6          | 2          | 0.05           |
+| `esp32p4` | 200   | 1e-6          | 2          | 0.0            |
+
+- **Calibration**: 300 steps at batch size 1 over 22,000 samples to estimate activation ranges.
+- **Multi-chip export**: Set `TQT_EXPORT_ALL_TARGETS = True` to produce optimized models for all three targets in a single run.
+
+#### Output Artifacts
+
+The TQT pipeline produces 3 TFLite files per model:
+
+| File | Purpose |
+|------|---------|
+| `*_quantized_integer_quant_float32.tflite` | Internal intermediate (creates saved_model/ for uint8 conversion) |
+| `*_quantized_integer_quant_uint8.tflite`   | **ESP32 TFLite Micro** — uint8 I/O, TQT-quality weights |
+| `*_quantized_float32.tflite`               | PC benchmarking — float32 I/O |
+
+Root directory stores the two deployment-ready files: `*_integer_quant_uint8.tflite` and `*_float32.tflite`. All other pipeline artifacts go to `full_models/`.
+
+#### uint8 I/O Contract
+
+TFLite Micro on ESP32 expects raw camera bytes in `[0, 255]` (uint8). The pipeline defaults to `USE_TFLITE_BUILTINS_UINT8_ONLY = True`. If targeting the ESP-DL SDK (which expects int8), set `USE_TFLITE_BUILTINS_INT8_ONLY = True` instead — the model will require pixel conversion in C++ code (`pixel_int8 = pixel_uint8 - 128`).
+
+#### Quick Workflow
+
+1. Set `QUANTIZATION_MODE = "tqt"` in `config/quantization.py` (already the default).
+2. Train normally: `python train.py --model digit_recognizer_v4 --classes 10 --color gray`
+3. Quantize & export: `python quantize_espdl.py --keras path/to/model.keras --target esp32`
+4. Deploy the resulting `*_integer_quant_uint8.tflite` to your ESP32.
+
+### Notes on TFLite Micro & ESP-DL Compatibility
+
+- Certain ops (e.g., `relu6`) are suppressed for ESP-DL compatibilty.
+- TFLite output size roughly doubles the tensor arena needed in inference RAM.
+- XNNPACK delegate is automatically disabled (`DISABLE_XNNPACK = True`) for TFLite Micro compatibility.
+- RGB vs grayscale: Conv2D flattens all input channels, so the kernel weights are comparable. However, RGB triples the pre-processing time and input tensor memory on IoT devices. Grayscale is strongly recommended for constrained microcontrollers.
+
 ## Documentation
 
 For detailed guides analyzing how to train, benchmark, and debug the models within this repository, refer to the guides in the [`documentations/`](documentations/) folder:
@@ -138,20 +165,9 @@ For detailed guides analyzing how to train, benchmark, and debug the models with
 - [Benchmarking & Prediction](documentations/benchmarking_and_prediction.md)
 - [Analysis & Debugging](documentations/analysis_and_debugging.md)
 - [Augmentation Strategy](documentations/augmentation_strategy.md)
+- [TFLite Quantization Guide](documentations/TFLite_Quantization_Guide.md)
 
-## Results
-
-The project demonstrates that :
-
- - Using training [Quantization aware training](https://www.tensorflow.org/model_optimization/guide/quantization/training) can lead to better results
- - tlite-micro or esp-dl compabilities suppress model operators (like relu6)
- - There is major differences between training efficiency and real tests
- - Model size "double" the tensor arena needed in memory
- - CPU operations must be also taken into parameters for IOT
- - RGB or grayscale has very same benchmark results, but the processing is not the same as in parameters needed. It also needs a lot of more cpu and memory to process
- - **Adaptive Loss Strategies**: Using `IntelligentFocalLossController` allows the model to master basic features with Cross-Entropy before focusing on hard-to-distinguish digits using Focal Loss.
- 
- ## RGB vs Grayscale Model Comparison
+## RGB vs Grayscale Model Comparison
 
  If the model uses Conv2D (first layer), it flattens all channels, which is why the theoretical benchmark results (accuracy and raw inference speed) are very similar between RGB and grayscale variants. 
 
@@ -166,18 +182,21 @@ The project demonstrates that :
 
 The table below summarizes the trade-offs between accuracy and model size across different classification complexities (10 vs 100 classes) and color spaces (Grayscale vs RGB). It highlights the most notable models to help you choose the best fit for your specific IoT application.
 
-| Model Name | 10 cls Gray | 10 cls RGB | 100 cls Gray | 100 cls RGB | Application / Comment |
+> **RGB columns now reflect TQT-quantized models** — only v3, v16, and v24 proved significant for RGB deployment. Other architectures are not shown for RGB.
+
+| Model Name | 10 cls Gray | 10 cls RGB (TQT) | 100 cls Gray | 100 cls RGB | Application / Comment |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **v6** | 96.5% / 36.5KB | 95.4% / 46.9KB | 84.0% / 132.5KB | 89.5% / 160.8KB | Best balanced IoT model for 10cls Gray, extremely small memory footprint. |
-| **v3** | 98.0% / 69.4KB | 96.6% / 38.4KB | 76.5% / 74.6KB | 82.5% / 45.1KB | Fast overall inference speed and best balanced for 100cls RGB. |
-| **v7** | 96.6% / 46.7KB | 96.6% / 47.2KB | 75.4% / 55.5KB | 79.7% / 56.0KB | Fastest inference speed under 100KB, optimal for speed-critical IoT. |
-| **v4** | 98.5% / 61.4KB | 98.5% / 78.3KB | 82.9% / 69.5KB | 90.7% / 87.1KB | Excellent accuracy while remaining under 100KB, great all-rounder. |
-| **v15** | 99.1% / 79.3KB | 98.4% / 100.0KB | 85.4% / 86.0KB | 90.5% / 107.4KB | Best accuracy for models under 100KB in 10-class scenarios. |
-| **v17** | 99.0% / 70.7KB | 98.0% / 71.0KB | 82.6% / 80.2KB | 87.5% / 80.5KB | Ultra-efficient GhostNet-inspired alternative with solid accuracy. |
-| **v16** | 99.2% / 128.6KB | 99.2% / 128.8KB | 88.4% / 139.5KB | 93.4% / 139.7KB | High accuracy MobileNetV2-based model, excellent under stress. |
-| **v18** | 98.9% / 97.1KB | 98.4% / 97.4KB | 90.2% / 109.4KB | 89.4% / 109.7KB | New variant with very strong performance hovering around 100KB. |
-| **v19** | 98.9% / 131.9KB | 98.3% / 132.2KB | 91.6% / 145.6KB | 91.4% / 146.0KB | New high-capacity variant built for challenging 100-class scenarios. |
-| **original_haverland** | 98.2% / 203.3KB | 96.0% / 203.8KB | 81.7% / 228.2KB | 83.8% / 228.8KB | Legacy baseline, superseded by v16 and newer variants. |
+| **v6** | 96.5% / 36.5KB | — | 84.0% / 132.5KB | 89.5% / 160.8KB | Best balanced IoT model for 10cls Gray, extremely small memory footprint. |
+| **v3** | 98.0% / 69.4KB | **98.0% / 37.4KB** | 76.5% / 74.6KB | 82.5% / 45.1KB | Fastest TQT RGB model (4557 inf/s) and smallest TQT footprint. |
+| **v7** | 96.6% / 46.7KB | — | 75.4% / 55.5KB | 79.7% / 56.0KB | Fastest inference speed under 100KB, optimal for speed-critical IoT. |
+| **v4** | 98.5% / 61.4KB | — | 82.9% / 69.5KB | 90.7% / 87.1KB | Excellent accuracy while remaining under 100KB, great all-rounder. |
+| **v15** | 99.1% / 79.3KB | — | 85.4% / 86.0KB | 90.5% / 107.4KB | Best accuracy for models under 100KB in 10-class scenarios. |
+| **v17** | 99.0% / 70.7KB | — | 82.6% / 80.2KB | 87.5% / 80.5KB | Ultra-efficient GhostNet-inspired alternative with solid accuracy. |
+| **v16** | 99.2% / 128.6KB | **99.5% / 128.1KB** | 88.4% / 139.5KB | 93.4% / 139.7KB | Highest accuracy TQT RGB model, excellent under stress. |
+| **v18** | 98.9% / 97.1KB | — | 90.2% / 109.4KB | 89.4% / 109.7KB | New variant with very strong performance hovering around 100KB. |
+| **v19** | 98.9% / 131.9KB | — | 91.6% / 145.6KB | 91.4% / 146.0KB | New high-capacity variant built for challenging 100-class scenarios. |
+| **v24** | — | **98.9% / 69.0KB** | — | — | Best all-round TQT RGB model: near-v16 accuracy at half the size. |
+| **original_haverland** | 98.2% / 203.3KB | — | 81.7% / 228.2KB | 83.8% / 228.8KB | Legacy baseline, superseded by v16 and newer variants. |
 
 ## Related Projects
 

@@ -247,7 +247,7 @@ def train_teacher(
     except KeyboardInterrupt:
         logger.info("\n⚠️  Teacher training interrupted by user (KeyboardInterrupt)")
         logger.info("   Saving best weights and continuing...")
-        history = teacher.history if (hasattr(teacher, 'history') and teacher.history is not None) else type('DummyHistory', (object,), {'history': {}})()
+        history = teacher.history if (hasattr(teacher, 'history') and teacher.history is not None) else {}
     
     monitor.save_training_plots()
     

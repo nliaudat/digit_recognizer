@@ -193,7 +193,7 @@ class Distiller(tf.keras.Model):
         # ── Validate teacher output format ─────────────────────────────
         try:
             dummy_shape = self.teacher.input_shape
-            if isinstance(dummy_shape, tuple) and None not in dummy_shape[1:]:
+            if not isinstance(dummy_shape, list) and None not in dummy_shape[1:]:
                 dummy_input = tf.zeros((1,) + dummy_shape[1:], dtype=tf.float32)
                 dummy_raw = self.teacher(dummy_input, training=False)
                 dummy_probs = _extract_teacher_probs(self.teacher, dummy_raw)
@@ -328,18 +328,15 @@ class Distiller(tf.keras.Model):
         self.loss_tracker.update_state(loss)
         
         # Compute accuracy manually as a scalar for reliable logging.
-        # Keras 3 auto-prefixes custom keys (loss, student_loss, distill_loss)
-        # with "val_" in validation logs but does NOT prefix compiled metrics
-        # (accuracy).  We return BOTH bare and val_accuracy so callbacks
-        # (CSVLogger, ReduceLROnPlateau, EarlyStopping) can find the key
-        # regardless of Keras version.
+        # Keras 3 auto-prefixes every key in test_step with "val_".
+        # We return ONLY bare names — Keras produces the val_ variants.
+        # Cast to common type: y is int32, argmax returns int64 by default.
         acc = tf.reduce_mean(
-            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), tf.reshape(y, [-1])), tf.float32)
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1, output_type=tf.int32), y), tf.float32)
         )
         results = {
             "loss": self.loss_tracker.result(),
             "accuracy": acc,
-            "val_accuracy": acc,
             "student_loss": student_loss,
             "distill_loss": distill_loss,
         }
@@ -800,14 +797,14 @@ class MixedInputDistiller(Distiller):
 
         self.loss_tracker.update_state(loss)
         
-        # Same policy as Distiller.test_step(): manual accuracy + val_accuracy
+        # Same policy as Distiller.test_step(): bare names only; Keras prefixes.
+        # argmax cast to int32 to match y dtype.
         acc = tf.reduce_mean(
-            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1), tf.reshape(y, [-1])), tf.float32)
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1, output_type=tf.int32), y), tf.float32)
         )
         results = {
             "loss": self.loss_tracker.result(),
             "accuracy": acc,
-            "val_accuracy": acc,
             "student_loss": student_loss,
             "distill_loss": distill_loss,
         }
