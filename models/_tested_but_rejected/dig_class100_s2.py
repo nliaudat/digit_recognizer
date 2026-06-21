@@ -7,7 +7,7 @@ notebook for 100-class (two-digit) recognition. Used as a reference
 baseline to compare against custom-built models.
 
 Reference:
-  https://github.com/haverland/Tenth-of-step-of-a-meter-digit/blob/master/dig-class100-s2.ipynb
+  Haverland's original notebook (repository no longer available as of 20.06.2026)
 
 Architecture:
   - Conv2D × 2 (DIG_CLASS100_FILTERS[0]) + BN + ReLU + MaxPool + Dropout
@@ -29,8 +29,7 @@ import config as params
 
 def create_dig_class100_s2():
     """
-    Model architecture from the referenced notebook:
-    https://github.com/haverland/Tenth-of-step-of-a-meter-digit/blob/master/dig-class100-s2.ipynb
+    Model architecture from Haverland's referenced notebook (repository no longer available as of 20.06.2026)
     """
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=params.INPUT_SHAPE),

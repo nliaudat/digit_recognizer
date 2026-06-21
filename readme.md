@@ -4,7 +4,7 @@ A deep learning project for rotating digit recognition using various neural netw
 
 ## Overview
 
-This project implements and compares different neural network models for recognizing rotating digits from [haverland dataset](https://github.com/haverland/Tenth-of-step-of-a-meter-digit). 
+This project implements and compares different neural network models for recognizing rotating digits from the haverland dataset (repository no longer available as of 20.06.2026). 
 
 The goal is to explore the trade-offs between model complexity, size, and accuracy.
 
@@ -14,9 +14,7 @@ Grayscale or RGB runs the same on test datasets, but RGB need more resources at 
 
 ## Model Performance
 
-![Accuracy vs Model Size (10cls RGB)](exported_models/10cls_RGB/test_results/graphs/accuracy_vs_size_quantized_full.png)
-
-The graph above shows the relationship between model accuracy and model size across different neural network architectures. As demonstrated, the project explores how different model complexities affect recognition performance.
+The project explores the relationship between model accuracy and model size across different neural network architectures, demonstrating how different model complexities affect recognition performance.
 
 ## Directory Organization
 
@@ -200,7 +198,7 @@ The table below summarizes the trade-offs between accuracy and model size across
 
 ## Related Projects
 
-This work contributes to improved digit recognition research, including the [Tenth-of-step-of-a-meter-digit](https://github.com/haverland/Tenth-of-step-of-a-meter-digit) project for enhanced meter digit analysis.
+This work contributes to improved digit recognition research, including the Tenth-of-step-of-a-meter-digit project (repository no longer available as of 20.06.2026) for enhanced meter digit analysis.
 
 ## Contributing
 Contributions are welcome! Please feel free to submit pull requests or open issues for suggestions.
