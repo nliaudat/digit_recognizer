@@ -40,6 +40,10 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v29", # v28 + 2-channel hybrid processing (hard binarization + soft gradient preservation)
     # "digit_recognizer_v25", # 10 classes only ! v24 + Multi-head Transition-Aware (need to change the transition rule in C++ code)
     # "digit_recognizer_v26", # 10 classes only ! v25 + Learnable Soft-Binarization (threshold trained, sharpness=10, TFLite Micro compatible)
+    "digit_recognizer_v35", # MobileNetV2 + SE (IoT, best accuracy <200 KB)
+    "digit_recognizer_v36", # GhostNet + SE (IoT, efficient, ~100 KB)
+    "digit_recognizer_v37_teacher", # Wide MobileNetV3-style Teacher (PC-only, distillation)
+    "digit_recognizer_v38", # RepVGG-style Reparameterizable CNN (IoT, multi-branch training -> single-branch inference)
     # "esp_quantization_ready", # ~70kB | Minimal Depthwise CNN for smooth INT8
     # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
     # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)

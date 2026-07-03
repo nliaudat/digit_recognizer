@@ -16,6 +16,8 @@ try:
 except ImportError:
     tfa = None
 
+from utils.optimizers import SAMModelWrapper
+
 # Project imports
 import config as params
 
@@ -281,12 +283,24 @@ def compile_model(model, loss_type='sparse'):
     
     optimizer = None
     
+    # Setup EMA arguments for Keras >= 2.11 optimizers
+    ema_kwargs = {}
+    if getattr(params, 'USE_EMA', False):
+        ema_kwargs['use_ema'] = True
+        ema_kwargs['ema_momentum'] = getattr(params, 'EMA_MOMENTUM', 0.999)
+        # overwrite frequency is standard in modern keras, but we can just use the defaults or pass it
+        ema_overwrite = getattr(params, 'EMA_OVERWRITE_WEIGHTS_ON_TRAIN_END', True)
+        if not ema_overwrite:
+            ema_kwargs['ema_overwrite_frequency'] = 100
+        print(f"🔧 Using EMA (momentum={ema_kwargs['ema_momentum']})")
+    
     if params.OPTIMIZER_TYPE == "rmsprop":
         optimizer = tf.keras.optimizers.RMSprop(
             learning_rate=params.LEARNING_RATE,
             rho=params.RMSPROP_RHO,
             momentum=params.RMSPROP_MOMENTUM,
-            epsilon=params.RMSPROP_EPSILON
+            epsilon=params.RMSPROP_EPSILON,
+            **ema_kwargs
         )
         print(f"🔧 Using RMSprop optimizer (rho={params.RMSPROP_RHO}, momentum={params.RMSPROP_MOMENTUM})")
         
@@ -296,7 +310,8 @@ def compile_model(model, loss_type='sparse'):
             beta_1=params.ADAM_BETA_1,
             beta_2=params.ADAM_BETA_2,
             epsilon=params.ADAM_EPSILON,
-            amsgrad=params.ADAM_AMSGRAD
+            amsgrad=params.ADAM_AMSGRAD,
+            **ema_kwargs
         )
         print(f"🔧 Using Adam optimizer (beta1={params.ADAM_BETA_1}, beta2={params.ADAM_BETA_2})")
         
@@ -304,7 +319,8 @@ def compile_model(model, loss_type='sparse'):
         optimizer = tf.keras.optimizers.SGD(
             learning_rate=params.LEARNING_RATE,
             momentum=params.SGD_MOMENTUM,
-            nesterov=params.SGD_NESTEROV
+            nesterov=params.SGD_NESTEROV,
+            **ema_kwargs
         )
         print(f"🔧 Using SGD optimizer (momentum={params.SGD_MOMENTUM}, nesterov={params.SGD_NESTEROV})")
         
@@ -312,7 +328,8 @@ def compile_model(model, loss_type='sparse'):
         optimizer = tf.keras.optimizers.Adagrad(
             learning_rate=params.LEARNING_RATE,
             initial_accumulator_value=params.ADAGRAD_INITIAL_ACCUMULATOR,
-            epsilon=params.ADAGRAD_EPSILON
+            epsilon=params.ADAGRAD_EPSILON,
+            **ema_kwargs
         )
         print(f"🔧 Using AdaGrad optimizer")
         
@@ -321,7 +338,8 @@ def compile_model(model, loss_type='sparse'):
             learning_rate=params.LEARNING_RATE,
             beta_1=params.ADAM_BETA_1,  # Use Adam parameters for consistency
             beta_2=params.ADAM_BETA_2,
-            epsilon=params.ADAM_EPSILON
+            epsilon=params.ADAM_EPSILON,
+            **ema_kwargs
         )
         print(f"🔧 Using Nadam optimizer (beta1={params.ADAM_BETA_1}, beta2={params.ADAM_BETA_2})")
         
@@ -333,7 +351,8 @@ def compile_model(model, loss_type='sparse'):
                 weight_decay=params.ADAMW_WEIGHT_DECAY,
                 beta_1=params.ADAMW_BETA_1,
                 beta_2=params.ADAMW_BETA_2,
-                epsilon=params.ADAMW_EPSILON
+                epsilon=params.ADAMW_EPSILON,
+                **ema_kwargs
             )
             print(f"🔧 Using AdamW optimizer (weight_decay={params.ADAMW_WEIGHT_DECAY})")
         else:
@@ -342,7 +361,8 @@ def compile_model(model, loss_type='sparse'):
                 learning_rate=params.LEARNING_RATE,
                 beta_1=params.ADAM_BETA_1,
                 beta_2=params.ADAM_BETA_2,
-                epsilon=params.ADAM_EPSILON
+                epsilon=params.ADAM_EPSILON,
+                **ema_kwargs
             )
     else:
         raise ValueError(f"❌ Unsupported optimizer type: {params.OPTIMIZER_TYPE}")
@@ -434,6 +454,11 @@ def compile_model(model, loss_type='sparse'):
     # COMPILE MODEL
     # ==========================================================================
     
+    # --- Apply SAM if configured ---
+    if getattr(params, 'USE_SAM', False):
+        print(f"🗡️  Wrapping model with Sharpness-Aware Minimization (SAM), rho={params.SAM_RHO}")
+        model = SAMModelWrapper(model, rho=params.SAM_RHO)
+
     # --- Multi-head detection (v25, v26 and future transition models) ---
     if hasattr(model, 'outputs') and len(model.outputs) > 1:
         print("🔀 Multi-head model detected — using per-output loss compilation")

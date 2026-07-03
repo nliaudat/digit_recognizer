@@ -178,6 +178,11 @@ def main():
     print(f"📦 Loading {keras_path}...")
     m = load_model_safe(keras_path)
 
+    # Automatically reparameterize v38 before export
+    if hasattr(m, 'reparameterize') and callable(m.reparameterize):
+        print(f"🔄 Reparameterizing model (detected structural reparameterization)...")
+        m.reparameterize()
+
     if args.dry_run:
         print("\n🏁 DRY RUN — stopping. Remove --dry-run to export.")
         return
