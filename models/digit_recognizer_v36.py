@@ -6,6 +6,13 @@ Design: GhostNet architecture upgraded with Squeeze-and-Excitation.
 Generates 'ghost' features via depthwise ops, then uses channel attention
 to reweigh importance. Highly parameter-efficient.
 
+Scope / Target:
+  - TARGET: ESP32 Edge Deployment (Ultra-efficient IoT target, ~100 KB INT8 budget).
+  - DATASETS: Primarily 10-class (for ultra low size), but also scales to 100-class.
+  - RECOMMENDED COMMANDS:
+    - 10-Class: python train.py --model digit_recognizer_v36 --classes 10 --color rgb --no-qat --tqt
+    - 100-Class: python train.py --model digit_recognizer_v36 --classes 100 --color rgb --no-qat --tqt
+
 All ops map safely to TFLite Micro / ESP-DL.
 Fully QAT-compatible.
 """

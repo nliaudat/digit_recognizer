@@ -58,12 +58,16 @@ class QuantizationNoiseAugmentation(BaseLayer):
         # Since images are [0, 1], 255 levels means step = 1/255. Half step is ~0.002.
         noise = tf.random.uniform(tf.shape(inputs), minval=-0.002, maxval=0.002)
         
-        apply_mask = tf.cast(tf.random.uniform(tf.shape(inputs)[:1]) < self.probability, tf.float32)
-        # Expand dims for broadcasting if rank is 4, else it's a single image rank 3
         if len(inputs.shape) == 4:
-            apply_mask = tf.reshape(apply_mask, [-1, 1, 1, 1])
+            apply_mask = tf.cast(
+                tf.random.uniform([tf.shape(inputs)[0], 1, 1, 1]) < self.probability,
+                tf.float32
+            )
         else:
-            apply_mask = tf.reshape(apply_mask, [])
+            apply_mask = tf.cast(
+                tf.random.uniform([]) < self.probability,
+                tf.float32
+            )
             
         noisy_inputs = inputs + noise
         return (1.0 - apply_mask) * inputs + apply_mask * noisy_inputs

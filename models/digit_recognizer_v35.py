@@ -6,6 +6,13 @@ Design: Upgrade of v16, optimized for ESP32 with TFLite Micro.
 Adds SE channel attention inside inverted residual blocks to boost
 accuracy while remaining strictly within TFLite built-in operations.
 
+Scope / Target:
+  - TARGET: ESP32 Edge Deployment (IoT Target, <200 KB INT8 budget).
+  - DATASETS: Suitable for both 10-class and 100-class tasks.
+  - RECOMMENDED COMMANDS:
+    - 10-Class: python train.py --model digit_recognizer_v35 --classes 10 --color rgb --no-qat --tqt
+    - 100-Class: python train.py --model digit_recognizer_v35 --classes 100 --color rgb --no-qat --tqt
+
 Key principles:
   - Inverted residual bottleneck + Squeeze-and-Excitation.
   - ReLU6 only (maps to hardware accelerators).
