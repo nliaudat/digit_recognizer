@@ -63,6 +63,17 @@ class RepVGGBlock(tf.keras.layers.Layer):
 
         self.relu = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_relu6')
 
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "in_channels": self.in_channels,
+            "out_channels": self.out_channels,
+            "stride": self.stride,
+            "deploy": self.deploy,
+            "name_prefix": self.name_prefix,
+        })
+        return config
+
     def call(self, inputs, training=None):
         if hasattr(self, 'rbr_reparam'):
             return self.relu(self.rbr_reparam(inputs))
