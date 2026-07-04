@@ -502,7 +502,9 @@ class SingleShotAugmentor:
         random.seed()
         np.random.seed()
         
-        angle = random.uniform(-AUG_ROTATION_HARD_RANGE, AUG_ROTATION_HARD_RANGE)
+        # Use globals().get() so a missing config key (e.g. older JSON) doesn't cause NameError
+        rotation_range = globals().get("AUG_ROTATION_HARD_RANGE", 45.0)
+        angle = random.uniform(-rotation_range, rotation_range)
         image = self.ensure_correct_shape(image)
         
         if len(image.shape) == 2:

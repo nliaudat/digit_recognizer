@@ -71,16 +71,13 @@ def generate_augmented_dataset_only_new():
                     shutil.move(str(img_path), str(dest_path))
                     image_count += 1
             print(f"✅ Moved {image_count} images to flattened folder.")
-            
-            # Clean up temp folder for next configuration
-            shutil.rmtree(temp_output)
-            temp_output.mkdir(parents=True, exist_ok=True)
         else:
             print(f"⚠️  Failed to process {config_name}, skipping flattening.")
-
-    # Remove final temp directory
-    if temp_output.exists():
-        shutil.rmtree(temp_output)
+        
+        # Always clean up temp folder before next config (even on failure)
+        if temp_output.exists():
+            shutil.rmtree(temp_output)
+        temp_output.mkdir(parents=True, exist_ok=True)
 
     # 3.5 Deduplicate Images (preserves originals, removes byte-identical dupes)
     print("\n🧹 Deduplicating Images…")
