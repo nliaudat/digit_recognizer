@@ -32,6 +32,7 @@ import json
 import h5py
 
 from models.model_factory import create_model_by_name
+from models.digit_recognizer_v38 import RepVGGBlock, RepVGGModel
 
 CUSTOM_OBJECTS = {
     "DropPath": DropPath,
@@ -40,6 +41,8 @@ CUSTOM_OBJECTS = {
     "ProgressiveDistiller": ProgressiveDistiller,
     "DistillationProgressCallback": DistillationProgressCallback,
     "EnsembleTeacher": EnsembleTeacher,
+    "RepVGGBlock": RepVGGBlock,
+    "RepVGGModel": RepVGGModel,
 }
 
 
