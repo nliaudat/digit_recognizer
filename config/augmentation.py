@@ -26,18 +26,22 @@ AUGMENTATION_VERTICAL_FLIP = False
 AUGMENTATION_POLARITY_INVERSION = False # done in static augmentation for efficiency and caching
 
 # ------------------------------------------------------------------------------
-# HARD AUGMENTATIONS (Rotation-Specific, Noise, Perspective)
+# HARD AUGMENTATIONS — DISABLED IN RUNTIME
 # ------------------------------------------------------------------------------
+# These are now generated in static_augmentation.py (via generate_augmented_dataset_only_new.py)
+# so runtime probability is set to 0 to avoid double-applying.
+# See datasets/tools/static_augmentation.py for the offline variants.
+
 # Targeted hard rotation for digits prone to rotational confusion (like 6 and 9)
-AUGMENTATION_ROTATION_HARD_PROB = 0.05
+AUGMENTATION_ROTATION_HARD_PROB = 0.0
 AUGMENTATION_ROTATION_HARD_RANGE = 45.0  # Up to 45 degrees
 
 # Inject quantization noise during training (simulate INT8 rounding)
 # Improves QAT performance by preparing the model for noise
-AUGMENTATION_QUANTIZATION_NOISE_PROB = 0.1
+AUGMENTATION_QUANTIZATION_NOISE_PROB = 0.0
 
 # Perspective Distortion to simulate camera angle viewing
-AUGMENTATION_PERSPECTIVE_PROB = 0.1
+AUGMENTATION_PERSPECTIVE_PROB = 0.0
 AUGMENTATION_PERSPECTIVE_SCALE = 0.15
 
 # Advanced Augmentations (used by super_high_accuracy_validator)
