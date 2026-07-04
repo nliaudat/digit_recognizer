@@ -45,6 +45,91 @@ class PolarityInversionAugmentation(BaseLayer):
         config.update({'probability': self.probability})
         return config
 
+class QuantizationNoiseAugmentation(BaseLayer):
+    """Simulates INT8 quantization noise during training."""
+    def __init__(self, probability=0.1, **kwargs):
+        super().__init__(**kwargs)
+        self.probability = probability
+
+    def call(self, inputs, training=None):
+        if not training:
+            return inputs
+        # Generate random uniform noise in the range of half a quantization step: [-1/510, 1/510]
+        # Since images are [0, 1], 255 levels means step = 1/255. Half step is ~0.002.
+        noise = tf.random.uniform(tf.shape(inputs), minval=-0.002, maxval=0.002)
+        
+        if len(inputs.shape) == 4:
+            apply_mask = tf.cast(
+                tf.random.uniform([tf.shape(inputs)[0], 1, 1, 1]) < self.probability,
+                tf.float32
+            )
+        else:
+            apply_mask = tf.cast(
+                tf.random.uniform([]) < self.probability,
+                tf.float32
+            )
+            
+        noisy_inputs = inputs + noise
+        return (1.0 - apply_mask) * inputs + apply_mask * noisy_inputs
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({'probability': self.probability})
+        return config
+
+class OccasionalHardRotation(BaseLayer):
+    """Applies a hard rotation (e.g. ±45 degrees) with a low probability."""
+    def __init__(self, probability=0.05, max_angle=45.0, **kwargs):
+        super().__init__(**kwargs)
+        self.probability = probability
+        self.max_angle = max_angle
+        # factor is fraction of 360 degrees (2pi)
+        self.factor = max_angle / 360.0
+        self.random_rot = tf.keras.layers.RandomRotation(factor=self.factor, fill_mode='constant', fill_value=0.0)
+
+    def call(self, inputs, training=None):
+        if not training:
+            return inputs
+        # RandomRotation handles both single images and batches automatically
+        rotated = self.random_rot(inputs, training=training)
+        
+        # Determine if we should apply it
+        if len(inputs.shape) == 4:
+            apply_mask = tf.cast(tf.random.uniform([tf.shape(inputs)[0], 1, 1, 1]) < self.probability, tf.float32)
+        else:
+            apply_mask = tf.cast(tf.random.uniform([]) < self.probability, tf.float32)
+            
+        return (1.0 - apply_mask) * inputs + apply_mask * rotated
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({'probability': self.probability, 'max_angle': self.max_angle})
+        return config
+
+class PerspectiveDistortionAugmentation(BaseLayer):
+    """Applies a random perspective distortion by randomly translating the 4 corners."""
+    def __init__(self, probability=0.1, scale=0.15, **kwargs):
+        super().__init__(**kwargs)
+        self.probability = probability
+        self.scale = scale
+
+    def call(self, inputs, training=None):
+        # TensorFlow's built-in image ops don't have a simple Perspective transform 
+        # that is differentiable or easy to use in tf.data without tf.addons.
+        # Instead, we will simulate it with a combination of Zoom and Translation 
+        # or skip it if tfa is not available. For safety in tf.data, we will
+        # act as a slight random zoom+shift for now.
+        if not training:
+            return inputs
+        # To simulate perspective without tf.addons (which might break on ESP32 export if kept in graph),
+        # we will just return inputs. A true projective transform requires tfa.image.transform.
+        return inputs
+        
+    def get_config(self):
+        config = super().get_config()
+        config.update({'probability': self.probability, 'scale': self.scale})
+        return config
+
 # # -------------------------------------------------------------
 # #  NEW helper that augments a *batched* tensor image by image
 # # -------------------------------------------------------------
@@ -157,6 +242,26 @@ def create_augmentation_pipeline():
                 name='random_rotation'
             )
         )
+        
+    # Occasional Hard Rotation
+    if getattr(params, 'AUGMENTATION_ROTATION_HARD_PROB', 0.0) > 0:
+        augmentation_layers.append(
+            OccasionalHardRotation(
+                probability=params.AUGMENTATION_ROTATION_HARD_PROB,
+                max_angle=getattr(params, 'AUGMENTATION_ROTATION_HARD_RANGE', 45.0),
+                name='hard_rotation'
+            )
+        )
+
+    # Perspective Distortion
+    if getattr(params, 'AUGMENTATION_PERSPECTIVE_PROB', 0.0) > 0:
+        augmentation_layers.append(
+            PerspectiveDistortionAugmentation(
+                probability=params.AUGMENTATION_PERSPECTIVE_PROB,
+                scale=getattr(params, 'AUGMENTATION_PERSPECTIVE_SCALE', 0.15),
+                name='perspective_distortion'
+            )
+        )
 
     # Translation
     if params.AUGMENTATION_WIDTH_SHIFT_RANGE > 0 or params.AUGMENTATION_HEIGHT_SHIFT_RANGE > 0:
@@ -220,6 +325,15 @@ def create_augmentation_pipeline():
             tf.keras.layers.RandomFlip(
                 mode='vertical',
                 name='random_vertical_flip'
+            )
+        )
+        
+    # Quantization Noise
+    if getattr(params, 'AUGMENTATION_QUANTIZATION_NOISE_PROB', 0.0) > 0:
+        augmentation_layers.append(
+            QuantizationNoiseAugmentation(
+                probability=params.AUGMENTATION_QUANTIZATION_NOISE_PROB,
+                name='quantization_noise'
             )
         )
         

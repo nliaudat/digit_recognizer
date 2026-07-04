@@ -153,6 +153,21 @@ else:
     OPTIMIZER_SEQUENCE = ["rmsprop", "rmsprop", "adamw"]
 
 # ==============================================================================
+# ADVANCED OPTIMIZER SETTINGS (EMA & SAM)
+# ==============================================================================
+
+# Exponential Moving Average (EMA) of weights
+# Smooths out parameter trajectory for better generalization and more stable QAT
+USE_EMA = True
+EMA_MOMENTUM = 0.999
+EMA_OVERWRITE_WEIGHTS_ON_TRAIN_END = True
+
+# Sharpness-Aware Minimization (SAM)
+# Flattens the loss landscape for much better generalization, especially on small models
+USE_SAM = False
+SAM_RHO = 0.05
+
+# ==============================================================================
 # REGULARIZATION HYPERPARAMETERS
 # ==============================================================================
 

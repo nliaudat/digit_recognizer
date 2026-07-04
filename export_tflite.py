@@ -32,6 +32,7 @@ import json
 import h5py
 
 from models.model_factory import create_model_by_name
+from models.digit_recognizer_v38 import RepVGGBlock, RepVGGModel
 
 CUSTOM_OBJECTS = {
     "DropPath": DropPath,
@@ -40,6 +41,8 @@ CUSTOM_OBJECTS = {
     "ProgressiveDistiller": ProgressiveDistiller,
     "DistillationProgressCallback": DistillationProgressCallback,
     "EnsembleTeacher": EnsembleTeacher,
+    "RepVGGBlock": RepVGGBlock,
+    "RepVGGModel": RepVGGModel,
 }
 
 
@@ -177,6 +180,11 @@ def main():
 
     print(f"📦 Loading {keras_path}...")
     m = load_model_safe(keras_path)
+
+    # Automatically reparameterize v38 before export
+    if hasattr(m, 'reparameterize') and callable(m.reparameterize):
+        print(f"🔄 Reparameterizing model (detected structural reparameterization)...")
+        m.reparameterize()
 
     if args.dry_run:
         print("\n🏁 DRY RUN — stopping. Remove --dry-run to export.")

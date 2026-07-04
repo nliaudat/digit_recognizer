@@ -7,7 +7,7 @@ Design goal: Faithful replica of the `CNN_s2` model from Haverland's
 Used as the primary reference baseline to compare all custom models against.
 
 Reference:
-  https://github.com/haverland/Tenth-of-step-of-a-meter-digit/blob/master/dig-class100-s2.ipynb
+  Haverland's original notebook (repository no longer available as of 20.06.2026)
 
 Architecture:
   - BN → Conv2D(32, 3×3) + BN + ReLU + MaxPool + Dropout(0.2)   → Block 1

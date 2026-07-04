@@ -105,6 +105,7 @@ class AugmentationConfig:
             },
             "augmentations": {
                 "rotation": {"enabled": True, "probability": 0.3, "rotation_range": 5},
+                "rotation_hard": {"enabled": True, "probability": 0.05, "rotation_hard_range": 45.0},
                 "zoom": {"enabled": True, "probability": 0.3, "zoom_range": 0.1},
                 "shift": {"enabled": True, "probability": 0.4, "width_shift_range": 0.05, "height_shift_range": 0.05},
                 "shear": {"enabled": True, "probability": 0.2, "shear_range": 0.1},
@@ -114,9 +115,10 @@ class AugmentationConfig:
                 "gaussian_noise": {"enabled": True, "probability": 0.2, "gaussian_noise_std": 0.05},
                 "random_erasing": {"enabled": False, "probability": 0.1, "erasing_max_area": 0.1, "erasing_aspect_ratio": [0.3, 3.3]},
                 "random_crop": {"enabled": True, "probability": 0.1, "crop_percent": 0.9},
-                "perspective": {"enabled": True, "probability": 0.1, "perspective_scale": 0.1},
+                "perspective": {"enabled": True, "probability": 0.1, "perspective_scale": 0.15},
                 "flashlight": {"enabled": True, "probability": 0.3, "flashlight_intensity": 0.8, "flashlight_radius_range": [0.1, 0.3], "flashlight_progressive": True, "flashlight_affected_area": 0.25, "flashlight_probability": 0.3},
-                "polarity_inversion": {"enabled": True, "probability": 0.5}
+                "polarity_inversion": {"enabled": True, "probability": 0.5},
+                "quantization_noise": {"enabled": True, "probability": 0.1}
             }
         }
     
@@ -217,6 +219,19 @@ class AugmentationConfig:
             globals()["AUG_FLASHLIGHT_AFFECTED_AREA"] = flashlight["flashlight_affected_area"]
             globals()["AUG_FLASHLIGHT_PROBABILITY"] = flashlight["flashlight_probability"]
         
+        # Rotation Hard (up to ±45° for rotational confusion robustness)
+        if "rotation_hard" in augmentations:
+            rotation_hard = augmentations["rotation_hard"]
+            globals()["AUG_ROTATION_HARD_ENABLED"] = rotation_hard["enabled"]
+            globals()["AUG_ROTATION_HARD_PROB"] = rotation_hard["probability"]
+            globals()["AUG_ROTATION_HARD_RANGE"] = rotation_hard.get("rotation_hard_range", 45.0)
+        
+        # Quantization Noise (simulate INT8 rounding)
+        if "quantization_noise" in augmentations:
+            quantization_noise = augmentations["quantization_noise"]
+            globals()["AUG_QUANTIZATION_NOISE_ENABLED"] = quantization_noise["enabled"]
+            globals()["AUG_QUANTIZATION_NOISE_PROB"] = quantization_noise["probability"]
+        
         # Polarity Inversion
         if "polarity_inversion" in augmentations:
             polarity_inversion = augmentations["polarity_inversion"]
@@ -259,6 +274,7 @@ config_manager = AugmentationConfig()
 # Available augmentations mapping
 AUGMENTATION_MAP = {
     'rotation': 'apply_rotation',
+    'rotation_hard': 'apply_rotation_hard',
     'zoom': 'apply_zoom',
     'shift': 'apply_shift',
     'shear': 'apply_shear',
@@ -270,12 +286,14 @@ AUGMENTATION_MAP = {
     'random_crop': 'apply_random_crop',
     'perspective': 'apply_perspective_transform',
     'flashlight': 'apply_flashlight_disturbance',
-    'polarity_inversion': 'apply_polarity_inversion'
+    'polarity_inversion': 'apply_polarity_inversion',
+    'quantization_noise': 'apply_quantization_noise'
 }
 
 # Mapping for short codes
 AUGMENTATION_CODE_MAP = {
     'rotation': 'rot',
+    'rotation_hard': 'rth',
     'zoom': 'zm',
     'shift': 'sh',
     'shear': 'shr',
@@ -287,7 +305,8 @@ AUGMENTATION_CODE_MAP = {
     'random_crop': 'rc',
     'perspective': 'pt',
     'flashlight': 'fl',
-    'polarity_inversion': 'plr'
+    'polarity_inversion': 'plr',
+    'quantization_noise': 'qn'
 }
 
 # Global variable to store selected augmentations
@@ -474,6 +493,27 @@ class SingleShotAugmentor:
             for channel in range(image.shape[2]):
                 rotated[:, :, channel] = ndimage.rotate(
                     image[:, :, channel], angle, reshape=False, mode='nearest'
+                )
+            return rotated
+    
+    def apply_rotation_hard(self, image):
+        """Apply hard rotation up to ±45° for rotational confusion robustness (e.g. 6/9)."""
+        # Reset random seed for this function
+        random.seed()
+        np.random.seed()
+        
+        # Use globals().get() so a missing config key (e.g. older JSON) doesn't cause NameError
+        rotation_range = globals().get("AUG_ROTATION_HARD_RANGE", 45.0)
+        angle = random.uniform(-rotation_range, rotation_range)
+        image = self.ensure_correct_shape(image)
+        
+        if len(image.shape) == 2:
+            return ndimage.rotate(image, angle, reshape=False, mode='constant', cval=0.0)
+        else:
+            rotated = np.zeros_like(image)
+            for channel in range(image.shape[2]):
+                rotated[:, :, channel] = ndimage.rotate(
+                    image[:, :, channel], angle, reshape=False, mode='constant', cval=0.0
                 )
             return rotated
     
@@ -790,6 +830,19 @@ class SingleShotAugmentor:
         inverted = 1.0 - image
         return self.ensure_correct_shape(inverted)
     
+    def apply_quantization_noise(self, image):
+        """Simulate INT8 quantization noise by adding uniform noise in half-step range [-1/510, 1/510].
+        Helps prepare models for QAT by familiarizing them with quantization artifacts."""
+        # Reset random seed for this function
+        random.seed()
+        np.random.seed()
+        
+        image = self.ensure_correct_shape(image)
+        # Half of one quantization step for [0,1] range with 255 levels: 1/255/2 ≈ 0.002
+        noise = np.random.uniform(-0.002, 0.002, image.shape).astype(np.float32)
+        noisy = np.clip(image + noise, 0, 1)
+        return self.ensure_correct_shape(noisy)
+    
     def get_available_augmentations(self):
         """Get list of available augmentation functions based on selection and configuration"""
         if self.selected_augmentations:
@@ -809,9 +862,9 @@ class SingleShotAugmentor:
                 probability = self.config.get_augmentation_probability(aug_name)
                 
                 # Set augmentation type for grouping
-                if aug_name in ['rotation', 'zoom', 'shift', 'shear', 'perspective']:
+                if aug_name in ['rotation', 'rotation_hard', 'zoom', 'shift', 'shear', 'perspective']:
                     aug_type = 'spatial'
-                elif aug_name in ['brightness', 'contrast', 'color_jitter', 'gaussian_noise']:
+                elif aug_name in ['brightness', 'contrast', 'color_jitter', 'gaussian_noise', 'quantization_noise']:
                     aug_type = 'color'
                 else:
                     aug_type = 'other'

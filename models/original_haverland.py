@@ -11,7 +11,7 @@ Architecture:
   Trained with: RMSprop(lr=0.001), CategoricalCrossentropy(from_logits=True).
 
 Reference:
-  https://github.com/haverland/Tenth-of-step-of-a-meter-digit/blob/master/dig-class100-s2.ipynb
+  Haverland's original notebook (repository no longer available as of 20.06.2026)
 """
 
 import config as params
@@ -21,7 +21,7 @@ def get_model_info():
     """Return model information matching the original notebook"""
     return {
         "name": "CNN_s2 - Exact Haverland Original",
-        "source": "https://github.com/haverland/Tenth-of-step-of-a-meter-digit/blob/master/dig-class100-s2.ipynb",
+        "source": "Haverland's original notebook (repository no longer available as of 20.06.2026)",
         "implementation": "Exact replica of b2n.models.cnn32.CNN_s2",
         "input_shape": params.INPUT_SHAPE,
         "nb_classes": params.NB_CLASSES,

@@ -23,6 +23,11 @@
       "probability": 0.3,
       "rotation_range": 5
     },
+    "rotation_hard": {
+      "enabled": true,
+      "probability": 0.05,
+      "rotation_hard_range": 45.0
+    },
     "zoom": {
       "enabled": true,
       "probability": 0.3,
@@ -82,7 +87,7 @@
     "perspective": {
       "enabled": true,
       "probability": 0.3,
-      "perspective_scale": 0.1
+      "perspective_scale": 0.15
     },
     "flashlight": {
       "enabled": true,
@@ -99,6 +104,10 @@
     "polarity_inversion": {
       "enabled": true,
       "probability": 0.5
+    },
+    "quantization_noise": {
+      "enabled": true,
+      "probability": 0.1
     }
   }
 }
