@@ -44,6 +44,8 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v36", # GhostNet + SE (IoT, efficient, ~100 KB)
     "digit_recognizer_v37_teacher", # Wide MobileNetV3-style Teacher (PC-only, distillation)
     "digit_recognizer_v38", # RepVGG-style Reparameterizable CNN (IoT, multi-branch training -> single-branch inference)
+    "digit_recognizer_v39", # Gated Multi-Scale Depthwise Fusion (v16 successor, IoT, ~84KB INT8)
+    "digit_recognizer_v40", # Soft Binarization Preprocessor (v24 successor, IoT, ~55KB INT8)
     # "esp_quantization_ready", # ~70kB | Minimal Depthwise CNN for smooth INT8
     # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
     # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
@@ -149,6 +151,21 @@ DROPOUT_RATE = 0.5
 ORIGINAL_HAVERLAND_FILTERS = [32, 64, 128]
 ORIGINAL_HAVERLAND_DENSE_UNITS = 512
 ORIGINAL_HAVERLAND_DROPOUT_RATES = [0.25, 0.25, 0.25, 0.5]
+
+# ==============================================================================
+# V39 — Multi-Scale Depthwise Fusion
+# ==============================================================================
+
+MSDW_FUSION_DUAL_KERNEL_MIN_WIDTH = 10
+MSDW_FUSION_KERNELS = [3, 5]
+
+# ==============================================================================
+# V40 — Enhanced Preprocessing (Soft Binarization)
+# ==============================================================================
+
+PREPROC_V40_SHARPNESS_INIT = 10.0
+PREPROC_V40_SHARPNESS_MIN = 1.0
+PREPROC_V40_SHARPNESS_MAX = 15.0
 
 # ==============================================================================
 # OUTPUT FUNCTIONS
