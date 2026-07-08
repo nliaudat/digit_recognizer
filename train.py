@@ -1058,16 +1058,14 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             print("\n⏳ Loading dataset and optimizing computation graph...")
             print("   (This may take a minute for the first epoch)")
 
-            with tqdm(total=1, desc="Graph Optimization", leave=False) as pbar:
-                history = model.fit(
-                    train_dataset,
-                    epochs=params.EPOCHS,
-                    initial_epoch=params.INITIAL_EPOCH if hasattr(params, 'INITIAL_EPOCH') else 0,
-                    validation_data=val_dataset,
-                    callbacks=callbacks,
-                    verbose=0
-                )
-                pbar.update(1)
+            history = model.fit(
+                train_dataset,
+                epochs=params.EPOCHS,
+                initial_epoch=params.INITIAL_EPOCH if hasattr(params, 'INITIAL_EPOCH') else 0,
+                validation_data=val_dataset,
+                callbacks=callbacks,
+                verbose=0
+            )
         else:
             # Compute class weights to handle imbalanced datasets
             try:
@@ -1319,6 +1317,23 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                     mlflow.end_run()
 
         return model, history, training_dir
+
+    except KeyboardInterrupt:
+        print("\n\n⏹️  Training interrupted by user (Ctrl+C). Cleaning up...")
+        try:
+            if 'monitor' in dir() and 'monitor' in locals() and monitor is not None:
+                monitor.save_training_plots()
+                print("   ✅ Training plots saved before exit")
+        except Exception:
+            pass
+        try:
+            if MLFLOW_AVAILABLE and mlflow.active_run():
+                mlflow.end_run(status="KILLED")
+        except Exception:
+            pass
+        tf.keras.backend.clear_session()
+        print("👋 Exiting cleanly. Goodbye.")
+        sys.exit(130)  # Standard exit code for SIGINT
 
     except Exception as e:
         print(f"\n💥 CRITICAL TRAINING ERROR: {e}")
