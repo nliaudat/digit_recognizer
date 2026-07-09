@@ -132,7 +132,7 @@ USE_DYNAMIC_SCHEDULER = True
 if NB_CLASSES <= 10:
     LR_SCHEDULER_THRESHOLDS = [0.985, 0.992] #[0.990, 0.995]
 else:
-    LR_SCHEDULER_THRESHOLDS = [0.75, 0.82]
+    LR_SCHEDULER_THRESHOLDS = [0.85, 0.92]
 
 LR_SCHEDULER_SEQUENCE = ["reduce_on_plateau", "reduce_on_plateau", "cosine"]
 
