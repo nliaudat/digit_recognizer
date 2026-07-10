@@ -280,6 +280,10 @@ def parse_arguments():
     parser.add_argument("--no-focal-loss", action="store_true", help="Explicitly disable Focal Loss.")
     
     # --- Advanced Features ---
+    parser.add_argument("--logits", action="store_true",
+                        help="Output raw logits instead of softmax probabilities.")
+    parser.add_argument("--softmax", action="store_true",
+                        help="Output softmax probabilities (default).")
     parser.add_argument("--cutmix", action="store_true", help="Enable CutMix augmentation.")
     parser.add_argument("--no-random-erasing", action="store_true", help="Disable Random Erasing augmentation.")
     parser.add_argument("--optimizer", type=str, default=None, help="Override the optimizer (e.g. adamw).")
@@ -627,6 +631,16 @@ def main():
         import config.quantization as _cfg_q
         _cfg_q.USE_TQT_PIPELINE = False
         _cfg_q.ESP_DL_QUANTIZE = False
+
+    # Logits / Softmax overrides
+    if args.logits:
+        params.USE_LOGITS = True
+        import config.models as _cfg_m
+        _cfg_m.USE_LOGITS = True
+    if args.softmax:
+        params.USE_LOGITS = False
+        import config.models as _cfg_m
+        _cfg_m.USE_LOGITS = False
 
     # -----------------------------------------------------------------
     #  REFRESH DERIVED PARAMETERS (Apply CLI overrides to paths/shapes)
