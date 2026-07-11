@@ -51,8 +51,25 @@ def evaluate_keras_model(keras_model, x_test, y_test):
     return accuracy
 
 
+def _evaluate_keras_multihead(keras_model, x_test, y_test_orig):
+    """
+    Evaluate multi-head Keras model (v41) using combined accuracy.
+    y_test_orig: scalar labels (0-99).
+    """
+    x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
+    preds = keras_model.predict(x_test_analysis, verbose=0)
+    joint = combine_multiheads(preds)
+    if hasattr(joint, 'numpy'):
+        joint = joint.numpy()
+    pred_cls = np.argmax(joint, axis=-1)
+    y_true = np.squeeze(y_orig)
+    accuracy = float(np.mean(pred_cls == y_true))
+    print(f"Keras Model Combined Accuracy: {accuracy:.4f} (on {len(x_test_analysis)} samples)")
+    return accuracy
+
+
 def evaluate_tflite_model(tflite_path, x_test, y_test):
-    """Evaluate TFLite model accuracy"""
+    """Evaluate TFLite model accuracy (single-head)."""
     print("🧪 Evaluating TFLite model...")
     
     # Use configured number of samples
@@ -122,6 +139,67 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
     accuracy = correct_predictions / total_samples
     print(f"TFLite Model Accuracy: {accuracy:.4f} ({correct_predictions}/{total_samples})")
     
+    return accuracy
+
+
+def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
+    """
+    Evaluate multi-head TFLite model (v41) using combined accuracy.
+    Reads both output tensors and combines tens*10+units.
+    y_test_orig: scalar labels (0-99).
+    """
+    print("🧪 Evaluating TFLite model (multi-head)...")
+    x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
+    total_samples = len(x_test_analysis)
+    
+    interpreter = tf.lite.Interpreter(model_path=tflite_path)
+    interpreter.allocate_tensors()
+    
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    input_dtype = input_details[0]['dtype']
+    
+    # Detect multi-head TFLite model
+    is_multihead_tflite = (
+        len(output_details) >= 2
+        and output_details[0]['shape'][-1] == 10
+        and output_details[1]['shape'][-1] == 10
+    )
+    
+    correct = 0
+    y_true_arr = np.squeeze(y_orig)
+    
+    for i in tqdm(range(total_samples), desc="Evaluating TFLite", leave=False):
+        input_data = np.array(x_test_analysis[i:i+1], dtype=np.float32)
+        if input_dtype == np.int8:
+            input_data = (input_data * 255.0 - 128.0).astype(np.int8)
+        elif input_dtype == np.uint8:
+            input_data = (input_data * 255.0).astype(np.uint8)
+        
+        interpreter.set_tensor(input_details[0]['index'], input_data)
+        interpreter.invoke()
+        
+        if is_multihead_tflite:
+            tens_out = interpreter.get_tensor(output_details[0]['index'])
+            units_out = interpreter.get_tensor(output_details[1]['index'])
+            if output_details[0]['dtype'] in [np.uint8, np.int8]:
+                s, zp = output_details[0]['quantization']
+                tens_out = (tens_out.astype(np.float32) - zp) * s
+            if output_details[1]['dtype'] in [np.uint8, np.int8]:
+                s, zp = output_details[1]['quantization']
+                units_out = (units_out.astype(np.float32) - zp) * s
+            tens_pred = int(np.argmax(tens_out[0]))
+            units_pred = int(np.argmax(units_out[0]))
+            pred = tens_pred * 10 + units_pred
+        else:
+            output = interpreter.get_tensor(output_details[0]['index'])
+            pred = int(np.argmax(output))
+        
+        if pred == y_true_arr[i]:
+            correct += 1
+    
+    accuracy = correct / total_samples
+    print(f"TFLite Model Accuracy: {accuracy:.4f} ({correct}/{total_samples})")
     return accuracy
 
 
@@ -219,9 +297,17 @@ def analyze_quantization_impact(keras_model, x_test, y_test, tflite_path, debug=
         # Use configured number of samples
         x_test_analysis, y_test_analysis = get_analysis_samples(x_test, y_test)
         
-        # Accuracy comparison
-        keras_accuracy = evaluate_keras_model(keras_model, x_test_analysis, y_test_analysis)
-        tflite_accuracy = evaluate_tflite_model(tflite_path, x_test_analysis, y_test_analysis)
+        # Detect multi-head model by checking config
+        is_multihead = hasattr(keras_model, 'output_names') and len(keras_model.output_names) >= 2 and all(
+            n in keras_model.output_names for n in ('tens_probs', 'units_probs'))
+
+        # Accuracy comparison — use multi-head-aware evaluation when needed
+        if is_multihead:
+            keras_accuracy = _evaluate_keras_multihead(keras_model, x_test_analysis, y_test_analysis)
+            tflite_accuracy = _evaluate_tflite_multihead(tflite_path, x_test_analysis, y_test_analysis)
+        else:
+            keras_accuracy = evaluate_keras_model(keras_model, x_test_analysis, y_test_analysis)
+            tflite_accuracy = evaluate_tflite_model(tflite_path, x_test_analysis, y_test_analysis)
         
         print(f"📊 ACCURACY COMPARISON:")
         print(f"   Keras Model:    {keras_accuracy:.4f}")
