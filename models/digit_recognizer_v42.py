@@ -164,16 +164,16 @@ def create_digit_recognizer_v42():
     For 10-class mode (NB_CLASSES ≤ 10), falls back to a single-head
     standard v16 output named 'output'.
     """
+    # 10-class fallback: single-head like v16 (supports USE_LOGITS)
+    if params.NB_CLASSES <= 10:
+        return _create_single_head_v42()
+
     # Soft conditioning requires probabilities for weighted combination.
     if params.USE_LOGITS:
         raise ValueError(
             "v42 soft conditioning requires USE_LOGITS=False "
             "(probability-weighted combination needs softmax, not logits)"
         )
-
-    # 10-class fallback: single-head like v16
-    if params.NB_CLASSES <= 10:
-        return _create_single_head_v42()
 
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
 
