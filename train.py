@@ -1156,8 +1156,8 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                 are combined as head0*10 + head1 and compared to y_orig.
                 """
                 preds = model.predict(x, verbose=0)
-                head0_pred = tf.argmax(preds[0], axis=-1).numpy()
-                head1_pred = tf.argmax(preds[1], axis=-1).numpy()
+                head0_pred = np.argmax(preds[0], axis=-1)
+                head1_pred = np.argmax(preds[1], axis=-1)
                 combined = head0_pred * 10 + head1_pred
                 # Squeeze y_orig to ensure 1D comparison — prevents (N,) vs (N,1) broadcasting
                 return float(np.mean(combined == np.squeeze(y_orig)))

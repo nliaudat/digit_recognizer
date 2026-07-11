@@ -74,30 +74,36 @@ class TFLiteDigitPredictor:
             self.idx_dec = self.output_details[1]['index']   # actual tensor index
             self.q_int = None  # dequant params for integer/tens head
             self.q_dec = None  # dequant params for decimal/units head
-            # Resolve head indices by NAME to survive TFLite converter reordering.
+            # Resolve head indices by NAME (substring match), not position.
+            # TFLite may decorate output names (e.g. 'serving_default_tens_probs:0')
+            # so we use substring matching rather than exact names.
             # v41: tens_probs / units_probs ;  v42: integer_probs / decimal_probs
+            def _head_by_substr(head_map, substr):
+                """Return detail for output whose name contains substr, else None."""
+                for name, detail in head_map.items():
+                    if substr in name:
+                        return detail
+                return None
+
             head_map = {od['name']: od for od in self.output_details}
-            if 'tens_probs' in head_map and 'units_probs' in head_map:
-                self.idx_int = head_map['tens_probs']['index']
-                self.idx_dec = head_map['units_probs']['index']
-                _t = head_map['tens_probs']
-                _u = head_map['units_probs']
-                self.q_int = _t.get('quantization', (None, None)) if _t['dtype'] in [np.uint8, np.int8] else None
-                self.q_dec = _u.get('quantization', (None, None)) if _u['dtype'] in [np.uint8, np.int8] else None
-            elif 'integer_probs' in head_map and 'decimal_probs' in head_map:
-                self.idx_int = head_map['integer_probs']['index']
-                self.idx_dec = head_map['decimal_probs']['index']
-                _t = head_map['integer_probs']
-                _u = head_map['decimal_probs']
-                self.q_int = _t.get('quantization', (None, None)) if _t['dtype'] in [np.uint8, np.int8] else None
-                self.q_dec = _u.get('quantization', (None, None)) if _u['dtype'] in [np.uint8, np.int8] else None
-            else:
+            det_int = _head_by_substr(head_map, 'integer_probs')
+            det_dec = _head_by_substr(head_map, 'decimal_probs')
+            if det_int is None:
+                det_int = _head_by_substr(head_map, 'tens_probs')
+                det_dec = _head_by_substr(head_map, 'units_probs')
+            if det_int is None:
                 found = [od['name'] for od in self.output_details]
                 raise ValueError(
                     "Multi-head TFLite model detected but output names are not "
                     "recognized. Expected 'tens_probs'+'units_probs' (v41) or "
                     f"'integer_probs'+'decimal_probs' (v42). Found: {found}"
                 )
+            self.idx_int = det_int['index']
+            self.idx_dec = det_dec['index']
+            _dtype_int = det_int['dtype']
+            _dtype_dec = det_dec['dtype']
+            self.q_int = det_int.get('quantization', (None, None)) if _dtype_int in [np.uint8, np.int8] else None
+            self.q_dec = det_dec.get('quantization', (None, None)) if _dtype_dec in [np.uint8, np.int8] else None
             logger.info(f"🔀 Multi-head model detected: integer@{self.idx_int} decimal@{self.idx_dec} ({stem})")
         else:
             self.multi_head = False

@@ -208,24 +208,14 @@ def create_digit_recognizer_v42():
     decimal_heads = []
 
     for i in range(10):
-        # Condition on specific integer via a constant scalar.
-        # Must wrap tf.op in Lambda (KerasTensors forbid raw TF ops in TF2/Keras3).
-        integer_condition = tf.keras.layers.Lambda(
-            lambda x, c=float(i): tf.ones_like(x) * c,
-            name=f'decimal_cond_{i}_scalar'
-        )(integer_probs[:, 0:1])
-
-        # Concatenate shared features with integer condition
-        conditioned = tf.keras.layers.Concatenate(
-            name=f'decimal_cond_{i}_concat'
-        )([shared_decimal, integer_condition])
-
-        # Head-specific processing
+        # Each head is an independent Dense layer, so concatenating a constant
+        # scalar to the input would only add a constant to the bias — redundant.
+        # Feed shared_decimal directly into each head's Dense layer.
         head_dense = tf.keras.layers.Dense(
             head_units, activation=None,
             kernel_initializer='he_normal',
             name=f'decimal_head_{i}_dense'
-        )(conditioned)
+        )(shared_decimal)
         head_dense = tf.keras.layers.ReLU(
             max_value=6.0, name=f'decimal_head_{i}_relu6'
         )(head_dense)
@@ -252,6 +242,7 @@ def create_digit_recognizer_v42():
             tf.stack(args[0], axis=1) * tf.expand_dims(args[1], axis=2),
             axis=1
         ),
+        output_shape=(10,),
         name='decimal_probs'
     )([decimal_heads, integer_probs])
 

@@ -160,35 +160,32 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
     output_details = interpreter.get_output_details()
     input_dtype = input_details[0]['dtype']
     
-    # Resolve integer/units head index by name, not position.
-    # TFLite preserves Keras layer names in output_details[i]['name'].
+    # Resolve integer/units head index by name (substring match), not position.
+    # TFLite may decorate output names (e.g. 'serving_default_tens_probs:0')
+    # so we use substring matching rather than exact names.
     # v41: tens_probs / units_probs ;  v42: integer_probs / decimal_probs
+    def _head_by_substr(head_map, substr):
+        """Return (detail, index) for output whose name contains substr, else (None, None)."""
+        for name, detail in head_map.items():
+            if substr in name:
+                return detail, detail['index']
+        return None, None
+
     head_map = {od['name']: od for od in output_details}
-    # All if/elif branches below set these unconditionally, or raise ValueError.
-    idx_int = None  # will be set to actual tensor index from head_map
-    idx_dec = None
-    det_int = None  # output_detail for integer/tens head (for dequant params)
-    det_dec = None  # output_detail for decimal/units head
-    has_named_heads = False
-    if 'tens_probs' in head_map and 'units_probs' in head_map:
-        idx_int = head_map['tens_probs']['index']
-        idx_dec = head_map['units_probs']['index']
-        det_int = head_map['tens_probs']
-        det_dec = head_map['units_probs']
-        has_named_heads = True
-    elif 'integer_probs' in head_map and 'decimal_probs' in head_map:
-        idx_int = head_map['integer_probs']['index']
-        idx_dec = head_map['decimal_probs']['index']
-        det_int = head_map['integer_probs']
-        det_dec = head_map['decimal_probs']
-        has_named_heads = True
-    else:
+    det_int, idx_int = _head_by_substr(head_map, 'integer_probs')
+    det_dec, idx_dec = _head_by_substr(head_map, 'decimal_probs')
+    if det_int is None:
+        # Fallback: try v41 naming (tens_probs / units_probs)
+        det_int, idx_int = _head_by_substr(head_map, 'tens_probs')
+        det_dec, idx_dec = _head_by_substr(head_map, 'units_probs')
+    if det_int is None:
         found_names = [od['name'] for od in output_details]
         raise ValueError(
             "Multi-head TFLite model detected but output names are not "
             "recognized. Expected 'tens_probs'+'units_probs' (v41) or "
             f"'integer_probs'+'decimal_probs' (v42). Found: {found_names}"
         )
+    has_named_heads = True
     
     # Pre-fetch dequantization params per head
     q_int = det_int['quantization'] if det_int['dtype'] in [np.uint8, np.int8] else None
