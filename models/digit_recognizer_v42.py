@@ -149,10 +149,13 @@ def create_digit_recognizer_v42():
     dec_dense_units = _get_shared_decimal_dense_units()
     head_units = _get_head_dense_units()
     dropout_rate = _get_dropout()
+    _l2_val = getattr(params, 'L2_REGULARIZATION', 0.0)
+    _reg = tf.keras.regularizers.l2(_l2_val) if _l2_val > 0.0 else None
 
     integer_dense = tf.keras.layers.Dense(
         int_dense_units, activation=None,
         kernel_initializer='he_normal',
+        kernel_regularizer=_reg,
         name='integer_dense'
     )(shared_features)
     integer_dense = tf.keras.layers.ReLU(max_value=6.0, name='integer_relu6')(integer_dense)

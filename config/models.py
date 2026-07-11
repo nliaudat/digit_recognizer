@@ -196,16 +196,6 @@ V42_DROPOUT = 0.1
 V42_LOSS_WEIGHT_INTEGER = 0.7
 V42_LOSS_WEIGHT_DECIMAL = 0.3
 
-# Dynamic loss weight schedule (epoch, int_weight, dec_weight)
-# Phase 0-19: focus on integer head
-# Phase 20-59: balanced refinement
-# Phase 60+: final equal weighting
-V42_LOSS_WEIGHT_SCHEDULE = [
-    (0,  1.0, 0.1),   # Early: integer head needs strong signal
-    (20, 0.7, 0.3),   # Mid: balanced refinement
-    (60, 0.5, 0.5),   # Late: equal weighting
-]
-
 # ==============================================================================
 # OUTPUT FUNCTIONS
 # ==============================================================================

@@ -76,11 +76,13 @@ def _evaluate_keras_multihead(keras_model, x_test, y_test_orig):
         dec_heads = outputs[1:]  # list of 10 arrays each [N, 10]
         int_preds = np.argmax(int_probs, axis=-1)
         # Pick the decimal head corresponding to the predicted integer for each sample
-        dec_preds = np.array([np.argmax(dec_heads[int_preds[i]][i]) for i in range(len(int_preds))])
+        # Vectorized: stack heads then select via advanced indexing
+        stacked_dec_heads = np.stack(dec_heads, axis=1)  # (N, 10, 10)
+        selected_heads = stacked_dec_heads[np.arange(len(int_preds)), int_preds]  # (N, 10)
+        dec_preds = np.argmax(selected_heads, axis=-1)
         pred_cls = int_preds * 10 + dec_preds
-        # Clean up temporary model
+        # Clean up temporary model (Python GC handles memory)
         del eval_model
-        tf.keras.backend.clear_session()
     else:
         # v41: standard argmax combination (both heads are independent 10-class)
         x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)

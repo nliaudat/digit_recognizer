@@ -47,18 +47,24 @@ def combine_multiheads(model_outputs, model=None):
         is_v42 = 'integer_probs' in model.output_names and 'decimal_probs' in model.output_names
 
     if is_v42:
-        # v42: decimal_probs is already the soft-weighted combination.
-        # Use argmax(integer) * 10 + argmax(decimal) and return one-hot 100-class.
+        # decimal_probs is the marginal Σ P(int=i)×P(dec|int=i), so its argmax may
+        # come from a different integer than argmax(integer_probs).  This means the
+        # combined prediction can be *invalid* (e.g. integer=2, decimal=7 producing 27
+        # when the model's own internal heads would choose head 2's best decimal).
+        #
+        # For precise v42 evaluation use _evaluate_keras_multihead() which extracts
+        # individual decimal_head_{i}_probs.  During training callbacks the ~1%
+        # discrepancy from the marginal approximation is acceptable for early stopping.
         is_tf = hasattr(head0, 'shape')
         if is_tf:
             int_pred = tf.cast(tf.argmax(head0, axis=-1), tf.int32)
             dec_pred = tf.cast(tf.argmax(head1, axis=-1), tf.int32)
-            combined = int_pred * 10 + dec_pred  # (N,)
+            combined = int_pred * 10 + dec_pred
             return tf.one_hot(combined, 100, dtype=tf.float32)
         else:
             int_pred = np.argmax(head0, axis=-1)
             dec_pred = np.argmax(head1, axis=-1)
-            combined = int_pred * 10 + dec_pred  # (N,)
+            combined = int_pred * 10 + dec_pred
             joint = np.zeros((len(combined), 100), dtype=np.float32)
             joint[np.arange(len(combined)), combined] = 1.0
             return joint
