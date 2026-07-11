@@ -314,6 +314,38 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         for i, callback in enumerate(callbacks):
             print(f"   {i+1}. {callback.__class__.__name__}")
     
+    # ── Dynamic Loss Weight Scheduler (v42 only) ─────────────────────────
+    # Transitions V42_LOSS_WEIGHT_INTEGER/DECIMAL at epoch boundaries
+    # according to V42_LOSS_WEIGHT_SCHEDULE.
+    is_v42 = 'v42' in params.MODEL_ARCHITECTURE
+    if is_v42:
+        schedule = getattr(params, 'V42_LOSS_WEIGHT_SCHEDULE', [])
+        if schedule:
+            class LossWeightScheduler(tf.keras.callbacks.Callback):
+                """Updates model.loss_weights at configured epoch boundaries."""
+                def __init__(self, schedule):
+                    super().__init__()
+                    self.schedule = sorted(schedule, key=lambda x: x[0])
+
+                def on_epoch_begin(self, epoch, logs=None):
+                    # Find the schedule entry for the current epoch
+                    int_w, dec_w = None, None
+                    for s_epoch, s_int, s_dec in reversed(self.schedule):
+                        if epoch >= s_epoch:
+                            int_w, dec_w = s_int, s_dec
+                            break
+                    if int_w is not None and hasattr(self.model, 'loss_weights'):
+                        # Update loss_weights dict
+                        for name in list(self.model.loss_weights.keys()):
+                            if name == 'integer_probs' or name == 'tens_probs':
+                                self.model.loss_weights[name] = int_w
+                            elif name == 'decimal_probs' or name == 'units_probs':
+                                self.model.loss_weights[name] = dec_w
+
+            callbacks.append(LossWeightScheduler(schedule))
+            if debug:
+                print(f"📊 LossWeightScheduler added (v42, {len(schedule)} phases)")
+
     # ── Multi-head Combined Accuracy Callback ─────────────────────────────
     # For v41 (multi-head models), inject combined tens*10+units accuracy
     # into val_accuracy before early stopping / checkpointing run.
@@ -345,11 +377,22 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
                     # v41: tens_probs / units_probs ;  v42: integer_probs / decimal_probs
                     if 'tens_probs' in y_val:
                         y_true = np.squeeze(y_val['tens_probs']) * 10 + np.squeeze(y_val['units_probs'])
+                        y_true_int = np.squeeze(y_val['tens_probs'])
+                        y_true_dec = np.squeeze(y_val['units_probs'])
                     else:
                         y_true = np.squeeze(y_val['integer_probs']) * 10 + np.squeeze(y_val['decimal_probs'])
+                        y_true_int = np.squeeze(y_val['integer_probs'])
+                        y_true_dec = np.squeeze(y_val['decimal_probs'])
                 else:
                     y_true = np.squeeze(y_val)
+                    y_true_int = y_true // 10
+                    y_true_dec = y_true % 10
                 logs['val_accuracy'] = float(np.mean(pred_cls == y_true))
+                # Per-head accuracy for CSV logging
+                pred_int = np.argmax(preds[0], axis=-1)
+                pred_dec = np.argmax(preds[1], axis=-1)
+                logs['val_integer_acc'] = float(np.mean(pred_int == np.squeeze(y_true_int)))
+                logs['val_decimal_acc'] = float(np.mean(pred_dec == np.squeeze(y_true_dec)))
 
         _multihead_cb = CombinedAccuracyCallback(validation_data)
         callbacks.insert(0, _multihead_cb)

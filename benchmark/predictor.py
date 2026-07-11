@@ -70,8 +70,8 @@ class TFLiteDigitPredictor:
         )
         if is_multihead_model and has_two_10way:
             self.multi_head = True
-            self.idx_int = self.output_details[0]['index']   # actual tensor index (overwritten by name resolution below)
-            self.idx_dec = self.output_details[1]['index']   # actual tensor index
+            self.idx_int = None  # resolved by name resolution below
+            self.idx_dec = None
             self.q_int = None  # dequant params for integer/tens head
             self.q_dec = None  # dequant params for decimal/units head
             # Resolve head indices by NAME (substring match), not position.
@@ -174,11 +174,11 @@ class TFLiteDigitPredictor:
                 tens_data = self.interpreter.get_tensor(self.idx_int)
                 units_data = self.interpreter.get_tensor(self.idx_dec)
 
-                # Dequantize both if needed
-                if self.q_int is not None and self.q_int[0] is not None:
+                # Dequantize both if needed (scale must be > 0 to avoid zeroing float32 outputs)
+                if self.q_int is not None and self.q_int[0] is not None and self.q_int[0] > 0.0:
                     s, zp = self.q_int
                     tens_data = (tens_data.astype(np.float32) - zp) * s
-                if self.q_dec is not None and self.q_dec[0] is not None:
+                if self.q_dec is not None and self.q_dec[0] is not None and self.q_dec[0] > 0.0:
                     s, zp = self.q_dec
                     units_data = (units_data.astype(np.float32) - zp) * s
 
@@ -198,8 +198,8 @@ class TFLiteDigitPredictor:
                 tens_pred = int(np.argmax(tens_vec))
                 units_pred = int(np.argmax(units_vec))
                 prediction = tens_pred * 10 + units_pred
-                # Combined confidence: geometric mean of both head confidences
-                confidence = float(np.sqrt(np.max(tens_vec) * np.max(units_vec)))
+                # Combined confidence: min of both head confidences (bottleneck)
+                confidence = float(min(np.max(tens_vec), np.max(units_vec)))
                 output_vector = np.zeros(100, dtype=np.float32)
                 output_vector[prediction] = 1.0  # one-hot for the combined class
 
@@ -319,10 +319,10 @@ class TFLiteDigitPredictor:
             if self.multi_head and len(self.output_details) >= 2:
                 tens_data = self.interpreter.get_tensor(self.idx_int)
                 units_data = self.interpreter.get_tensor(self.idx_dec)
-                if self.q_int is not None and self.q_int[0] is not None:
+                if self.q_int is not None and self.q_int[0] is not None and self.q_int[0] > 0.0:
                     s, zp = self.q_int
                     tens_data = (tens_data.astype(np.float32) - zp) * s
-                if self.q_dec is not None and self.q_dec[0] is not None:
+                if self.q_dec is not None and self.q_dec[0] is not None and self.q_dec[0] > 0.0:
                     s, zp = self.q_dec
                     units_data = (units_data.astype(np.float32) - zp) * s
                 tens_vec = tens_data[0]; units_vec = units_data[0]
@@ -334,7 +334,7 @@ class TFLiteDigitPredictor:
                     units_vec = np.exp(units_vec - np.max(units_vec)) / np.sum(np.exp(units_vec - np.max(units_vec)))
                 tens_pred = int(np.argmax(tens_vec)); units_pred = int(np.argmax(units_vec))
                 prediction = tens_pred * 10 + units_pred
-                confidence = float(np.sqrt(np.max(tens_vec) * np.max(units_vec)))
+                confidence = float(min(np.max(tens_vec), np.max(units_vec)))
                 output_vector = np.zeros(100, dtype=np.float32)
                 output_vector[prediction] = 1.0
                 return prediction, confidence, output_vector

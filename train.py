@@ -1097,17 +1097,31 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             )
         else:
             # Compute class weights to handle imbalanced datasets.
-            # For multi-head models, y_train_final is a dict; use the raw labels.
-            _class_weight_labels = y_train_raw if is_multihead else y_train_final
+            # For multi-head models: compute per-head 10-class dicts
+            # (Keras applies separate weight dicts per output).
+            # For single-head: single dict matching label range.
             try:
-                unique_classes = np.unique(_class_weight_labels)
-                weights = compute_class_weight(
-                    class_weight='balanced',
-                    classes=unique_classes,
-                    y=_class_weight_labels
-                )
-                class_weight_dict = dict(zip(unique_classes, weights))
-                print(f"⚖️  Using class weights for {len(unique_classes)} classes (max ratio: {max(weights)/min(weights):.2f}x)")
+                if is_multihead:
+                    class_weight_dict = {}
+                    for key in y_train_final.keys():
+                        head_labels = y_train_final[key]
+                        unique_classes = np.unique(head_labels)
+                        weights = compute_class_weight(
+                            class_weight='balanced',
+                            classes=unique_classes,
+                            y=head_labels
+                        )
+                        class_weight_dict[key] = dict(zip(unique_classes, weights))
+                    print(f"⚖️  Using multi-head class weights for heads: {list(class_weight_dict.keys())}")
+                else:
+                    unique_classes = np.unique(y_train_final)
+                    weights = compute_class_weight(
+                        class_weight='balanced',
+                        classes=unique_classes,
+                        y=y_train_final
+                    )
+                    class_weight_dict = dict(zip(unique_classes, weights))
+                    print(f"⚖️  Using class weights for {len(unique_classes)} classes (max ratio: {max(weights)/min(weights):.2f}x)")
             except Exception as e:
                 print(f"⚠️  Could not compute class weights: {e}. Training without class weighting.")
                 class_weight_dict = None
