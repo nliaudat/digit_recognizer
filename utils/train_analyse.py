@@ -58,10 +58,9 @@ def _evaluate_keras_multihead(keras_model, x_test, y_test_orig):
     """
     x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
     preds = keras_model.predict(x_test_analysis, verbose=0)
-    joint = combine_multiheads(preds)
-    if hasattr(joint, 'numpy'):
-        joint = joint.numpy()
-    pred_cls = np.argmax(joint, axis=-1)
+    # argmax(head0) * 10 + argmax(head1) is equivalent to argmax of the joint
+    # 100-class distribution, but avoids the expensive outer product.
+    pred_cls = np.argmax(preds[0], axis=-1) * 10 + np.argmax(preds[1], axis=-1)
     y_true = np.asarray(y_orig).flatten()
     accuracy = float(np.mean(pred_cls == y_true))
     print(f"Keras Model Combined Accuracy: {accuracy:.4f} (on {len(x_test_analysis)} samples)")
@@ -174,18 +173,17 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
     head_map = {od['name']: od for od in output_details}
     det_int, idx_int = _head_by_substr(head_map, 'integer_probs')
     det_dec, idx_dec = _head_by_substr(head_map, 'decimal_probs')
-    if det_int is None:
+    if det_int is None or det_dec is None:
         # Fallback: try v41 naming (tens_probs / units_probs)
         det_int, idx_int = _head_by_substr(head_map, 'tens_probs')
         det_dec, idx_dec = _head_by_substr(head_map, 'units_probs')
-    if det_int is None:
+    if det_int is None or det_dec is None:
         found_names = [od['name'] for od in output_details]
         raise ValueError(
             "Multi-head TFLite model detected but output names are not "
             "recognized. Expected 'tens_probs'+'units_probs' (v41) or "
             f"'integer_probs'+'decimal_probs' (v42). Found: {found_names}"
         )
-    has_named_heads = True
     
     # Pre-fetch dequantization params per head
     q_int = det_int['quantization'] if det_int['dtype'] in [np.uint8, np.int8] else None

@@ -108,6 +108,21 @@ def _inv_res(x, filters_out, expand_ratio, stride, name_prefix):
 
 
 # ---------------------------------------------------------------------------
+# Registered serializable function for the soft conditioning Lambda layer.
+# Module-level + @register_keras_serializable ensures .keras save/load works.
+# ---------------------------------------------------------------------------
+
+@tf.keras.utils.register_keras_serializable(package='Custom')
+def soft_conditioning_combine(args):
+    """Stack 10 decimal heads and compute Σ P(integer=i) × P(decimal|integer=i)."""
+    decimal_heads, integer_probs = args
+    return tf.reduce_sum(
+        tf.stack(decimal_heads, axis=1) * tf.expand_dims(integer_probs, axis=2),
+        axis=1
+    )
+
+
+# ---------------------------------------------------------------------------
 # Model builder
 # ---------------------------------------------------------------------------
 
@@ -238,10 +253,7 @@ def create_digit_recognizer_v42():
     # Weighted combination: Σ P(integer=i) × P(decimal|integer=i)
     # Must wrap in Lambda (KerasTensors forbid raw TF ops in TF2/Keras3).
     decimal_probs = tf.keras.layers.Lambda(
-        lambda args: tf.reduce_sum(
-            tf.stack(args[0], axis=1) * tf.expand_dims(args[1], axis=2),
-            axis=1
-        ),
+        soft_conditioning_combine,
         output_shape=(10,),
         name='decimal_probs'
     )([decimal_heads, integer_probs])

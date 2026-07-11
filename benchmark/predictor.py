@@ -88,10 +88,10 @@ class TFLiteDigitPredictor:
             head_map = {od['name']: od for od in self.output_details}
             det_int = _head_by_substr(head_map, 'integer_probs')
             det_dec = _head_by_substr(head_map, 'decimal_probs')
-            if det_int is None:
+            if det_int is None or det_dec is None:
                 det_int = _head_by_substr(head_map, 'tens_probs')
                 det_dec = _head_by_substr(head_map, 'units_probs')
-            if det_int is None:
+            if det_int is None or det_dec is None:
                 found = [od['name'] for od in self.output_details]
                 raise ValueError(
                     "Multi-head TFLite model detected but output names are not "
