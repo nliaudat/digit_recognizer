@@ -1155,25 +1155,25 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         # Evaluate Keras model
         if is_multihead and len(model.outputs) > 1:
             # For multi-head models, compute combined accuracy manually.
-            # Works for both v41 (tens_probs, units_probs) and v42 (integer_probs, decimal_probs)
-            # since both produce list[2] of [batch, 10] tensors combined as first*10+second.
-            def _combined_accuracy(model, x, y_orig):
-                """
-                y_orig: original integer labels (0-99)
-                Returns combined accuracy (0-1 scale) where model's two 10-class heads
-                are combined as head0*10 + head1 and compared to y_orig.
-                """
-                preds = model.predict(x, verbose=0)
-                head0_pred = np.argmax(preds[0], axis=-1)
-                head1_pred = np.argmax(preds[1], axis=-1)
-                combined = head0_pred * 10 + head1_pred
-                # Squeeze y_orig to ensure 1D comparison — prevents (N,) vs (N,1) broadcasting
-                return float(np.mean(combined == np.squeeze(y_orig)))
-
-            train_accuracy = _combined_accuracy(model, x_train, y_train_raw)
-            val_accuracy = _combined_accuracy(model, x_val, y_val_raw)
-            test_accuracy = _combined_accuracy(model, x_test, y_test_raw)
-            print(f"✅ Multi-head Combined Accuracy (head0*10+head1):")
+            # For v42, use _evaluate_keras_multihead which extracts individual decimal
+            # heads to avoid the marginal argmax issue.  For v41, use head0*10+head1.
+            is_v42 = 'v42' in params.MODEL_ARCHITECTURE
+            if is_v42:
+                from utils.train_analyse import _evaluate_keras_multihead
+                train_accuracy = _evaluate_keras_multihead(model, x_train, y_train_raw)
+                val_accuracy = _evaluate_keras_multihead(model, x_val, y_val_raw)
+                test_accuracy = _evaluate_keras_multihead(model, x_test, y_test_raw)
+            else:
+                def _combined_accuracy(model, x, y_orig):
+                    preds = model.predict(x, verbose=0)
+                    head0_pred = np.argmax(preds[0], axis=-1)
+                    head1_pred = np.argmax(preds[1], axis=-1)
+                    combined = head0_pred * 10 + head1_pred
+                    return float(np.mean(combined == np.squeeze(y_orig)))
+                train_accuracy = _combined_accuracy(model, x_train, y_train_raw)
+                val_accuracy = _combined_accuracy(model, x_val, y_val_raw)
+                test_accuracy = _combined_accuracy(model, x_test, y_test_raw)
+            print(f"✅ Multi-head Combined Accuracy:")
         else:
             train_accuracy = model.evaluate(x_train, y_train_final, verbose=0)[1]
             val_accuracy = model.evaluate(x_val, y_val_final, verbose=0)[1]

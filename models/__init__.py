@@ -62,8 +62,8 @@ def combine_multiheads(model_outputs, model=None):
             combined = int_pred * 10 + dec_pred
             return tf.one_hot(combined, 100, dtype=tf.float32)
         else:
-            int_pred = np.argmax(head0, axis=-1)
-            dec_pred = np.argmax(head1, axis=-1)
+            int_pred = np.atleast_1d(np.argmax(head0, axis=-1))
+            dec_pred = np.atleast_1d(np.argmax(head1, axis=-1))
             combined = int_pred * 10 + dec_pred
             joint = np.zeros((len(combined), 100), dtype=np.float32)
             joint[np.arange(len(combined)), combined] = 1.0
@@ -92,3 +92,41 @@ __all__ = [
     'get_training_callbacks',
     'combine_multiheads',
 ]
+
+# ---------------------------------------------------------------------------
+# Global Custom Object Registration for Keras load_model
+# ---------------------------------------------------------------------------
+try:
+    from models.digit_recognizer_v42 import SoftConditioningCombine, NoOpQuantizeConfig
+    tf.keras.utils.get_custom_objects().update({
+        'SoftConditioningCombine': SoftConditioningCombine,
+        'NoOpQuantizeConfig': NoOpQuantizeConfig
+    })
+except Exception:
+    pass
+
+try:
+    from models.convnext_blocks import DropPath
+    tf.keras.utils.get_custom_objects().update({
+        'DropPath': DropPath
+    })
+except Exception:
+    pass
+
+try:
+    from models.digit_recognizer_v38 import RepVGGBlock, RepVGGModel
+    tf.keras.utils.get_custom_objects().update({
+        'RepVGGBlock': RepVGGBlock,
+        'RepVGGModel': RepVGGModel
+    })
+except Exception:
+    pass
+
+try:
+    from models.digit_recognizer_v40 import AdaptiveBinarization, _ClipConstraint
+    tf.keras.utils.get_custom_objects().update({
+        'AdaptiveBinarization': AdaptiveBinarization,
+        '_ClipConstraint': _ClipConstraint
+    })
+except Exception:
+    pass

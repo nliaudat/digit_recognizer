@@ -261,13 +261,16 @@ def _compile_multihead_model(model, optimizer, resolved_loss='sparse_categorical
         else:
             _alpha_mean = 0.25
         _gamma = float(resolved_loss.gamma) if hasattr(resolved_loss, 'gamma') else 2.0
-        # Build per-head focal loss with 10-class alpha
-        _head_loss = DynamicSparseFocalLoss(
-            gamma=_gamma,
-            alpha=float(_alpha_mean),  # scalar → internally expanded to ones(10)
-            nb_classes=10,
-            from_logits=params.USE_LOGITS,
-        )
+        # Build per-head focal loss with 10-class alpha (guard import failure)
+        if DynamicSparseFocalLoss is not None:
+            _head_loss = DynamicSparseFocalLoss(
+                gamma=_gamma,
+                alpha=float(_alpha_mean),  # scalar → internally expanded to ones(10)
+                nb_classes=10,
+                from_logits=params.USE_LOGITS,
+            )
+        else:
+            _head_loss = resolved_loss
     else:
         _head_loss = resolved_loss
 

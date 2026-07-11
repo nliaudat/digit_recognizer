@@ -34,55 +34,13 @@ Hyperparameters (config/models.py):
 
 import tensorflow as tf
 import config as params
+from models._backbone_v16 import create_v16_backbone
 
 try:
     import tensorflow_model_optimization as tfmot
     QAT_AVAILABLE = True
 except ImportError:
     QAT_AVAILABLE = False
-
-
-# ---------------------------------------------------------------------------
-# Inverted residual bottleneck  (identical to v16)
-# ---------------------------------------------------------------------------
-
-def _inv_res(x, filters_out, expand_ratio, stride, name_prefix):
-    """MobileNetV2-style inverted residual.  Exact copy from v16."""
-    ch_in = x.shape[-1]
-    ch_exp = ch_in * expand_ratio
-    use_shortcut = (stride == 1 and ch_in == filters_out)
-
-    # 1. Pointwise expansion
-    y = tf.keras.layers.Conv2D(
-        ch_exp, (1, 1), padding='same',
-        kernel_initializer='he_normal', use_bias=False,
-        name=f'{name_prefix}_expand'
-    )(x)
-    y = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_exp_bn')(y)
-    y = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_exp_relu6')(y)
-
-    # 2. Depthwise conv
-    y = tf.keras.layers.DepthwiseConv2D(
-        (3, 3), strides=stride, padding='same',
-        depthwise_initializer='he_normal', use_bias=False,
-        name=f'{name_prefix}_dw'
-    )(y)
-    y = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_dw_bn')(y)
-    y = tf.keras.layers.ReLU(max_value=6.0, name=f'{name_prefix}_dw_relu6')(y)
-
-    # 3. Pointwise projection (linear bottleneck)
-    y = tf.keras.layers.Conv2D(
-        filters_out, (1, 1), padding='same',
-        kernel_initializer='he_normal', use_bias=False,
-        name=f'{name_prefix}_project'
-    )(y)
-    y = tf.keras.layers.BatchNormalization(name=f'{name_prefix}_proj_bn')(y)
-
-    # 4. Shortcut
-    if use_shortcut:
-        y = tf.keras.layers.Add(name=f'{name_prefix}_add')([x, y])
-
-    return y
 
 
 # ---------------------------------------------------------------------------
@@ -125,42 +83,9 @@ def create_digit_recognizer_v41():
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
 
     # ==================================================================
-    # Shared backbone — identical to v16
+    # Shared Backbone (imported from _backbone_v16)
     # ==================================================================
-
-    # Entry conv
-    x = tf.keras.layers.Conv2D(
-        16, (3, 3), padding='same',
-        kernel_initializer='he_normal', use_bias=False,
-        name='entry_conv'
-    )(inputs)
-    x = tf.keras.layers.BatchNormalization(name='entry_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='entry_relu6')(x)
-
-    # Inverted residual stages
-    inv_res_config = [
-        (24,  4, 2),
-        (24,  4, 1),
-        (40,  4, 2),
-        (40,  6, 1),
-        (56,  6, 1),
-    ]
-    for i, (out_ch, t, s) in enumerate(inv_res_config):
-        x = _inv_res(x, filters_out=out_ch, expand_ratio=t, stride=s,
-                     name_prefix=f'ir{i+1}')
-
-    # Head conv
-    x = tf.keras.layers.Conv2D(
-        96, (1, 1), padding='same',
-        kernel_initializer='he_normal', use_bias=False,
-        name='head_conv'
-    )(x)
-    x = tf.keras.layers.BatchNormalization(name='head_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='head_relu6')(x)
-
-    # Global average pooling → shared feature vector
-    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='gap')(x)
-    shared = tf.keras.layers.Flatten(name='flatten')(x)
+    shared = create_v16_backbone(inputs)
 
     # ==================================================================
     # Two independent 10-class heads
@@ -185,6 +110,7 @@ def create_digit_recognizer_v41():
     # ── Units head ──
     u = tf.keras.layers.Dense(head_units, activation=None,
                               kernel_initializer='he_normal',
+                              kernel_regularizer=tf.keras.regularizers.l2(_l2_val) if _l2_val > 0.0 else None,
                               name='units_dense')(shared)
     u = tf.keras.layers.ReLU(max_value=6.0, name='units_relu6')(u)
     u = tf.keras.layers.Dropout(head_drop, name='units_dropout')(u)
@@ -214,31 +140,8 @@ def _create_single_head_v41():
     """
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
 
-    # Shared backbone — identical to v16
-    x = tf.keras.layers.Conv2D(
-        16, (3, 3), padding='same',
-        kernel_initializer='he_normal', use_bias=False,
-        name='entry_conv'
-    )(inputs)
-    x = tf.keras.layers.BatchNormalization(name='entry_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='entry_relu6')(x)
-
-    inv_res_config = [
-        (24,  4, 2), (24,  4, 1), (40,  4, 2), (40,  6, 1), (56,  6, 1),
-    ]
-    for i, (out_ch, t, s) in enumerate(inv_res_config):
-        x = _inv_res(x, filters_out=out_ch, expand_ratio=t, stride=s,
-                     name_prefix=f'ir{i+1}')
-
-    x = tf.keras.layers.Conv2D(
-        96, (1, 1), padding='same',
-        kernel_initializer='he_normal', use_bias=False,
-        name='head_conv'
-    )(x)
-    x = tf.keras.layers.BatchNormalization(name='head_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='head_relu6')(x)
-    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='gap')(x)
-    x = tf.keras.layers.Flatten(name='flatten')(x)
+    # Shared backbone (imported from _backbone_v16)
+    x = create_v16_backbone(inputs)
 
     if params.USE_LOGITS:
         outputs = tf.keras.layers.Dense(

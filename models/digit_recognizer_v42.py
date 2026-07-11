@@ -174,6 +174,7 @@ def create_digit_recognizer_v42():
     shared_decimal = tf.keras.layers.Dense(
         dec_dense_units, activation=None,
         kernel_initializer='he_normal',
+        kernel_regularizer=_reg,
         name='shared_decimal_dense'
     )(shared_features)
     shared_decimal = tf.keras.layers.ReLU(
@@ -193,6 +194,7 @@ def create_digit_recognizer_v42():
         head_dense = tf.keras.layers.Dense(
             head_units, activation=None,
             kernel_initializer='he_normal',
+            kernel_regularizer=_reg,
             name=f'decimal_head_{i}_dense'
         )(shared_decimal)
         head_dense = tf.keras.layers.ReLU(
