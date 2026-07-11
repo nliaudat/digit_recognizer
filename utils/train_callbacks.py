@@ -5,6 +5,7 @@ Handles: early stopping, model checkpointing, LR scheduling, CSV logging, etc.
 """
 
 import os
+import numpy as np
 import tensorflow as tf
 
 import config as params
@@ -313,4 +314,42 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         for i, callback in enumerate(callbacks):
             print(f"   {i+1}. {callback.__class__.__name__}")
     
+    # ── Multi-head Combined Accuracy Callback ─────────────────────────────
+    # For v41 (multi-head models), inject combined tens*10+units accuracy
+    # into val_accuracy so early stopping, checkpointing, and LR schedulers
+    # that monitor val_accuracy work correctly.
+    is_multihead = params.MODEL_ARCHITECTURE in getattr(params, 'MULTI_HEAD_MODELS', [])
+    if is_multihead and validation_data is not None:
+        from models import combine_multiheads
+        class CombinedAccuracyCallback(tf.keras.callbacks.Callback):
+            """Injects combined head accuracy into val_accuracy."""
+            def __init__(self, val_data):
+                super().__init__()
+                self.val_data = val_data
+            def on_epoch_end(self, epoch, logs=None):
+                if logs is None:
+                    return
+                correct = 0
+                total = 0
+                for x_batch, y_batch in self.val_data:
+                    preds = self.model(x_batch, training=False)
+                    joint = combine_multiheads(preds)
+                    if isinstance(joint, tf.Tensor):
+                        joint = joint.numpy()
+                    pred_cls = np.argmax(joint, axis=-1)
+                    # Recombine dict labels to scalar 0-99
+                    if isinstance(y_batch, dict):
+                        t = y_batch['tens_probs'].numpy().flatten()
+                        u = y_batch['units_probs'].numpy().flatten()
+                        y_true = t * 10 + u
+                    else:
+                        y_true = y_batch.numpy().flatten()
+                    correct += int(np.sum(pred_cls == y_true))
+                    total += len(y_true)
+                logs['val_accuracy'] = correct / max(total, 1)
+
+        callbacks.append(CombinedAccuracyCallback(validation_data))
+        if debug:
+            print("🎯 CombinedAccuracyCallback added (multi-head val_accuracy)")
+
     return callbacks

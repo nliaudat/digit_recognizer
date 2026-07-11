@@ -1180,7 +1180,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                 print("🔍 Running quantization analysis...")
                 # Use the analysis function with correct parameter order
                 analysis_result = analyze_quantization_impact(
-                    model, x_test, y_test_final, quantized_tflite_path, debug=debug
+                    model, x_test, _analysis_y, quantized_tflite_path, debug=debug
                 )
                 
                 if analysis_result is not None:

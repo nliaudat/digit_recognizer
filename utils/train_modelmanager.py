@@ -440,6 +440,13 @@ class TFLiteModelManager:
             input_details = interpreter.get_input_details()
             output_details = interpreter.get_output_details()
             
+            # Detect multi-head TFLite model (2 outputs, each 10-class)
+            is_multihead = (
+                len(output_details) >= 2
+                and output_details[0]['shape'][-1] == 10
+                and output_details[1]['shape'][-1] == 10
+            )
+            
             correct = 0
             total = min(100, len(x_test))  # Quick test with 100 samples
             
@@ -465,9 +472,24 @@ class TFLiteModelManager:
                 
                 interpreter.set_tensor(input_details[0]['index'], input_data)
                 interpreter.invoke()
-                output = interpreter.get_tensor(output_details[0]['index'])
                 
-                pred = np.argmax(output)
+                if is_multihead:
+                    # Read both heads and combine
+                    tens_out = interpreter.get_tensor(output_details[0]['index'])
+                    units_out = interpreter.get_tensor(output_details[1]['index'])
+                    if output_details[0]['dtype'] in [np.uint8, np.int8]:
+                        s, zp = output_details[0]['quantization']
+                        tens_out = (tens_out.astype(np.float32) - zp) * s
+                    if output_details[1]['dtype'] in [np.uint8, np.int8]:
+                        s, zp = output_details[1]['quantization']
+                        units_out = (units_out.astype(np.float32) - zp) * s
+                    tens_pred = int(np.argmax(tens_out[0]))
+                    units_pred = int(np.argmax(units_out[0]))
+                    pred = tens_pred * 10 + units_pred
+                else:
+                    output = interpreter.get_tensor(output_details[0]['index'])
+                    pred = int(np.argmax(output))
+                    
                 true_label = y_test[i]
                 if hasattr(true_label, 'numpy'):
                     true_label = true_label.numpy()
