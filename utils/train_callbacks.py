@@ -316,8 +316,10 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
     
     # ── Multi-head Combined Accuracy Callback ─────────────────────────────
     # For v41 (multi-head models), inject combined tens*10+units accuracy
-    # into val_accuracy so early stopping, checkpointing, and LR schedulers
-    # that monitor val_accuracy work correctly.
+    # into val_accuracy before early stopping / checkpointing run.
+    # Must be added early (at the top) so val_accuracy is available to them.
+    # Must be added to callbacks list immediately — we prepend at the end.
+    _multihead_cb = None
     is_multihead = params.MODEL_ARCHITECTURE in getattr(params, 'MULTI_HEAD_MODELS', [])
     if is_multihead and validation_data is not None:
         from models import combine_multiheads
@@ -331,25 +333,23 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
                     return
                 correct = 0
                 total = 0
-                for x_batch, y_batch in self.val_data:
-                    preds = self.model(x_batch, training=False)
-                    joint = combine_multiheads(preds)
-                    if isinstance(joint, tf.Tensor):
-                        joint = joint.numpy()
-                    pred_cls = np.argmax(joint, axis=-1)
-                    # Recombine dict labels to scalar 0-99
-                    if isinstance(y_batch, dict):
-                        t = y_batch['tens_probs'].numpy().flatten()
-                        u = y_batch['units_probs'].numpy().flatten()
-                        y_true = t * 10 + u
-                    else:
-                        y_true = y_batch.numpy().flatten()
-                    correct += int(np.sum(pred_cls == y_true))
-                    total += len(y_true)
-                logs['val_accuracy'] = correct / max(total, 1)
+                # val_data is (x_val, y_val) arrays — predict on the whole set at once
+                x_val, y_val = self.val_data
+                preds = self.model.predict(x_val, verbose=0, batch_size=params.BATCH_SIZE)
+                joint = combine_multiheads(preds)
+                if isinstance(joint, tf.Tensor):
+                    joint = joint.numpy()
+                pred_cls = np.argmax(joint, axis=-1)
+                # Recombine dict labels to scalar 0-99
+                if isinstance(y_val, dict):
+                    y_true = np.squeeze(y_val['tens_probs']) * 10 + np.squeeze(y_val['units_probs'])
+                else:
+                    y_true = np.squeeze(y_val)
+                logs['val_accuracy'] = float(np.mean(pred_cls == y_true))
 
-        callbacks.append(CombinedAccuracyCallback(validation_data))
+        _multihead_cb = CombinedAccuracyCallback(validation_data)
+        callbacks.insert(0, _multihead_cb)
         if debug:
-            print("🎯 CombinedAccuracyCallback added (multi-head val_accuracy)")
+            print("🎯 CombinedAccuracyCallback prepended (multi-head val_accuracy)")
 
     return callbacks

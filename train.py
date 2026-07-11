@@ -830,13 +830,13 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         x_test  = preprocess_for_training(x_test_raw)
         
         # Handle labels based on model type
-        is_v41_multihead = (params.MODEL_ARCHITECTURE == "digit_recognizer_v41" and params.NB_CLASSES > 10)
+        is_multihead = params.MODEL_ARCHITECTURE in getattr(params, 'MULTI_HEAD_MODELS', [])
 
         if params.MODEL_ARCHITECTURE == "original_haverland":
             y_train_final = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
             y_val_final = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES) 
             y_test_final = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)
-        elif is_v41_multihead:
+        elif is_multihead:
             # Decompose 100-class labels into tens + units dicts
             def _decompose_labels(y):
                 return {
@@ -1132,7 +1132,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         print("\n📈 Evaluating models...")
         
         # Evaluate Keras model
-        if is_v41_multihead:
+        if is_multihead:
             # For multi-head models, compute combined accuracy manually
             def _v41_combined_accuracy(model, x, y_orig):
                 """
@@ -1174,6 +1174,10 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             'accuracy_drop': 0.0,
             'size_reduction': 0.0
         }
+
+        # For v41: use y_test_raw (scalar 0-99 labels) instead of y_test_final (dict).
+        # Define once here so both quantization analysis and comprehensive analysis use it.
+        _analysis_y = y_test_raw if is_multihead else y_test_final
 
         if os.path.exists(quantized_tflite_path):
             try:
@@ -1223,8 +1227,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         # Run comprehensive analysis if requested
         # For v41: pass y_test_raw (scalar 0-99 labels) instead of y_test_final (dict of decomposed labels).
         # The analysis functions use combine_multiheads() to get 100-class predictions and need
-        # scalar labels for comparison.
-        _analysis_y = y_test_raw if is_v41_multihead else y_test_final
+        # scalar labels for comparison.  _analysis_y is already defined above.
         if full_analysis:
             run_comprehensive_analysis(model, history, training_dir, x_test, _analysis_y, debug)
         else:
