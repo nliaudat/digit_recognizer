@@ -54,11 +54,12 @@ def _get_paired_tflite_files(dir_path):
     if uint8_candidates:
         result['uint8'] = uint8_candidates[0]
 
-    # float32 variant (prefer new *_float32.tflite, fall back to legacy patterns)
+    # float32 variant (prefer canonical *_float32.tflite, fall back to legacy patterns)
     float32_candidates = (
-        [f for f in all_tflite if f.endswith('_float32.tflite')] +
+        [f for f in all_tflite if f.endswith('_float32.tflite') and not f.endswith('_quantized_float32.tflite')] +
         [f for f in all_tflite if f.endswith('_integer_quant_float32.tflite')] +
-        [f for f in all_tflite if f.endswith('_full_integer_quant.tflite')]
+        [f for f in all_tflite if f.endswith('_full_integer_quant.tflite')] +
+        [f for f in all_tflite if f.endswith('_quantized_float32.tflite')]  # chip-specific fallback
     )
     # Deduplicate while preserving order
     seen = set()

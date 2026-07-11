@@ -280,6 +280,10 @@ def parse_arguments():
     parser.add_argument("--no-focal-loss", action="store_true", help="Explicitly disable Focal Loss.")
     
     # --- Advanced Features ---
+    parser.add_argument("--logits", action="store_true",
+                        help="Output raw logits instead of softmax probabilities.")
+    parser.add_argument("--softmax", action="store_true",
+                        help="Output softmax probabilities (default).")
     parser.add_argument("--cutmix", action="store_true", help="Enable CutMix augmentation.")
     parser.add_argument("--no-random-erasing", action="store_true", help="Disable Random Erasing augmentation.")
     parser.add_argument("--optimizer", type=str, default=None, help="Override the optimizer (e.g. adamw).")
@@ -627,6 +631,16 @@ def main():
         import config.quantization as _cfg_q
         _cfg_q.USE_TQT_PIPELINE = False
         _cfg_q.ESP_DL_QUANTIZE = False
+
+    # Logits / Softmax overrides
+    if args.logits:
+        params.USE_LOGITS = True
+        import config.models as _cfg_m
+        _cfg_m.USE_LOGITS = True
+    if args.softmax:
+        params.USE_LOGITS = False
+        import config.models as _cfg_m
+        _cfg_m.USE_LOGITS = False
 
     # -----------------------------------------------------------------
     #  REFRESH DERIVED PARAMETERS (Apply CLI overrides to paths/shapes)
@@ -1058,16 +1072,14 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             print("\n⏳ Loading dataset and optimizing computation graph...")
             print("   (This may take a minute for the first epoch)")
 
-            with tqdm(total=1, desc="Graph Optimization", leave=False) as pbar:
-                history = model.fit(
-                    train_dataset,
-                    epochs=params.EPOCHS,
-                    initial_epoch=params.INITIAL_EPOCH if hasattr(params, 'INITIAL_EPOCH') else 0,
-                    validation_data=val_dataset,
-                    callbacks=callbacks,
-                    verbose=0
-                )
-                pbar.update(1)
+            history = model.fit(
+                train_dataset,
+                epochs=params.EPOCHS,
+                initial_epoch=params.INITIAL_EPOCH if hasattr(params, 'INITIAL_EPOCH') else 0,
+                validation_data=val_dataset,
+                callbacks=callbacks,
+                verbose=0
+            )
         else:
             # Compute class weights to handle imbalanced datasets
             try:
@@ -1319,6 +1331,23 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                     mlflow.end_run()
 
         return model, history, training_dir
+
+    except KeyboardInterrupt:
+        print("\n\n⏹️  Training interrupted by user (Ctrl+C). Cleaning up...")
+        try:
+            if 'monitor' in dir() and 'monitor' in locals() and monitor is not None:
+                monitor.save_training_plots()
+                print("   ✅ Training plots saved before exit")
+        except Exception:
+            pass
+        try:
+            if MLFLOW_AVAILABLE and mlflow.active_run():
+                mlflow.end_run(status="KILLED")
+        except Exception:
+            pass
+        tf.keras.backend.clear_session()
+        print("👋 Exiting cleanly. Goodbye.")
+        sys.exit(130)  # Standard exit code for SIGINT
 
     except Exception as e:
         print(f"\n💥 CRITICAL TRAINING ERROR: {e}")
