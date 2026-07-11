@@ -1291,7 +1291,9 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         
         
         # Save training plots and configuration
-        monitor.save_training_plots()
+        _mon = locals().get('monitor')
+        if _mon is not None:
+            _mon.save_training_plots()
         save_training_config(training_dir, 
                             quantization_results['tflite_size'],
                             quantization_results['keras_size'],
@@ -1370,8 +1372,9 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     except KeyboardInterrupt:
         print("\n\n⏹️  Training interrupted by user (Ctrl+C). Cleaning up...")
         try:
-            if 'monitor' in dir() and 'monitor' in locals() and monitor is not None:
-                monitor.save_training_plots()
+            _mon = locals().get('monitor')
+            if _mon is not None:
+                _mon.save_training_plots()
                 print("   ✅ Training plots saved before exit")
         except Exception:
             pass

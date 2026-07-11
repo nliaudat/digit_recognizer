@@ -157,16 +157,17 @@ ORIGINAL_HAVERLAND_DROPOUT_RATES = [0.25, 0.25, 0.25, 0.5]
 # V39 — Multi-Scale Depthwise Fusion
 # ==============================================================================
 
-MSDW_FUSION_DUAL_KERNEL_MIN_WIDTH = 10
+MSDW_FUSION_DUAL_KERNEL_MIN_WIDTH = 8
 MSDW_FUSION_KERNELS = [3, 5]
 
 # ==============================================================================
 # V40 — Enhanced Preprocessing (Soft Binarization)
 # ==============================================================================
 
+PREPROC_V40_THRESHOLD_INIT = 0.5
 PREPROC_V40_SHARPNESS_INIT = 10.0
-PREPROC_V40_SHARPNESS_MIN = 1.0
-PREPROC_V40_SHARPNESS_MAX = 15.0
+PREPROC_V40_SHARPNESS_MIN = 0.1
+PREPROC_V40_SHARPNESS_MAX = 50.0
 
 # ==============================================================================
 # V41 — Multi-Head (Tens+Units) based on v16

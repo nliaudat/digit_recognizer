@@ -33,6 +33,7 @@ import h5py
 
 from models.model_factory import create_model_by_name
 from models.digit_recognizer_v38 import RepVGGBlock, RepVGGModel
+from models.digit_recognizer_v40 import AdaptiveBinarization, _ClipConstraint
 
 CUSTOM_OBJECTS = {
     "DropPath": DropPath,
@@ -43,6 +44,8 @@ CUSTOM_OBJECTS = {
     "EnsembleTeacher": EnsembleTeacher,
     "RepVGGBlock": RepVGGBlock,
     "RepVGGModel": RepVGGModel,
+    "_ClipConstraint": _ClipConstraint,
+    "AdaptiveBinarization": AdaptiveBinarization,
 }
 
 
