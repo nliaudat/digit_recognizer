@@ -30,9 +30,11 @@ class TFLiteDigitPredictor:
     Multi-head detection is automatic when:
       - len(output_details) == 2
       - each output_detail shape[-1] == 10
-      - the model name contains 'v41'
+      - the model name contains 'v41' or 'v42'
 
     Can also be set explicitly via the `multi_head` attribute.
+    Head tensors are resolved by NAME (not position), so TFLite converter
+    reordering does not silently swap integer and decimal outputs.
     """
 
     def __init__(self, model_path):
@@ -68,7 +70,28 @@ class TFLiteDigitPredictor:
         )
         if is_multihead_model and has_two_10way:
             self.multi_head = True
-            logger.info(f"🔀 Multi-head model detected: combining head0*10+head1 ({stem})")
+            self.idx_int = 0   # index of the integer/tens head tensor
+            self.idx_dec = 1   # index of the decimal/units head tensor
+            self.q_int = None  # dequant params for integer/tens head
+            self.q_dec = None  # dequant params for decimal/units head
+            # Resolve head indices by NAME to survive TFLite converter reordering.
+            # v41: tens_probs / units_probs ;  v42: integer_probs / decimal_probs
+            head_map = {od['name']: od for od in self.output_details}
+            if 'tens_probs' in head_map and 'units_probs' in head_map:
+                self.idx_int = head_map['tens_probs']['index']
+                self.idx_dec = head_map['units_probs']['index']
+                self.q_int = head_map['tens_probs'].get('quantization', (None, None))
+                self.q_dec = head_map['units_probs'].get('quantization', (None, None))
+            elif 'integer_probs' in head_map and 'decimal_probs' in head_map:
+                self.idx_int = head_map['integer_probs']['index']
+                self.idx_dec = head_map['decimal_probs']['index']
+                self.q_int = head_map['integer_probs'].get('quantization', (None, None))
+                self.q_dec = head_map['decimal_probs'].get('quantization', (None, None))
+            else:
+                # Fallback: positional (legacy / unnamed heads)
+                self.q_int = self.output_details[0].get('quantization', (None, None))
+                self.q_dec = self.output_details[1].get('quantization', (None, None))
+            logger.info(f"🔀 Multi-head model detected: integer@{self.idx_int} decimal@{self.idx_dec} ({stem})")
         else:
             self.multi_head = False
 
@@ -132,18 +155,18 @@ class TFLiteDigitPredictor:
             # Run inference
             self.interpreter.invoke()
 
-            # ── Multi-head (v41) path: read both head outputs ──
+            # ── Multi-head (v41/v42) path: read both head outputs ──
             if self.multi_head and len(self.output_details) >= 2:
-                # Read tens head (index 0) and units head (index 1)
-                tens_data = self.interpreter.get_tensor(self.output_details[0]['index'])
-                units_data = self.interpreter.get_tensor(self.output_details[1]['index'])
+                # Read by resolved index (name-based, survives converter reordering)
+                tens_data = self.interpreter.get_tensor(self.idx_int)
+                units_data = self.interpreter.get_tensor(self.idx_dec)
 
                 # Dequantize both if needed
-                if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
-                    s, zp = self.output_details[0]['quantization']
+                if self.q_int is not None and self.q_int[0] is not None:
+                    s, zp = self.q_int
                     tens_data = (tens_data.astype(np.float32) - zp) * s
-                if self.output_details[1]['dtype'] in [np.uint8, np.int8]:
-                    s, zp = self.output_details[1]['quantization']
+                if self.q_dec is not None and self.q_dec[0] is not None:
+                    s, zp = self.q_dec
                     units_data = (units_data.astype(np.float32) - zp) * s
 
                 tens_vec = tens_data[0]
@@ -279,15 +302,15 @@ class TFLiteDigitPredictor:
             self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
             self.interpreter.invoke()
 
-            # ── Multi-head (v41) ESP32 path ──
+            # ── Multi-head (v41/v42) ESP32 path ──
             if self.multi_head and len(self.output_details) >= 2:
-                tens_data = self.interpreter.get_tensor(self.output_details[0]['index'])
-                units_data = self.interpreter.get_tensor(self.output_details[1]['index'])
-                if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
-                    s, zp = self.output_details[0]['quantization']
+                tens_data = self.interpreter.get_tensor(self.idx_int)
+                units_data = self.interpreter.get_tensor(self.idx_dec)
+                if self.q_int is not None and self.q_int[0] is not None:
+                    s, zp = self.q_int
                     tens_data = (tens_data.astype(np.float32) - zp) * s
-                if self.output_details[1]['dtype'] in [np.uint8, np.int8]:
-                    s, zp = self.output_details[1]['quantization']
+                if self.q_dec is not None and self.q_dec[0] is not None:
+                    s, zp = self.q_dec
                     units_data = (units_data.astype(np.float32) - zp) * s
                 tens_vec = tens_data[0]; units_vec = units_data[0]
                 tens_is_sm = np.isclose(np.sum(tens_vec), 1.0, atol=0.02) and np.all(tens_vec >= -0.05) and np.all(tens_vec <= 1.05)

@@ -62,7 +62,7 @@ def _evaluate_keras_multihead(keras_model, x_test, y_test_orig):
     if hasattr(joint, 'numpy'):
         joint = joint.numpy()
     pred_cls = np.argmax(joint, axis=-1)
-    y_true = np.squeeze(y_orig)
+    y_true = np.asarray(y_orig).flatten()
     accuracy = float(np.mean(pred_cls == y_true))
     print(f"Keras Model Combined Accuracy: {accuracy:.4f} (on {len(x_test_analysis)} samples)")
     return accuracy
@@ -144,8 +144,9 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
 
 def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
     """
-    Evaluate multi-head TFLite model (v41) using combined accuracy.
-    Reads both output tensors and combines tens*10+units.
+    Evaluate multi-head TFLite model (v41/v42) using combined accuracy.
+    Matches output tensors by NAME (not position) to handle converter reordering.
+    Both heads are 10-class; combined as head0*10+head1.
     y_test_orig: scalar labels (0-99).
     """
     print("🧪 Evaluating TFLite model (multi-head)...")
@@ -159,15 +160,38 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
     output_details = interpreter.get_output_details()
     input_dtype = input_details[0]['dtype']
     
-    # Detect multi-head TFLite model
-    is_multihead_tflite = (
-        len(output_details) >= 2
-        and output_details[0]['shape'][-1] == 10
-        and output_details[1]['shape'][-1] == 10
-    )
+    # Resolve integer/units head index by name, not position.
+    # TFLite preserves Keras layer names in output_details[i]['name'].
+    # v41: tens_probs / units_probs ;  v42: integer_probs / decimal_probs
+    head_map = {od['name']: od for od in output_details}
+    idx_int = 0   # fallback: index of the integer/tens head
+    idx_dec = 1   # fallback: index of the decimal/units head
+    det_int = None  # output_detail for integer/tens head (for dequant params)
+    det_dec = None  # output_detail for decimal/units head
+    has_named_heads = False
+    if 'tens_probs' in head_map and 'units_probs' in head_map:
+        idx_int = head_map['tens_probs']['index']
+        idx_dec = head_map['units_probs']['index']
+        det_int = head_map['tens_probs']
+        det_dec = head_map['units_probs']
+        has_named_heads = True
+    elif 'integer_probs' in head_map and 'decimal_probs' in head_map:
+        idx_int = head_map['integer_probs']['index']
+        idx_dec = head_map['decimal_probs']['index']
+        det_int = head_map['integer_probs']
+        det_dec = head_map['decimal_probs']
+        has_named_heads = True
+    else:
+        # Fallback: positional (legacy models without named heads)
+        det_int = output_details[0]
+        det_dec = output_details[1]
+    
+    # Pre-fetch dequantization params per head
+    q_int = det_int['quantization'] if det_int['dtype'] in [np.uint8, np.int8] else None
+    q_dec = det_dec['quantization'] if det_dec['dtype'] in [np.uint8, np.int8] else None
     
     correct = 0
-    y_true_arr = np.squeeze(y_orig)
+    y_true_arr = np.asarray(y_orig).flatten()
     
     for i in tqdm(range(total_samples), desc="Evaluating TFLite", leave=False):
         input_data = np.array(x_test_analysis[i:i+1], dtype=np.float32)
@@ -179,21 +203,17 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
         interpreter.set_tensor(input_details[0]['index'], input_data)
         interpreter.invoke()
         
-        if is_multihead_tflite:
-            tens_out = interpreter.get_tensor(output_details[0]['index'])
-            units_out = interpreter.get_tensor(output_details[1]['index'])
-            if output_details[0]['dtype'] in [np.uint8, np.int8]:
-                s, zp = output_details[0]['quantization']
-                tens_out = (tens_out.astype(np.float32) - zp) * s
-            if output_details[1]['dtype'] in [np.uint8, np.int8]:
-                s, zp = output_details[1]['quantization']
-                units_out = (units_out.astype(np.float32) - zp) * s
-            tens_pred = int(np.argmax(tens_out[0]))
-            units_pred = int(np.argmax(units_out[0]))
-            pred = tens_pred * 10 + units_pred
-        else:
-            output = interpreter.get_tensor(output_details[0]['index'])
-            pred = int(np.argmax(output))
+        int_out = interpreter.get_tensor(idx_int)
+        dec_out = interpreter.get_tensor(idx_dec)
+        if q_int is not None:
+            s, zp = q_int
+            int_out = (int_out.astype(np.float32) - zp) * s
+        if q_dec is not None:
+            s, zp = q_dec
+            dec_out = (dec_out.astype(np.float32) - zp) * s
+        int_pred = int(np.argmax(int_out[0]))
+        dec_pred = int(np.argmax(dec_out[0]))
+        pred = int_pred * 10 + dec_pred
         
         if pred == y_true_arr[i]:
             correct += 1
