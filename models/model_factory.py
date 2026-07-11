@@ -248,6 +248,9 @@ def _compile_multihead_model(model, optimizer):
         'digit_confidence': ('binary_crossentropy',             0.1),
         'transition_prob':  ('binary_crossentropy',             0.5),
         'transition_dir':   ('binary_crossentropy',             0.5),
+        # v41 multi-head (tens + units)
+        'tens_probs':       ('sparse_categorical_crossentropy', 1.0),
+        'units_probs':      ('sparse_categorical_crossentropy', 1.0),
     }
 
     output_names = model.output_names          # e.g. ['digit_probs', 'digit_confidence', ...]
@@ -258,11 +261,19 @@ def _compile_multihead_model(model, optimizer):
         loss_dict[name]   = loss_fn
         weight_dict[name] = weight
 
+    # Build per-output metrics dict
+    metrics_dict = {}
+    for name in output_names:
+        # All classification heads use accuracy
+        if name in ('tens_probs', 'units_probs', 'digit_probs'):
+            metrics_dict[name] = ['accuracy']
+        # Binary outputs get accuracy too (binary_accuracy is default)
+
     model.compile(
         optimizer=optimizer,
         loss=loss_dict,
         loss_weights=weight_dict,
-        metrics={'digit_probs': ['accuracy']},
+        metrics=metrics_dict if metrics_dict else None,
     )
 
     print("✅ Multi-head model compiled:")

@@ -22,13 +22,25 @@ logger = logging.getLogger(__name__)
 
 
 class TFLiteDigitPredictor:
-    """Load a TFLite model and run inference on digit images."""
+    """Load a TFLite model and run inference on digit images.
+
+    Supports multi-head models (e.g. v41) where the output is split across
+    two 10-class tensors that must be combined: digit = tens * 10 + units.
+
+    Multi-head detection is automatic when:
+      - len(output_details) == 2
+      - each output_detail shape[-1] == 10
+      - the model name contains 'v41'
+
+    Can also be set explicitly via the `multi_head` attribute.
+    """
 
     def __init__(self, model_path):
         self.model_path = model_path
         self.interpreter = None
         self.input_details = None
         self.output_details = None
+        self.multi_head = None  # None = auto-detect
         self.load_model()
 
     def load_model(self):
@@ -42,7 +54,22 @@ class TFLiteDigitPredictor:
 
         logger.info(f"Input shape: {self.input_details[0]['shape']}")
         logger.info(f"Input type: {self.input_details[0]['dtype']}")
-        logger.info(f"Output shape: {self.output_details[0]['shape']}")
+        logger.info(f"Output count: {len(self.output_details)}")
+        for i, od in enumerate(self.output_details):
+            logger.info(f"Output {i}: shape={od['shape']}, dtype={od['dtype']}")
+
+        # Auto-detect multi-head (v41)
+        is_v41 = 'v41' in Path(self.model_path).stem.lower()
+        has_two_10way = (
+            len(self.output_details) == 2
+            and self.output_details[0]['shape'][-1] == 10
+            and self.output_details[1]['shape'][-1] == 10
+        )
+        if is_v41 and has_two_10way:
+            self.multi_head = True
+            logger.info("🔀 Multi-head model detected (v41): combining tens*10+units")
+        else:
+            self.multi_head = False
 
     def predict(self, image, debug=False):
         """Predict digit from image using TFLite, returns (prediction, confidence, output_vector)."""
@@ -104,7 +131,40 @@ class TFLiteDigitPredictor:
             # Run inference
             self.interpreter.invoke()
 
-            # Get output
+            # ── Multi-head (v41) path: read both head outputs ──
+            if self.multi_head and len(self.output_details) >= 2:
+                # Read tens head (index 0) and units head (index 1)
+                tens_data = self.interpreter.get_tensor(self.output_details[0]['index'])
+                units_data = self.interpreter.get_tensor(self.output_details[1]['index'])
+
+                # Dequantize both if needed
+                if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
+                    s, zp = self.output_details[0]['quantization']
+                    tens_data = (tens_data.astype(np.float32) - zp) * s
+                if self.output_details[1]['dtype'] in [np.uint8, np.int8]:
+                    s, zp = self.output_details[1]['quantization']
+                    units_data = (units_data.astype(np.float32) - zp) * s
+
+                tens_vec = tens_data[0]
+                units_vec = units_data[0]
+
+                # Softmax if logits
+                if not np.isclose(np.sum(tens_vec), 1.0, atol=0.02):
+                    tens_vec = np.exp(tens_vec - np.max(tens_vec)) / np.sum(np.exp(tens_vec - np.max(tens_vec)))
+                if not np.isclose(np.sum(units_vec), 1.0, atol=0.02):
+                    units_vec = np.exp(units_vec - np.max(units_vec)) / np.sum(np.exp(units_vec - np.max(units_vec)))
+
+                tens_pred = int(np.argmax(tens_vec))
+                units_pred = int(np.argmax(units_vec))
+                prediction = tens_pred * 10 + units_pred
+                # Combined confidence: geometric mean of both head confidences
+                confidence = float(np.sqrt(np.max(tens_vec) * np.max(units_vec)))
+                output_vector = np.zeros(100, dtype=np.float32)
+                output_vector[prediction] = 1.0  # one-hot for the combined class
+
+                return prediction, confidence, output_vector
+
+            # ── Standard single-head path ──
             output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
 
             # Handle output quantization if needed
@@ -239,7 +299,12 @@ class TFLiteDigitPredictor:
 
     @property
     def num_classes(self):
-        """Get the number of classes this model was trained to predict"""
+        """Get the number of classes this model was trained to predict.
+
+        For multi-head v41: each head is 10-class, but combined output is 100-class.
+        """
+        if self.multi_head:
+            return 100
         return self.output_details[0]['shape'][-1]
 
 
