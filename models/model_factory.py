@@ -252,10 +252,12 @@ def _compile_multihead_model(model, optimizer, resolved_loss='sparse_categorical
     # create a per-head clone with a flat alpha initialized from the mean.
     if is_focal:
         # Read alpha from the already-constructed loss to get current gamma/alpha
-        if hasattr(resolved_loss, 'alpha'):
-            _alpha_mean = tf.reduce_mean(resolved_loss.alpha).numpy()
-        elif hasattr(resolved_loss, 'alpha') and isinstance(getattr(resolved_loss, 'alpha', None), (int, float)):
-            _alpha_mean = float(resolved_loss.alpha)
+        _alpha = getattr(resolved_loss, 'alpha', None)
+        if _alpha is not None:
+            if isinstance(_alpha, (int, float)):
+                _alpha_mean = float(_alpha)
+            else:
+                _alpha_mean = tf.reduce_mean(_alpha).numpy()
         else:
             _alpha_mean = 0.25
         _gamma = float(resolved_loss.gamma) if hasattr(resolved_loss, 'gamma') else 2.0

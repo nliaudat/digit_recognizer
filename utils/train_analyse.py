@@ -53,14 +53,40 @@ def evaluate_keras_model(keras_model, x_test, y_test):
 
 def _evaluate_keras_multihead(keras_model, x_test, y_test_orig):
     """
-    Evaluate multi-head Keras model (v41) using combined accuracy.
+    Evaluate multi-head Keras model (v41/v42) using combined accuracy.
     y_test_orig: scalar labels (0-99).
+
+    For v42: decimal_probs is the marginal Σ P(int=t)×P(dec|int=t), so
+    argmax(decimal_probs) can select a decimal from the wrong integer.
+    We extract the individual decimal_head_{i}_probs layers to compute
+    the correct joint: argmax(integer) × 10 + head[argmax(integer)].
     """
-    x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
-    preds = keras_model.predict(x_test_analysis, verbose=0)
-    # argmax(head0) * 10 + argmax(head1) is equivalent to argmax of the joint
-    # 100-class distribution, but avoids the expensive outer product.
-    pred_cls = np.argmax(preds[0], axis=-1) * 10 + np.argmax(preds[1], axis=-1)
+    is_v42 = hasattr(keras_model, 'output_names') and 'integer_probs' in keras_model.output_names
+
+    if is_v42:
+        # Build a temporary model exposing individual decimal heads
+        dec_layers = [keras_model.get_layer(f'decimal_head_{i}_probs') for i in range(10)]
+        eval_model = tf.keras.Model(
+            inputs=keras_model.input,
+            outputs=[keras_model.get_layer('integer_probs').output] + [l.output for l in dec_layers]
+        )
+        x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
+        outputs = eval_model.predict(x_test_analysis, verbose=0)
+        int_probs = outputs[0]
+        dec_heads = outputs[1:]  # list of 10 arrays each [N, 10]
+        int_preds = np.argmax(int_probs, axis=-1)
+        # Pick the decimal head corresponding to the predicted integer for each sample
+        dec_preds = np.array([np.argmax(dec_heads[int_preds[i]][i]) for i in range(len(int_preds))])
+        pred_cls = int_preds * 10 + dec_preds
+        # Clean up temporary model
+        del eval_model
+        tf.keras.backend.clear_session()
+    else:
+        # v41: standard argmax combination (both heads are independent 10-class)
+        x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
+        preds = keras_model.predict(x_test_analysis, verbose=0)
+        pred_cls = np.argmax(preds[0], axis=-1) * 10 + np.argmax(preds[1], axis=-1)
+
     y_true = np.asarray(y_orig).flatten()
     accuracy = float(np.mean(pred_cls == y_true))
     print(f"Keras Model Combined Accuracy: {accuracy:.4f} (on {len(x_test_analysis)} samples)")
@@ -161,10 +187,12 @@ def _eval_two_heads(interpreter, input_details, output_details, input_dtype,
         out_b = interpreter.get_tensor(output_details[idx_b]['index'])
         if output_details[idx_a]['dtype'] in [np.uint8, np.int8]:
             s, zp = output_details[idx_a]['quantization']
-            out_a = (out_a.astype(np.float32) - zp) * s
+            if s is not None and s > 0.0:
+                out_a = (out_a.astype(np.float32) - zp) * s
         if output_details[idx_b]['dtype'] in [np.uint8, np.int8]:
             s, zp = output_details[idx_b]['quantization']
-            out_b = (out_b.astype(np.float32) - zp) * s
+            if s is not None and s > 0.0:
+                out_b = (out_b.astype(np.float32) - zp) * s
         pred = int(np.argmax(out_a[0])) * 10 + int(np.argmax(out_b[0]))
         if pred == y_true[i]:
             correct += 1
