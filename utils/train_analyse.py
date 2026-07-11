@@ -297,9 +297,10 @@ def analyze_quantization_impact(keras_model, x_test, y_test, tflite_path, debug=
         # Use configured number of samples
         x_test_analysis, y_test_analysis = get_analysis_samples(x_test, y_test)
         
-        # Detect multi-head model by checking config
-        is_multihead = hasattr(keras_model, 'output_names') and len(keras_model.output_names) >= 2 and all(
-            n in keras_model.output_names for n in ('tens_probs', 'units_probs'))
+        # Detect multi-head model by checking config (v41: tens_probs/units_probs, v42: integer_probs/decimal_probs)
+        is_multihead = hasattr(keras_model, 'output_names') and len(keras_model.output_names) >= 2 and (
+            all(n in keras_model.output_names for n in ('tens_probs', 'units_probs')) or
+            all(n in keras_model.output_names for n in ('integer_probs', 'decimal_probs')))
 
         # Accuracy comparison — use multi-head-aware evaluation when needed
         if is_multihead:

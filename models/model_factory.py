@@ -251,6 +251,9 @@ def _compile_multihead_model(model, optimizer):
         # v41 multi-head (tens + units)
         'tens_probs':       ('sparse_categorical_crossentropy', 1.0),
         'units_probs':      ('sparse_categorical_crossentropy', 1.0),
+        # v42 soft conditioning (integer + decimal)
+        'integer_probs':    ('sparse_categorical_crossentropy', 1.0),
+        'decimal_probs':    ('sparse_categorical_crossentropy', 1.0),
     }
 
     output_names = model.output_names          # e.g. ['digit_probs', 'digit_confidence', ...]

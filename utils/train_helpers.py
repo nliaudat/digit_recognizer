@@ -782,10 +782,14 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
                 else:
                     preds = preds.numpy()
                 y_pred_all.append(np.argmax(preds, axis=-1))
-                # v41 dict labels: recombine to scalar 0-99
+                # v41/v42 dict labels: recombine to scalar 0-99
                 if isinstance(y_batch, dict) and 'tens_probs' in y_batch:
                     t = y_batch['tens_probs'].numpy().flatten()
                     u = y_batch['units_probs'].numpy().flatten()
+                    y_true_all.append(t * 10 + u)
+                elif isinstance(y_batch, dict) and 'integer_probs' in y_batch:
+                    t = y_batch['integer_probs'].numpy().flatten()
+                    u = y_batch['decimal_probs'].numpy().flatten()
                     y_true_all.append(t * 10 + u)
                 elif len(y_batch.shape) > 1 and y_batch.shape[-1] > 1:
                     y_true_all.append(np.argmax(y_batch, axis=-1))
@@ -957,10 +961,15 @@ class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
                     preds = preds.numpy()
                 y_pred_all.append(np.argmax(preds, axis=-1))
 
-                # v41 dict labels: recombine tens*10+units to scalar 0-99
+                # v41/v42 dict labels: recombine head0*10+head1 to scalar 0-99
                 if isinstance(y_batch, dict) and 'tens_probs' in y_batch:
                     t = y_batch['tens_probs'].numpy().flatten()
                     u = y_batch['units_probs'].numpy().flatten()
+                    y_batch_flat = t * 10 + u
+                    y_true_all.append(y_batch_flat)
+                elif isinstance(y_batch, dict) and 'integer_probs' in y_batch:
+                    t = y_batch['integer_probs'].numpy().flatten()
+                    u = y_batch['decimal_probs'].numpy().flatten()
                     y_batch_flat = t * 10 + u
                     y_true_all.append(y_batch_flat)
                 # Handle both sparse and one-hot labels

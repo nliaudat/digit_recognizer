@@ -837,16 +837,29 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             y_val_final = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES) 
             y_test_final = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)
         elif is_multihead:
-            # Decompose 100-class labels into tens + units dicts
-            def _decompose_labels(y):
-                return {
-                    'tens_probs': y // 10,
-                    'units_probs': y % 10,
-                }
-            y_train_final = _decompose_labels(y_train_raw)
-            y_val_final = _decompose_labels(y_val_raw)
-            y_test_final = _decompose_labels(y_test_raw)
-            print("🔀 v41 multi-head: labels decomposed into tens_probs + units_probs")
+            # Decompose 100-class labels into head-specific dicts
+            # Keys must match the model's output layer names.
+            if params.MODEL_ARCHITECTURE == "digit_recognizer_v42":
+                def _decompose_labels(y):
+                    return {
+                        'integer_probs': y // 10,
+                        'decimal_probs': y % 10,
+                    }
+                y_train_final = _decompose_labels(y_train_raw)
+                y_val_final = _decompose_labels(y_val_raw)
+                y_test_final = _decompose_labels(y_test_raw)
+                print("🔀 v42 soft conditioning: labels decomposed into integer_probs + decimal_probs")
+            else:
+                # v41 multi-head (tens + units)
+                def _decompose_labels(y):
+                    return {
+                        'tens_probs': y // 10,
+                        'units_probs': y % 10,
+                    }
+                y_train_final = _decompose_labels(y_train_raw)
+                y_val_final = _decompose_labels(y_val_raw)
+                y_test_final = _decompose_labels(y_test_raw)
+                print("🔀 v41 multi-head: labels decomposed into tens_probs + units_probs")
         else:
             y_train_final = y_train_raw.copy()
             y_val_final = y_val_raw.copy()
@@ -1133,25 +1146,26 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         
         # Evaluate Keras model
         if is_multihead:
-            # For multi-head models, compute combined accuracy manually
-            def _v41_combined_accuracy(model, x, y_orig):
+            # For multi-head models, compute combined accuracy manually.
+            # Works for both v41 (tens_probs, units_probs) and v42 (integer_probs, decimal_probs)
+            # since both produce list[2] of [batch, 10] tensors combined as first*10+second.
+            def _combined_accuracy(model, x, y_orig):
                 """
                 y_orig: original integer labels (0-99)
-                Returns combined accuracy (0-1 scale) where model's argmax predictions
-                are combined as tens*10 + units and compared to y_orig.
+                Returns combined accuracy (0-1 scale) where model's two 10-class heads
+                are combined as head0*10 + head1 and compared to y_orig.
                 """
                 preds = model.predict(x, verbose=0)
-                # preds is a list [tens_probs, units_probs]
-                tens_pred = tf.argmax(preds[0], axis=-1).numpy()
-                units_pred = tf.argmax(preds[1], axis=-1).numpy()
-                combined = tens_pred * 10 + units_pred
+                head0_pred = tf.argmax(preds[0], axis=-1).numpy()
+                head1_pred = tf.argmax(preds[1], axis=-1).numpy()
+                combined = head0_pred * 10 + head1_pred
                 # Squeeze y_orig to ensure 1D comparison — prevents (N,) vs (N,1) broadcasting
                 return float(np.mean(combined == np.squeeze(y_orig)))
 
-            train_accuracy = _v41_combined_accuracy(model, x_train, y_train_raw)
-            val_accuracy = _v41_combined_accuracy(model, x_val, y_val_raw)
-            test_accuracy = _v41_combined_accuracy(model, x_test, y_test_raw)
-            print(f"✅ v41 Combined Accuracy (tens*10+units):")
+            train_accuracy = _combined_accuracy(model, x_train, y_train_raw)
+            val_accuracy = _combined_accuracy(model, x_val, y_val_raw)
+            test_accuracy = _combined_accuracy(model, x_test, y_test_raw)
+            print(f"✅ Multi-head Combined Accuracy (head0*10+head1):")
         else:
             train_accuracy = model.evaluate(x_train, y_train_final, verbose=0)[1]
             val_accuracy = model.evaluate(x_val, y_val_final, verbose=0)[1]

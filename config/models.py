@@ -47,6 +47,7 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v39", # Gated Multi-Scale Depthwise Fusion (v16 successor, IoT, ~84KB INT8)
     "digit_recognizer_v40", # Soft Binarization Preprocessor (v24 successor, IoT, ~55KB INT8)
     "digit_recognizer_v41", # Multi-Head (Tens+Units) based on v16 backbone — 100-class decomposition
+    "digit_recognizer_v42", # Full Soft Conditioning Hierarchical — 100-class decomposition
     # "esp_quantization_ready", # ~70kB | Minimal Depthwise CNN for smooth INT8
     # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
     # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
@@ -70,6 +71,7 @@ USE_LOGITS = False # else softmax
 
 MULTI_HEAD_MODELS = [
     "digit_recognizer_v41",
+    "digit_recognizer_v42",
 ]
 
 # ==============================================================================
@@ -182,6 +184,17 @@ PREPROC_V40_SHARPNESS_MAX = 15.0
 
 V41_HEAD_DENSE_UNITS = 32
 V41_HEAD_DROPOUT = 0.2
+
+# ==============================================================================
+# V42 — Full Soft Conditioning Hierarchical
+# ==============================================================================
+
+V42_INTEGER_DENSE_UNITS = 64
+V42_SHARED_DECIMAL_DENSE_UNITS = 64
+V42_HEAD_DENSE_UNITS = 32
+V42_DROPOUT = 0.1
+V42_LOSS_WEIGHT_INTEGER = 0.7
+V42_LOSS_WEIGHT_DECIMAL = 0.3
 
 # ==============================================================================
 # OUTPUT FUNCTIONS

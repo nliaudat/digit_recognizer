@@ -58,16 +58,17 @@ class TFLiteDigitPredictor:
         for i, od in enumerate(self.output_details):
             logger.info(f"Output {i}: shape={od['shape']}, dtype={od['dtype']}")
 
-        # Auto-detect multi-head (v41)
-        is_v41 = 'v41' in Path(self.model_path).stem.lower()
+        # Auto-detect multi-head (v41 / v42)
+        stem = Path(self.model_path).stem.lower()
+        is_multihead_model = 'v41' in stem or 'v42' in stem
         has_two_10way = (
             len(self.output_details) == 2
             and self.output_details[0]['shape'][-1] == 10
             and self.output_details[1]['shape'][-1] == 10
         )
-        if is_v41 and has_two_10way:
+        if is_multihead_model and has_two_10way:
             self.multi_head = True
-            logger.info("🔀 Multi-head model detected (v41): combining tens*10+units")
+            logger.info(f"🔀 Multi-head model detected: combining head0*10+head1 ({stem})")
         else:
             self.multi_head = False
 

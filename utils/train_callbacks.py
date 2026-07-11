@@ -342,7 +342,11 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
                 pred_cls = np.argmax(joint, axis=-1)
                 # Recombine dict labels to scalar 0-99
                 if isinstance(y_val, dict):
-                    y_true = np.squeeze(y_val['tens_probs']) * 10 + np.squeeze(y_val['units_probs'])
+                    # v41: tens_probs / units_probs ;  v42: integer_probs / decimal_probs
+                    if 'tens_probs' in y_val:
+                        y_true = np.squeeze(y_val['tens_probs']) * 10 + np.squeeze(y_val['units_probs'])
+                    else:
+                        y_true = np.squeeze(y_val['integer_probs']) * 10 + np.squeeze(y_val['decimal_probs'])
                 else:
                     y_true = np.squeeze(y_val)
                 logs['val_accuracy'] = float(np.mean(pred_cls == y_true))
