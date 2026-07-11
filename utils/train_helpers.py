@@ -775,7 +775,7 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
             for x_batch, y_batch in self.val_ds:
                 preds = self.model(x_batch, training=False)
                 # Multi-head models (v41/v42) — use combine_multiheads (handles both)
-                if isinstance(preds, (list, tuple)) and len(preds) == 2:
+                if isinstance(preds, (list, tuple)) and len(preds) >= 2:
                     from models import combine_multiheads
                     preds = combine_multiheads(preds, model=self.model)
                     if hasattr(preds, 'numpy'):
@@ -953,7 +953,7 @@ class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
             for x_batch, y_batch in self.val_ds:
                 preds = self.model(x_batch, training=False)
                 # Multi-head models (v41/v42) — use combine_multiheads (handles both)
-                if isinstance(preds, (list, tuple)) and len(preds) == 2:
+                if isinstance(preds, (list, tuple)) and len(preds) >= 2:
                     from models import combine_multiheads
                     preds = combine_multiheads(preds, model=self.model)
                     if hasattr(preds, 'numpy'):
