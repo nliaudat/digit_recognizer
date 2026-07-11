@@ -48,6 +48,48 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
+# NoOpQuantizeConfig — tells QAT to pass through this layer unchanged.
+# The soft conditioning combine layer does simple arithmetic (stack, multiply,
+# sum) that needs no quantization.
+# ---------------------------------------------------------------------------
+
+if QAT_AVAILABLE:
+    class NoOpQuantizeConfig(tfmot.quantization.keras.QuantizeConfig):
+        def get_weights_and_quantizers(self, layer): return []
+        def get_activations_and_quantizers(self, layer): return []
+        def set_quantize_weights(self, layer, quantizers): pass
+        def set_quantize_activations(self, layer, quantizers): pass
+        def get_output_quantizers(self, layer): return []
+        def get_config(self): return {}
+else:
+    class NoOpQuantizeConfig:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Custom Keras layer for the soft conditioning combination.
+# A Lambda layer is invisible to tfmot.quantize_model() and causes QAT to
+# silently fail.  A real Layer + NoOpQuantizeConfig solves this.
+# ---------------------------------------------------------------------------
+
+@tf.keras.utils.register_keras_serializable(package='Custom')
+class SoftConditioningCombine(tf.keras.layers.Layer):
+    """Stack 10 decimal heads and compute Σ P(integer=i) × P(decimal|integer=i)."""
+
+    def call(self, inputs):
+        # inputs: list of 11 tensors — 10 decimal heads + 1 integer_probs
+        decimal_heads = inputs[:-1]
+        integer_probs = inputs[-1]
+        return tf.reduce_sum(
+            tf.stack(decimal_heads, axis=1) * tf.expand_dims(integer_probs, axis=2),
+            axis=1
+        )
+
+    def get_config(self):
+        return super().get_config()
+
+
+# ---------------------------------------------------------------------------
 # Config helpers (convention: safe defaults, values live in config/models.py)
 # ---------------------------------------------------------------------------
 
@@ -105,21 +147,6 @@ def _inv_res(x, filters_out, expand_ratio, stride, name_prefix):
         y = tf.keras.layers.Add(name=f'{name_prefix}_add')([x, y])
 
     return y
-
-
-# ---------------------------------------------------------------------------
-# Registered serializable function for the soft conditioning Lambda layer.
-# Module-level + @register_keras_serializable ensures .keras save/load works.
-# ---------------------------------------------------------------------------
-
-@tf.keras.utils.register_keras_serializable(package='Custom')
-def soft_conditioning_combine(args):
-    """Stack 10 decimal heads and compute Σ P(integer=i) × P(decimal|integer=i)."""
-    decimal_heads, integer_probs = args
-    return tf.reduce_sum(
-        tf.stack(decimal_heads, axis=1) * tf.expand_dims(integer_probs, axis=2),
-        axis=1
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -251,12 +278,13 @@ def create_digit_recognizer_v42():
     # ==================================================================
 
     # Weighted combination: Σ P(integer=i) × P(decimal|integer=i)
-    # Must wrap in Lambda (KerasTensors forbid raw TF ops in TF2/Keras3).
-    decimal_probs = tf.keras.layers.Lambda(
-        soft_conditioning_combine,
-        output_shape=(10,),
-        name='decimal_probs'
-    )([decimal_heads, integer_probs])
+    # Custom Layer (not Lambda) so tfmot.quantize_model() can see it.
+    combine_layer = SoftConditioningCombine(name='decimal_probs')
+    if QAT_AVAILABLE:
+        combine_layer = tfmot.quantization.keras.quantize_annotate_layer(
+            combine_layer, NoOpQuantizeConfig()
+        )
+    decimal_probs = combine_layer(decimal_heads + [integer_probs])
 
     # ==================================================================
     # Model Construction

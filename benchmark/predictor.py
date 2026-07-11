@@ -60,9 +60,9 @@ class TFLiteDigitPredictor:
         for i, od in enumerate(self.output_details):
             logger.info(f"Output {i}: shape={od['shape']}, dtype={od['dtype']}")
 
-        # Auto-detect multi-head (v41 / v42)
+        # Auto-detect multi-head (v41 / v42); respect explicit self.multi_head if set
         stem = Path(self.model_path).stem.lower()
-        is_multihead_model = 'v41' in stem or 'v42' in stem
+        is_multihead_model = self.multi_head if self.multi_head is not None else ('v41' in stem or 'v42' in stem)
         has_two_10way = (
             len(self.output_details) == 2
             and self.output_details[0]['shape'][-1] == 10
@@ -128,12 +128,12 @@ class TFLiteDigitPredictor:
         expected_dtype = self.input_details[0]['dtype']
         if expected_dtype == np.uint8:
             if input_data.dtype == np.float32 and input_data.max() <= 1.0:
-                input_data = (input_data * 255.0).astype(np.uint8)
+                input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
             else:
                 input_data = input_data.astype(np.uint8)
         elif expected_dtype == np.int8:
             if input_data.dtype == np.float32 and input_data.max() <= 1.0:
-                input_data = (input_data * 255.0 - 128).astype(np.int8)
+                input_data = np.clip(np.round(input_data * 255.0 - 128.0), -128, 127).astype(np.int8)
             elif input_data.dtype == np.uint8:
                 input_data = (input_data.astype(np.int32) - 128).astype(np.int8)
             else:

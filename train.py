@@ -837,29 +837,15 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             y_val_final = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES) 
             y_test_final = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)
         elif is_multihead:
-            # Decompose 100-class labels into head-specific dicts
+            # Decompose 100-class labels into head-specific dicts.
             # Keys must match the model's output layer names.
-            if "v42" in params.MODEL_ARCHITECTURE:
-                def _decompose_labels(y):
-                    return {
-                        'integer_probs': y // 10,
-                        'decimal_probs': y % 10,
-                    }
-                y_train_final = _decompose_labels(y_train_raw)
-                y_val_final = _decompose_labels(y_val_raw)
-                y_test_final = _decompose_labels(y_test_raw)
-                print("🔀 v42 soft conditioning: labels decomposed into integer_probs + decimal_probs")
-            else:
-                # v41 multi-head (tens + units)
-                def _decompose_labels(y):
-                    return {
-                        'tens_probs': y // 10,
-                        'units_probs': y % 10,
-                    }
-                y_train_final = _decompose_labels(y_train_raw)
-                y_val_final = _decompose_labels(y_val_raw)
-                y_test_final = _decompose_labels(y_test_raw)
-                print("🔀 v41 multi-head: labels decomposed into tens_probs + units_probs")
+            keys = ('integer_probs', 'decimal_probs') if 'v42' in params.MODEL_ARCHITECTURE else ('tens_probs', 'units_probs')
+            def _decompose_labels(y):
+                return {keys[0]: y // 10, keys[1]: y % 10}
+            y_train_final = _decompose_labels(y_train_raw)
+            y_val_final = _decompose_labels(y_val_raw)
+            y_test_final = _decompose_labels(y_test_raw)
+            print(f"🔀 {params.MODEL_ARCHITECTURE} multi-head: labels decomposed into {keys[0]} + {keys[1]}")
         else:
             y_train_final = y_train_raw.copy()
             y_val_final = y_val_raw.copy()

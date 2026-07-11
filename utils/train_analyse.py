@@ -98,11 +98,10 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
         
         # Convert input based on model requirements
         if input_dtype == np.int8:
-            # Convert float [0,1] to int8 [-128, 127]
-            input_data = (input_data * 255.0 - 128.0).astype(np.int8)
+            # Round + clip before cast to match training quantisation
+            input_data = np.clip(np.round(input_data * 255.0 - 128.0), -128, 127).astype(np.int8)
         elif input_dtype == np.uint8:
-            # Convert float [0,1] to uint8 [0, 255]
-            input_data = (input_data * 255.0).astype(np.uint8)
+            input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
         else:
             input_data = input_data.astype(np.float32)
         
@@ -195,9 +194,9 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
     for i in tqdm(range(total_samples), desc="Evaluating TFLite", leave=False):
         input_data = np.array(x_test_analysis[i:i+1], dtype=np.float32)
         if input_dtype == np.int8:
-            input_data = (input_data * 255.0 - 128.0).astype(np.int8)
+            input_data = np.clip(np.round(input_data * 255.0 - 128.0), -128, 127).astype(np.int8)
         elif input_dtype == np.uint8:
-            input_data = (input_data * 255.0).astype(np.uint8)
+            input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
         
         interpreter.set_tensor(input_details[0]['index'], input_data)
         interpreter.invoke()
