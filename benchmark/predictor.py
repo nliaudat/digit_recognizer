@@ -81,7 +81,8 @@ class TFLiteDigitPredictor:
             def _head_by_substr(head_map, substr):
                 """Return detail for output whose name contains substr, else None."""
                 for name, detail in head_map.items():
-                    if substr in name:
+                    name_str = name.decode('utf-8') if isinstance(name, bytes) else name
+                    if substr in name_str:
                         return detail
                 return None
 
