@@ -46,6 +46,7 @@ AVAILABLE_MODELS = [
     "digit_recognizer_v38", # RepVGG-style Reparameterizable CNN (IoT, multi-branch training -> single-branch inference)
     "digit_recognizer_v39", # Gated Multi-Scale Depthwise Fusion (v16 successor, IoT, ~84KB INT8)
     "digit_recognizer_v40", # Soft Binarization Preprocessor (v24 successor, IoT, ~55KB INT8)
+    "digit_recognizer_v41", # Multi-Head (Tens+Units) based on v16 backbone — 100-class decomposition
     # "esp_quantization_ready", # ~70kB | Minimal Depthwise CNN for smooth INT8
     # "high_accuracy_validator", # strictly for PC validation (not for ESP32)
     # "super_high_accuracy_validator", # GPU-only deep SE-ResNet validator (2026 SOTA)
@@ -62,6 +63,14 @@ AVAILABLE_MODELS = [
 
 MODEL_ARCHITECTURE = "digit_recognizer_v16" # one of the models in AVAILABLE_MODELS
 USE_LOGITS = False # else softmax
+
+# ==============================================================================
+# MULTI-HEAD MODELS
+# ==============================================================================
+
+MULTI_HEAD_MODELS = [
+    "digit_recognizer_v41",
+]
 
 # ==============================================================================
 # OPTIMIZER CONFIGURATION
@@ -97,7 +106,6 @@ USE_LOGITS = False # else softmax
 #       ✅ Best final-layer fine-tuning convergence when combined with cosine annealing.
 #       ❌ Slow cold-start — needs many epochs to settle without a warm-up.
 #       → Never use alone for cold-start 100cls; pair with CosineDecayRestarts.
-
 
 
 # OPTIMIZER_TYPE = "adamw"            # Tuner winner (#13): best 10cls val_acc @ 98.83%
@@ -163,9 +171,17 @@ MSDW_FUSION_KERNELS = [3, 5]
 # V40 — Enhanced Preprocessing (Soft Binarization)
 # ==============================================================================
 
+PREPROC_V40_THRESHOLD_INIT = 0.5
 PREPROC_V40_SHARPNESS_INIT = 10.0
 PREPROC_V40_SHARPNESS_MIN = 1.0
 PREPROC_V40_SHARPNESS_MAX = 15.0
+
+# ==============================================================================
+# V41 — Multi-Head (Tens+Units) based on v16
+# ==============================================================================
+
+V41_HEAD_DENSE_UNITS = 32
+V41_HEAD_DROPOUT = 0.2
 
 # ==============================================================================
 # OUTPUT FUNCTIONS

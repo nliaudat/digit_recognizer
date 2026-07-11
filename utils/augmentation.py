@@ -671,6 +671,10 @@ def setup_augmentation_for_training(x_train, y_train_final,
     sample_x, sample_y = sample_batch
     print(f"   Sample batch – X range: [{sample_x.numpy().min():.3f}, "
           f"{sample_x.numpy().max():.3f}]")
-    print(f"   Sample batch – Y shape: {sample_y.numpy().shape}")
+    if isinstance(sample_y, dict):
+        shapes = {k: tuple(v.shape) for k, v in sample_y.items()}
+        print(f"   Sample batch – Y shapes: {shapes}")
+    else:
+        print(f"   Sample batch – Y shape: {sample_y.numpy().shape}")
 
     return train_dataset, val_dataset, augmentation_pipeline

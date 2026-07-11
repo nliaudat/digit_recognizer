@@ -40,11 +40,17 @@ class TFLiteModelManager:
     # -----------------------------------------------------------------
     #  Sanity check before conversion
     # -----------------------------------------------------------------
+    def _first_tensor(self, x):
+        """For multi-head models (v41), combine tens and units heads into 100-class probabilities."""
+        if isinstance(x, (list, tuple)) and len(x) == 2:
+            return tf.reshape(x[0][:, :, tf.newaxis] * x[1][:, tf.newaxis, :], [-1, 100])
+        return x
+
     def verify_model_for_conversion(self, model: tf.keras.Model) -> bool:
         """Run a quick forwardpass sanity check."""
         try:
             test_input = tf.random.normal([1] + list(params.INPUT_SHAPE))
-            out = model(test_input)
+            out = self._first_tensor(model(test_input))
             expected = (1, params.NB_CLASSES)
             if out.shape != expected:
                 print(f"Unexpected output shape {out.shape} (expected {expected})")
@@ -259,7 +265,7 @@ class TFLiteModelManager:
             # Test model with sample input
             test_input = tf.random.normal([1] + list(params.INPUT_SHAPE), dtype=tf.float32)
             try:
-                test_output = model(test_input)
+                test_output = self._first_tensor(model(test_input))
                 if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                     log_print(f"✅ Model accepts float32 inputs: output shape {test_output.shape}", level=2)
             except Exception as e:
@@ -434,6 +440,13 @@ class TFLiteModelManager:
             input_details = interpreter.get_input_details()
             output_details = interpreter.get_output_details()
             
+            # Detect multi-head TFLite model (2 outputs, each 10-class)
+            is_multihead = (
+                len(output_details) >= 2
+                and output_details[0]['shape'][-1] == 10
+                and output_details[1]['shape'][-1] == 10
+            )
+            
             correct = 0
             total = min(100, len(x_test))  # Quick test with 100 samples
             
@@ -459,9 +472,24 @@ class TFLiteModelManager:
                 
                 interpreter.set_tensor(input_details[0]['index'], input_data)
                 interpreter.invoke()
-                output = interpreter.get_tensor(output_details[0]['index'])
                 
-                pred = np.argmax(output)
+                if is_multihead:
+                    # Read both heads and combine
+                    tens_out = interpreter.get_tensor(output_details[0]['index'])
+                    units_out = interpreter.get_tensor(output_details[1]['index'])
+                    if output_details[0]['dtype'] in [np.uint8, np.int8]:
+                        s, zp = output_details[0]['quantization']
+                        tens_out = (tens_out.astype(np.float32) - zp) * s
+                    if output_details[1]['dtype'] in [np.uint8, np.int8]:
+                        s, zp = output_details[1]['quantization']
+                        units_out = (units_out.astype(np.float32) - zp) * s
+                    tens_pred = int(np.argmax(tens_out[0]))
+                    units_pred = int(np.argmax(units_out[0]))
+                    pred = tens_pred * 10 + units_pred
+                else:
+                    output = interpreter.get_tensor(output_details[0]['index'])
+                    pred = int(np.argmax(output))
+                    
                 true_label = y_test[i]
                 if hasattr(true_label, 'numpy'):
                     true_label = true_label.numpy()
@@ -541,7 +569,7 @@ class TFLiteModelManager:
         # Test 1: Model can handle inference
         try:
             test_input = tf.random.uniform([1] + list(params.INPUT_SHAPE), 0, 1, dtype=tf.float32)
-            output = model(test_input)
+            output = self._first_tensor(model(test_input))
             if self.debug:
                 print(f"✅ Model inference test: output shape {output.shape}")
         except Exception as e:
@@ -560,7 +588,7 @@ class TFLiteModelManager:
         test_outputs = []
         for _ in range(5):
             test_input = tf.random.uniform([1] + list(params.INPUT_SHAPE), 0, 1, dtype=tf.float32)
-            output = model(test_input)
+            output = self._first_tensor(model(test_input))
             test_outputs.append(output.numpy())
         
         all_outputs = np.concatenate(test_outputs)

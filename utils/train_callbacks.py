@@ -5,6 +5,7 @@ Handles: early stopping, model checkpointing, LR scheduling, CSV logging, etc.
 """
 
 import os
+import numpy as np
 import tensorflow as tf
 
 import config as params
@@ -313,4 +314,42 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
         for i, callback in enumerate(callbacks):
             print(f"   {i+1}. {callback.__class__.__name__}")
     
+    # ── Multi-head Combined Accuracy Callback ─────────────────────────────
+    # For v41 (multi-head models), inject combined tens*10+units accuracy
+    # into val_accuracy before early stopping / checkpointing run.
+    # Must be added early (at the top) so val_accuracy is available to them.
+    # Must be added to callbacks list immediately — we prepend at the end.
+    _multihead_cb = None
+    is_multihead = params.MODEL_ARCHITECTURE in getattr(params, 'MULTI_HEAD_MODELS', [])
+    if is_multihead and validation_data is not None:
+        from models import combine_multiheads
+        class CombinedAccuracyCallback(tf.keras.callbacks.Callback):
+            """Injects combined head accuracy into val_accuracy."""
+            def __init__(self, val_data):
+                super().__init__()
+                self.val_data = val_data
+            def on_epoch_end(self, epoch, logs=None):
+                if logs is None:
+                    return
+                correct = 0
+                total = 0
+                # val_data is (x_val, y_val) arrays — predict on the whole set at once
+                x_val, y_val = self.val_data
+                preds = self.model.predict(x_val, verbose=0, batch_size=params.BATCH_SIZE)
+                joint = combine_multiheads(preds)
+                if isinstance(joint, tf.Tensor):
+                    joint = joint.numpy()
+                pred_cls = np.argmax(joint, axis=-1)
+                # Recombine dict labels to scalar 0-99
+                if isinstance(y_val, dict):
+                    y_true = np.squeeze(y_val['tens_probs']) * 10 + np.squeeze(y_val['units_probs'])
+                else:
+                    y_true = np.squeeze(y_val)
+                logs['val_accuracy'] = float(np.mean(pred_cls == y_true))
+
+        _multihead_cb = CombinedAccuracyCallback(validation_data)
+        callbacks.insert(0, _multihead_cb)
+        if debug:
+            print("🎯 CombinedAccuracyCallback prepended (multi-head val_accuracy)")
+
     return callbacks

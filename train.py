@@ -830,10 +830,23 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         x_test  = preprocess_for_training(x_test_raw)
         
         # Handle labels based on model type
+        is_multihead = params.MODEL_ARCHITECTURE in getattr(params, 'MULTI_HEAD_MODELS', [])
+
         if params.MODEL_ARCHITECTURE == "original_haverland":
             y_train_final = tf.keras.utils.to_categorical(y_train_raw, params.NB_CLASSES)
             y_val_final = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES) 
             y_test_final = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)
+        elif is_multihead:
+            # Decompose 100-class labels into tens + units dicts
+            def _decompose_labels(y):
+                return {
+                    'tens_probs': y // 10,
+                    'units_probs': y % 10,
+                }
+            y_train_final = _decompose_labels(y_train_raw)
+            y_val_final = _decompose_labels(y_val_raw)
+            y_test_final = _decompose_labels(y_test_raw)
+            print("🔀 v41 multi-head: labels decomposed into tens_probs + units_probs")
         else:
             y_train_final = y_train_raw.copy()
             y_val_final = y_val_raw.copy()
@@ -949,6 +962,9 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         print("\n🧪 QUICK QAT VERIFICATION TEST:")
         test_input = tf.convert_to_tensor(np.random.randint(0, 255, (1,) + params.INPUT_SHAPE, dtype=np.uint8))
         output = model(test_input)
+        # Multi-head models return a list of tensors — use first head for this smoke test
+        if isinstance(output, (list, tuple)):
+            output = output[0]
         print(f"   Input dtype: {test_input.dtype}")
         print(f"   Output range: [{output.numpy().min():.3f}, {output.numpy().max():.3f}]")
         print(f"   Output sum: {np.sum(output.numpy(), axis=1)}")
@@ -1116,11 +1132,31 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         print("\n📈 Evaluating models...")
         
         # Evaluate Keras model
-        train_accuracy = model.evaluate(x_train, y_train_final, verbose=0)[1]
-        val_accuracy = model.evaluate(x_val, y_val_final, verbose=0)[1]
-        test_accuracy = model.evaluate(x_test, y_test_final, verbose=0)[1]
+        if is_multihead:
+            # For multi-head models, compute combined accuracy manually
+            def _v41_combined_accuracy(model, x, y_orig):
+                """
+                y_orig: original integer labels (0-99)
+                Returns combined accuracy (0-1 scale) where model's argmax predictions
+                are combined as tens*10 + units and compared to y_orig.
+                """
+                preds = model.predict(x, verbose=0)
+                # preds is a list [tens_probs, units_probs]
+                tens_pred = tf.argmax(preds[0], axis=-1).numpy()
+                units_pred = tf.argmax(preds[1], axis=-1).numpy()
+                combined = tens_pred * 10 + units_pred
+                # Squeeze y_orig to ensure 1D comparison — prevents (N,) vs (N,1) broadcasting
+                return float(np.mean(combined == np.squeeze(y_orig)))
+
+            train_accuracy = _v41_combined_accuracy(model, x_train, y_train_raw)
+            val_accuracy = _v41_combined_accuracy(model, x_val, y_val_raw)
+            test_accuracy = _v41_combined_accuracy(model, x_test, y_test_raw)
+            print(f"✅ v41 Combined Accuracy (tens*10+units):")
+        else:
+            train_accuracy = model.evaluate(x_train, y_train_final, verbose=0)[1]
+            val_accuracy = model.evaluate(x_val, y_val_final, verbose=0)[1]
+            test_accuracy = model.evaluate(x_test, y_test_final, verbose=0)[1]
         
-        print(f"✅ Keras Model Evaluation:")
         print(f"   Train Accuracy: {train_accuracy:.4f}")
         print(f"   Val Accuracy: {val_accuracy:.4f}")
         print(f"   Test Accuracy: {test_accuracy:.4f}")
@@ -1139,12 +1175,16 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             'size_reduction': 0.0
         }
 
+        # For v41: use y_test_raw (scalar 0-99 labels) instead of y_test_final (dict).
+        # Define once here so both quantization analysis and comprehensive analysis use it.
+        _analysis_y = y_test_raw if is_multihead else y_test_final
+
         if os.path.exists(quantized_tflite_path):
             try:
                 print("🔍 Running quantization analysis...")
                 # Use the analysis function with correct parameter order
                 analysis_result = analyze_quantization_impact(
-                    model, x_test, y_test_final, quantized_tflite_path, debug=debug
+                    model, x_test, _analysis_y, quantized_tflite_path, debug=debug
                 )
                 
                 if analysis_result is not None:
@@ -1185,8 +1225,11 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                     quantization_results['keras_size'] = 0
         
         # Run comprehensive analysis if requested
+        # For v41: pass y_test_raw (scalar 0-99 labels) instead of y_test_final (dict of decomposed labels).
+        # The analysis functions use combine_multiheads() to get 100-class predictions and need
+        # scalar labels for comparison.  _analysis_y is already defined above.
         if full_analysis:
-            run_comprehensive_analysis(model, history, training_dir, x_test, y_test_final, debug)
+            run_comprehensive_analysis(model, history, training_dir, x_test, _analysis_y, debug)
         else:
             print("⏭️  Skipping comprehensive analysis (--no_analysis flag used)")
 
@@ -1256,7 +1299,9 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         
         
         # Save training plots and configuration
-        monitor.save_training_plots()
+        _mon = locals().get('monitor')
+        if _mon is not None:
+            _mon.save_training_plots()
         save_training_config(training_dir, 
                             quantization_results['tflite_size'],
                             quantization_results['keras_size'],
@@ -1335,8 +1380,9 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
     except KeyboardInterrupt:
         print("\n\n⏹️  Training interrupted by user (Ctrl+C). Cleaning up...")
         try:
-            if 'monitor' in dir() and 'monitor' in locals() and monitor is not None:
-                monitor.save_training_plots()
+            _mon = locals().get('monitor')
+            if _mon is not None:
+                _mon.save_training_plots()
                 print("   ✅ Training plots saved before exit")
         except Exception:
             pass
