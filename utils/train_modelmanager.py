@@ -40,11 +40,15 @@ class TFLiteModelManager:
     # -----------------------------------------------------------------
     #  Sanity check before conversion
     # -----------------------------------------------------------------
+    def _first_tensor(self, x):
+        """For multi-head models (v41), grab first tensor for validation."""
+        return x[0] if isinstance(x, (list, tuple)) else x
+
     def verify_model_for_conversion(self, model: tf.keras.Model) -> bool:
         """Run a quick forwardpass sanity check."""
         try:
             test_input = tf.random.normal([1] + list(params.INPUT_SHAPE))
-            out = model(test_input)
+            out = self._first_tensor(model(test_input))
             expected = (1, params.NB_CLASSES)
             if out.shape != expected:
                 print(f"Unexpected output shape {out.shape} (expected {expected})")
@@ -259,7 +263,7 @@ class TFLiteModelManager:
             # Test model with sample input
             test_input = tf.random.normal([1] + list(params.INPUT_SHAPE), dtype=tf.float32)
             try:
-                test_output = model(test_input)
+                test_output = self._first_tensor(model(test_input))
                 if self.debug or getattr(params, 'VERBOSE', 2) >= 2:
                     log_print(f"✅ Model accepts float32 inputs: output shape {test_output.shape}", level=2)
             except Exception as e:
@@ -538,10 +542,14 @@ class TFLiteModelManager:
             print("\n🔍 VALIDATING MODEL BEFORE CONVERSION")
             print("=" * 50)
         
+        # Helper: for multi-head models (v41), grab first tensor for validation
+        def _first_tensor(x):
+            return x[0] if isinstance(x, (list, tuple)) else x
+
         # Test 1: Model can handle inference
         try:
             test_input = tf.random.uniform([1] + list(params.INPUT_SHAPE), 0, 1, dtype=tf.float32)
-            output = model(test_input)
+            output = _first_tensor(model(test_input))
             if self.debug:
                 print(f"✅ Model inference test: output shape {output.shape}")
         except Exception as e:
@@ -560,7 +568,7 @@ class TFLiteModelManager:
         test_outputs = []
         for _ in range(5):
             test_input = tf.random.uniform([1] + list(params.INPUT_SHAPE), 0, 1, dtype=tf.float32)
-            output = model(test_input)
+            output = _first_tensor(model(test_input))
             test_outputs.append(output.numpy())
         
         all_outputs = np.concatenate(test_outputs)

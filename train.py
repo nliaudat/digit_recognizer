@@ -962,6 +962,9 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         print("\n🧪 QUICK QAT VERIFICATION TEST:")
         test_input = tf.convert_to_tensor(np.random.randint(0, 255, (1,) + params.INPUT_SHAPE, dtype=np.uint8))
         output = model(test_input)
+        # Multi-head models return a list of tensors — use first head for this smoke test
+        if isinstance(output, (list, tuple)):
+            output = output[0]
         print(f"   Input dtype: {test_input.dtype}")
         print(f"   Output range: [{output.numpy().min():.3f}, {output.numpy().max():.3f}]")
         print(f"   Output sum: {np.sum(output.numpy(), axis=1)}")
