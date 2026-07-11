@@ -248,17 +248,38 @@ def _compile_multihead_model(model, optimizer, resolved_loss='sparse_categorical
     """
     # Detect if resolved_loss is a focal loss object (not a string)
     is_focal = not isinstance(resolved_loss, str)
+    # When focal loss was built with 100-class alpha but the head is 10-class,
+    # create a per-head clone with a flat alpha initialized from the mean.
+    if is_focal:
+        # Read alpha from the already-constructed loss to get current gamma/alpha
+        if hasattr(resolved_loss, 'alpha'):
+            _alpha_mean = tf.reduce_mean(resolved_loss.alpha).numpy()
+        elif hasattr(resolved_loss, 'alpha') and isinstance(getattr(resolved_loss, 'alpha', None), (int, float)):
+            _alpha_mean = float(resolved_loss.alpha)
+        else:
+            _alpha_mean = 0.25
+        _gamma = float(resolved_loss.gamma) if hasattr(resolved_loss, 'gamma') else 2.0
+        # Build per-head focal loss with 10-class alpha
+        _head_loss = DynamicSparseFocalLoss(
+            gamma=_gamma,
+            alpha=float(_alpha_mean),  # scalar → internally expanded to ones(10)
+            nb_classes=10,
+            from_logits=params.USE_LOGITS,
+        )
+    else:
+        _head_loss = resolved_loss
+
     _LOSS_MAP = {
         'digit_probs':      ('sparse_categorical_crossentropy', 1.0),
         'digit_confidence': ('binary_crossentropy',             0.1),
         'transition_prob':  ('binary_crossentropy',             0.5),
         'transition_dir':   ('binary_crossentropy',             0.5),
         # v41 multi-head (tens + units)
-        'tens_probs':       (resolved_loss if is_focal else 'sparse_categorical_crossentropy', 1.0),
-        'units_probs':      (resolved_loss if is_focal else 'sparse_categorical_crossentropy', 1.0),
+        'tens_probs':       (_head_loss if is_focal else 'sparse_categorical_crossentropy', 1.0),
+        'units_probs':      (_head_loss if is_focal else 'sparse_categorical_crossentropy', 1.0),
         # v42 soft conditioning (integer + decimal) — weights from config
-        'integer_probs':    (resolved_loss if is_focal else 'sparse_categorical_crossentropy', getattr(params, 'V42_LOSS_WEIGHT_INTEGER', 1.0)),
-        'decimal_probs':    (resolved_loss if is_focal else 'sparse_categorical_crossentropy', getattr(params, 'V42_LOSS_WEIGHT_DECIMAL', 1.0)),
+        'integer_probs':    (_head_loss if is_focal else 'sparse_categorical_crossentropy', getattr(params, 'V42_LOSS_WEIGHT_INTEGER', 1.0)),
+        'decimal_probs':    (_head_loss if is_focal else 'sparse_categorical_crossentropy', getattr(params, 'V42_LOSS_WEIGHT_DECIMAL', 1.0)),
     }
 
     output_names = model.output_names          # e.g. ['digit_probs', 'digit_confidence', ...]

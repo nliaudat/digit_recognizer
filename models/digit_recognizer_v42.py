@@ -39,6 +39,7 @@ Hyperparameters (config/models.py):
 
 import tensorflow as tf
 import config as params
+from models._backbone_v16 import create_v16_backbone
 
 try:
     import tensorflow_model_optimization as tfmot
@@ -70,9 +71,11 @@ else:
 # Custom Keras layer for the soft conditioning combination.
 # A Lambda layer is invisible to tfmot.quantize_model() and causes QAT to
 # silently fail.  A real Layer + NoOpQuantizeConfig solves this.
+# No @register_keras_serializable decorator: it would wrap the class in a
+# proxy that blocks tfmot's isinstance(layer, keras.layers.Layer) check.
+# Serialization is handled by quantize_scope in create_qat_model.
 # ---------------------------------------------------------------------------
 
-@tf.keras.utils.register_keras_serializable(package='Custom')
 class SoftConditioningCombine(tf.keras.layers.Layer):
     """Stack 10 decimal heads and compute Σ P(integer=i) × P(decimal|integer=i)."""
 
@@ -178,42 +181,9 @@ def create_digit_recognizer_v42():
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
 
     # ==================================================================
-    # Shared Backbone (identical to v16)
+    # Shared Backbone (imported from _backbone_v16)
     # ==================================================================
-
-    # Entry conv
-    x = tf.keras.layers.Conv2D(
-        16, (3, 3), padding='same',
-        kernel_initializer='he_normal', use_bias=False,
-        name='entry_conv'
-    )(inputs)
-    x = tf.keras.layers.BatchNormalization(name='entry_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='entry_relu6')(x)
-
-    # Inverted residual stages
-    inv_res_config = [
-        (24,  4, 2),   # spatial: /2
-        (24,  4, 1),   # residual pass
-        (40,  4, 2),   # spatial: /4
-        (40,  6, 1),   # residual pass with wider expansion
-        (56,  6, 1),   # deepen without downsampling
-    ]
-    for i, (out_ch, t, s) in enumerate(inv_res_config):
-        x = _inv_res(x, filters_out=out_ch, expand_ratio=t, stride=s,
-                     name_prefix=f'ir{i+1}')
-
-    # Head conv
-    x = tf.keras.layers.Conv2D(
-        96, (1, 1), padding='same',
-        kernel_initializer='he_normal', use_bias=False,
-        name='head_conv'
-    )(x)
-    x = tf.keras.layers.BatchNormalization(name='head_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='head_relu6')(x)
-
-    # Global average pooling → shared feature vector
-    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='gap')(x)
-    shared_features = tf.keras.layers.Flatten(name='flatten')(x)  # [batch, 96]
+    shared_features = create_v16_backbone(inputs)
 
     # ==================================================================
     # Stage 1: Integer Classifier
@@ -286,12 +256,12 @@ def create_digit_recognizer_v42():
 
     # Weighted combination: Σ P(integer=i) × P(decimal|integer=i)
     # Custom Layer (not Lambda) so tfmot.quantize_model() can see it.
-    combine_layer = SoftConditioningCombine(name='decimal_probs')
-    if QAT_AVAILABLE:
-        combine_layer = tfmot.quantization.keras.quantize_annotate_layer(
-            combine_layer, NoOpQuantizeConfig()
-        )
-    decimal_probs = combine_layer(decimal_heads + [integer_probs])
+    # No quantize_annotate_layer — the layer has no trainable weights and
+    # the isinstance check in tfmot fails for arbitrary Layer subclasses.
+    # Serialization is handled by quantize_scope in create_qat_model.
+    decimal_probs = SoftConditioningCombine(name='decimal_probs')(
+        decimal_heads + [integer_probs]
+    )
 
     # ==================================================================
     # Model Construction
@@ -319,31 +289,8 @@ def create_digit_recognizer_v42():
 def _create_single_head_v42():
     """Single-head model for NB_CLASSES <= 10 (behaves like standard v16)."""
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
-
-    x = tf.keras.layers.Conv2D(
-        16, (3, 3), padding='same',
-        kernel_initializer='he_normal', use_bias=False,
-        name='entry_conv'
-    )(inputs)
-    x = tf.keras.layers.BatchNormalization(name='entry_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='entry_relu6')(x)
-
-    inv_res_config = [
-        (24, 4, 2), (24, 4, 1), (40, 4, 2), (40, 6, 1), (56, 6, 1),
-    ]
-    for i, (out_ch, t, s) in enumerate(inv_res_config):
-        x = _inv_res(x, filters_out=out_ch, expand_ratio=t, stride=s,
-                     name_prefix=f'ir{i+1}')
-
-    x = tf.keras.layers.Conv2D(
-        96, (1, 1), padding='same',
-        kernel_initializer='he_normal', use_bias=False,
-        name='head_conv'
-    )(x)
-    x = tf.keras.layers.BatchNormalization(name='head_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name='head_relu6')(x)
-    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='gap')(x)
-    x = tf.keras.layers.Flatten(name='flatten')(x)
+    features = create_v16_backbone(inputs)
+    x = features
 
     if params.USE_LOGITS:
         outputs = tf.keras.layers.Dense(

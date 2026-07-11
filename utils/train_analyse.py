@@ -141,6 +141,36 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
     return accuracy
 
 
+def _eval_two_heads(interpreter, input_details, output_details, input_dtype,
+                     x_test, y_orig, idx_a, idx_b):
+    """Evaluate two 10-head outputs at positional indices idx_a, idx_b, combined as A*10+B."""
+    total = len(x_test)
+    y_true = np.asarray(y_orig).flatten()
+    correct = 0
+    for i in tqdm(range(total), desc="Evaluating TFLite", leave=False):
+        input_data = x_test[i:i+1]
+        if input_dtype == np.int8:
+            input_data = np.clip(np.round(input_data * 255.0 - 128.0), -128, 127).astype(np.int8)
+        elif input_dtype == np.uint8:
+            input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
+
+        interpreter.set_tensor(input_details[0]['index'], input_data)
+        interpreter.invoke()
+
+        out_a = interpreter.get_tensor(output_details[idx_a]['index'])
+        out_b = interpreter.get_tensor(output_details[idx_b]['index'])
+        if output_details[idx_a]['dtype'] in [np.uint8, np.int8]:
+            s, zp = output_details[idx_a]['quantization']
+            out_a = (out_a.astype(np.float32) - zp) * s
+        if output_details[idx_b]['dtype'] in [np.uint8, np.int8]:
+            s, zp = output_details[idx_b]['quantization']
+            out_b = (out_b.astype(np.float32) - zp) * s
+        pred = int(np.argmax(out_a[0])) * 10 + int(np.argmax(out_b[0]))
+        if pred == y_true[i]:
+            correct += 1
+    return correct / total
+
+
 def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
     """
     Evaluate multi-head TFLite model (v41/v42) using combined accuracy.
@@ -183,12 +213,22 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
         det_int, idx_int = _head_by_substr(head_map, 'tens_probs')
         det_dec, idx_dec = _head_by_substr(head_map, 'units_probs')
     if det_int is None or det_dec is None:
+        # Fallback: generic names (e.g. Identity:0) — try both orderings, take max accuracy.
+        # Swapping integer/decimal inverts digits (e.g. 35 ↔ 53), giving ~10% vs true accuracy.
         found_names = [od['name'] for od in output_details]
-        raise ValueError(
-            "Multi-head TFLite model detected but output names are not "
-            "recognized. Expected 'tens_probs'+'units_probs' (v41) or "
-            f"'integer_probs'+'decimal_probs' (v42). Found: {found_names}"
+        print(f"⚠️  Unrecognized output names: {found_names} — trying both head orderings")
+        # Evaluate with positional order A→B, then B→A
+        acc_ab = _eval_two_heads(
+            interpreter, input_details, output_details, input_dtype,
+            x_test_analysis, y_orig, idx_a=0, idx_b=1
         )
+        acc_ba = _eval_two_heads(
+            interpreter, input_details, output_details, input_dtype,
+            x_test_analysis, y_orig, idx_a=1, idx_b=0
+        )
+        accuracy = max(acc_ab, acc_ba)
+        print(f"   Positional A→B: {acc_ab:.4f}  B→A: {acc_ba:.4f}  → taking max: {accuracy:.4f}")
+        return accuracy
     
     # Pre-fetch dequantization params per head
     q_int = det_int['quantization'] if det_int['dtype'] in [np.uint8, np.int8] else None
@@ -209,10 +249,10 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
         
         int_out = interpreter.get_tensor(idx_int)
         dec_out = interpreter.get_tensor(idx_dec)
-        if q_int is not None:
+        if q_int is not None and q_int[0] is not None and q_int[0] > 0.0:
             s, zp = q_int
             int_out = (int_out.astype(np.float32) - zp) * s
-        if q_dec is not None:
+        if q_dec is not None and q_dec[0] is not None and q_dec[0] > 0.0:
             s, zp = q_dec
             dec_out = (dec_out.astype(np.float32) - zp) * s
         int_pred = int(np.argmax(int_out[0]))

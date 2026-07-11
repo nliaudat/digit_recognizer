@@ -837,15 +837,21 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             y_val_final = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES) 
             y_test_final = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)
         elif is_multihead:
-            # Decompose 100-class labels into head-specific dicts.
-            # Keys must match the model's output layer names.
-            keys = ('integer_probs', 'decimal_probs') if 'v42' in params.MODEL_ARCHITECTURE else ('tens_probs', 'units_probs')
-            def _decompose_labels(y):
-                return {keys[0]: y // 10, keys[1]: y % 10}
-            y_train_final = _decompose_labels(y_train_raw)
-            y_val_final = _decompose_labels(y_val_raw)
-            y_test_final = _decompose_labels(y_test_raw)
-            print(f"🔀 {params.MODEL_ARCHITECTURE} multi-head: labels decomposed into {keys[0]} + {keys[1]}")
+            if params.NB_CLASSES <= 10:
+                # Single-head fallback: use raw labels, not dict
+                y_train_final = y_train_raw.copy()
+                y_val_final = y_val_raw.copy()
+                y_test_final = y_test_raw.copy()
+            else:
+                # Decompose 100-class labels into head-specific dicts.
+                # Keys must match the model's output layer names.
+                keys = ('integer_probs', 'decimal_probs') if 'v42' in params.MODEL_ARCHITECTURE else ('tens_probs', 'units_probs')
+                def _decompose_labels(y):
+                    return {keys[0]: y // 10, keys[1]: y % 10}
+                y_train_final = _decompose_labels(y_train_raw)
+                y_val_final = _decompose_labels(y_val_raw)
+                y_test_final = _decompose_labels(y_test_raw)
+                print(f"🔀 {params.MODEL_ARCHITECTURE} multi-head: labels decomposed into {keys[0]} + {keys[1]}")
         else:
             y_train_final = y_train_raw.copy()
             y_val_final = y_val_raw.copy()
@@ -1101,7 +1107,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             # (Keras applies separate weight dicts per output).
             # For single-head: single dict matching label range.
             try:
-                if is_multihead:
+                if is_multihead and isinstance(y_train_final, dict):
                     class_weight_dict = {}
                     for key in y_train_final.keys():
                         head_labels = y_train_final[key]
@@ -1147,7 +1153,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         print("\n📈 Evaluating models...")
         
         # Evaluate Keras model
-        if is_multihead:
+        if is_multihead and len(model.outputs) > 1:
             # For multi-head models, compute combined accuracy manually.
             # Works for both v41 (tens_probs, units_probs) and v42 (integer_probs, decimal_probs)
             # since both produce list[2] of [batch, 10] tensors combined as first*10+second.

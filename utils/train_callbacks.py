@@ -334,7 +334,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
                         if epoch >= s_epoch:
                             int_w, dec_w = s_int, s_dec
                             break
-                    if int_w is not None and hasattr(self.model, 'loss_weights'):
+                    if int_w is not None and getattr(self.model, 'loss_weights', None) is not None:
                         # Update loss_weights dict
                         for name in list(self.model.loss_weights.keys()):
                             if name == 'integer_probs' or name == 'tens_probs':
@@ -362,6 +362,9 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
                 self.val_data = val_data
             def on_epoch_end(self, epoch, logs=None):
                 if logs is None:
+                    return
+                # Skip multi-head logic for single-head fallback (NB_CLASSES <= 10)
+                if len(self.model.outputs) <= 1:
                     return
                 correct = 0
                 total = 0

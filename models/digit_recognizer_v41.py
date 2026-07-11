@@ -170,9 +170,10 @@ def create_digit_recognizer_v41():
     head_drop = _get_head_dropout()
 
     # ── Tens head ──
+    _l2_val = getattr(params, 'L2_REGULARIZATION', 0.0)
     t = tf.keras.layers.Dense(head_units, activation=None,
                               kernel_initializer='he_normal',
-                              kernel_regularizer=getattr(params, 'L2_REGULARIZATION', 1e-4) and tf.keras.regularizers.l2(getattr(params, 'L2_REGULARIZATION', 1e-4)),
+                              kernel_regularizer=tf.keras.regularizers.l2(_l2_val) if _l2_val > 0.0 else None,
                               name='tens_dense')(shared)
     t = tf.keras.layers.ReLU(max_value=6.0, name='tens_relu6')(t)
     t = tf.keras.layers.Dropout(head_drop, name='tens_dropout')(t)
