@@ -226,11 +226,11 @@ def build_model(
         x = _conv_block(x, f, s, e, name_prefix=f'block_{i}')
 
     # Head
-    x = tf.keras.layers.GlobalAveragePooling2D(name='gap')(x)
+    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='gap')(x)
     x = tf.keras.layers.Dropout(0.0, name='dropout')(x)
     outputs = tf.keras.layers.Conv2D(
         num_classes, (1, 1), padding='same', name='logits'
-    )(x[:, tf.newaxis, tf.newaxis, :])
+    )(x)
     outputs = tf.keras.layers.Reshape((num_classes,), name='output')(outputs)
 
     if activation_fn is not None:
