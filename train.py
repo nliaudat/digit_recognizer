@@ -843,9 +843,9 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                     'tens_probs': y // 10,
                     'units_probs': y % 10,
                 }
-            y_train_final = _decompose_labels(y_train_raw.copy())
-            y_val_final = _decompose_labels(y_val_raw.copy())
-            y_test_final = _decompose_labels(y_test_raw.copy())
+            y_train_final = _decompose_labels(y_train_raw)
+            y_val_final = _decompose_labels(y_val_raw)
+            y_test_final = _decompose_labels(y_test_raw)
             print("🔀 v41 multi-head: labels decomposed into tens_probs + units_probs")
         else:
             y_train_final = y_train_raw.copy()
@@ -1145,7 +1145,8 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                 tens_pred = tf.argmax(preds[0], axis=-1).numpy()
                 units_pred = tf.argmax(preds[1], axis=-1).numpy()
                 combined = tens_pred * 10 + units_pred
-                return float(np.mean(combined == y_orig))
+                # Squeeze y_orig to ensure 1D comparison — prevents (N,) vs (N,1) broadcasting
+                return float(np.mean(combined == np.squeeze(y_orig)))
 
             train_accuracy = _v41_combined_accuracy(model, x_train, y_train_raw)
             val_accuracy = _v41_combined_accuracy(model, x_val, y_val_raw)
@@ -1220,8 +1221,12 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                     quantization_results['keras_size'] = 0
         
         # Run comprehensive analysis if requested
+        # For v41: pass y_test_raw (scalar 0-99 labels) instead of y_test_final (dict of decomposed labels).
+        # The analysis functions use combine_multiheads() to get 100-class predictions and need
+        # scalar labels for comparison.
+        _analysis_y = y_test_raw if is_v41_multihead else y_test_final
         if full_analysis:
-            run_comprehensive_analysis(model, history, training_dir, x_test, y_test_final, debug)
+            run_comprehensive_analysis(model, history, training_dir, x_test, _analysis_y, debug)
         else:
             print("⏭️  Skipping comprehensive analysis (--no_analysis flag used)")
 

@@ -261,19 +261,19 @@ def _compile_multihead_model(model, optimizer):
         loss_dict[name]   = loss_fn
         weight_dict[name] = weight
 
-    # Build per-output metrics dict
-    metrics_dict = {}
-    for name in output_names:
-        # All classification heads use accuracy
-        if name in ('tens_probs', 'units_probs', 'digit_probs'):
-            metrics_dict[name] = ['accuracy']
-        # Binary outputs get accuracy too (binary_accuracy is default)
+    # Do NOT set per-output accuracy metrics for multi-head models.
+    # Keras's global 'accuracy' for multi-output models compares flattened
+    # predictions against dict labels, which is meaningless and always ~0.
+    # The real metric (combined tens*10+units accuracy) is computed in
+    # train.py's evaluation phase.  Per-head sparse_categorical_accuracy
+    # metrics ARE tracked internally by Keras (via output name matching),
+    # but excluding them from the compile call prevents the misleading
+    # 'acc: 0.0000' from appearing in the progress bar.
 
     model.compile(
         optimizer=optimizer,
         loss=loss_dict,
         loss_weights=weight_dict,
-        metrics=metrics_dict if metrics_dict else None,
     )
 
     print("✅ Multi-head model compiled:")

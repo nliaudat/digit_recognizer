@@ -65,6 +65,14 @@ MODEL_ARCHITECTURE = "digit_recognizer_v16" # one of the models in AVAILABLE_MOD
 USE_LOGITS = False # else softmax
 
 # ==============================================================================
+# MULTI-HEAD MODELS
+# ==============================================================================
+
+MULTI_HEAD_MODELS = [
+    "digit_recognizer_v41",
+]
+
+# ==============================================================================
 # OPTIMIZER CONFIGURATION
 # ==============================================================================
 
@@ -98,7 +106,6 @@ USE_LOGITS = False # else softmax
 #       ✅ Best final-layer fine-tuning convergence when combined with cosine annealing.
 #       ❌ Slow cold-start — needs many epochs to settle without a warm-up.
 #       → Never use alone for cold-start 100cls; pair with CosineDecayRestarts.
-
 
 
 # OPTIMIZER_TYPE = "adamw"            # Tuner winner (#13): best 10cls val_acc @ 98.83%
@@ -157,7 +164,7 @@ ORIGINAL_HAVERLAND_DROPOUT_RATES = [0.25, 0.25, 0.25, 0.5]
 # V39 — Multi-Scale Depthwise Fusion
 # ==============================================================================
 
-MSDW_FUSION_DUAL_KERNEL_MIN_WIDTH = 8
+MSDW_FUSION_DUAL_KERNEL_MIN_WIDTH = 10
 MSDW_FUSION_KERNELS = [3, 5]
 
 # ==============================================================================
@@ -166,8 +173,8 @@ MSDW_FUSION_KERNELS = [3, 5]
 
 PREPROC_V40_THRESHOLD_INIT = 0.5
 PREPROC_V40_SHARPNESS_INIT = 10.0
-PREPROC_V40_SHARPNESS_MIN = 0.1
-PREPROC_V40_SHARPNESS_MAX = 50.0
+PREPROC_V40_SHARPNESS_MIN = 1.0
+PREPROC_V40_SHARPNESS_MAX = 15.0
 
 # ==============================================================================
 # V41 — Multi-Head (Tens+Units) based on v16

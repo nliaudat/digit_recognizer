@@ -148,10 +148,14 @@ class TFLiteDigitPredictor:
                 tens_vec = tens_data[0]
                 units_vec = units_data[0]
 
-                # Softmax if logits
-                if not np.isclose(np.sum(tens_vec), 1.0, atol=0.02):
+                # Softmax if logits — robust check matching single-head path
+                tens_is_softmax = (np.isclose(np.sum(tens_vec), 1.0, atol=0.02)
+                                  and np.all(tens_vec >= -0.05) and np.all(tens_vec <= 1.05))
+                if not tens_is_softmax:
                     tens_vec = np.exp(tens_vec - np.max(tens_vec)) / np.sum(np.exp(tens_vec - np.max(tens_vec)))
-                if not np.isclose(np.sum(units_vec), 1.0, atol=0.02):
+                units_is_softmax = (np.isclose(np.sum(units_vec), 1.0, atol=0.02)
+                                    and np.all(units_vec >= -0.05) and np.all(units_vec <= 1.05))
+                if not units_is_softmax:
                     units_vec = np.exp(units_vec - np.max(units_vec)) / np.sum(np.exp(units_vec - np.max(units_vec)))
 
                 tens_pred = int(np.argmax(tens_vec))
@@ -273,6 +277,32 @@ class TFLiteDigitPredictor:
             # ── Stage 2: Run inference ──
             self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
             self.interpreter.invoke()
+
+            # ── Multi-head (v41) ESP32 path ──
+            if self.multi_head and len(self.output_details) >= 2:
+                tens_data = self.interpreter.get_tensor(self.output_details[0]['index'])
+                units_data = self.interpreter.get_tensor(self.output_details[1]['index'])
+                if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
+                    s, zp = self.output_details[0]['quantization']
+                    tens_data = (tens_data.astype(np.float32) - zp) * s
+                if self.output_details[1]['dtype'] in [np.uint8, np.int8]:
+                    s, zp = self.output_details[1]['quantization']
+                    units_data = (units_data.astype(np.float32) - zp) * s
+                tens_vec = tens_data[0]; units_vec = units_data[0]
+                tens_is_sm = np.isclose(np.sum(tens_vec), 1.0, atol=0.02) and np.all(tens_vec >= -0.05) and np.all(tens_vec <= 1.05)
+                if not tens_is_sm:
+                    tens_vec = np.exp(tens_vec - np.max(tens_vec)) / np.sum(np.exp(tens_vec - np.max(tens_vec)))
+                units_is_sm = np.isclose(np.sum(units_vec), 1.0, atol=0.02) and np.all(units_vec >= -0.05) and np.all(units_vec <= 1.05)
+                if not units_is_sm:
+                    units_vec = np.exp(units_vec - np.max(units_vec)) / np.sum(np.exp(units_vec - np.max(units_vec)))
+                tens_pred = int(np.argmax(tens_vec)); units_pred = int(np.argmax(units_vec))
+                prediction = tens_pred * 10 + units_pred
+                confidence = float(np.sqrt(np.max(tens_vec) * np.max(units_vec)))
+                output_vector = np.zeros(100, dtype=np.float32)
+                output_vector[prediction] = 1.0
+                return prediction, confidence, output_vector
+
+            # ── Standard single-head ESP32 path ──
             output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
 
             # ── Stage 3: Dequantize output ──

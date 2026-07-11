@@ -41,8 +41,10 @@ class TFLiteModelManager:
     #  Sanity check before conversion
     # -----------------------------------------------------------------
     def _first_tensor(self, x):
-        """For multi-head models (v41), grab first tensor for validation."""
-        return x[0] if isinstance(x, (list, tuple)) else x
+        """For multi-head models (v41), combine tens and units heads into 100-class probabilities."""
+        if isinstance(x, (list, tuple)) and len(x) == 2:
+            return tf.reshape(x[0][:, :, tf.newaxis] * x[1][:, tf.newaxis, :], [-1, 100])
+        return x
 
     def verify_model_for_conversion(self, model: tf.keras.Model) -> bool:
         """Run a quick forwardpass sanity check."""
@@ -542,14 +544,10 @@ class TFLiteModelManager:
             print("\n🔍 VALIDATING MODEL BEFORE CONVERSION")
             print("=" * 50)
         
-        # Helper: for multi-head models (v41), grab first tensor for validation
-        def _first_tensor(x):
-            return x[0] if isinstance(x, (list, tuple)) else x
-
         # Test 1: Model can handle inference
         try:
             test_input = tf.random.uniform([1] + list(params.INPUT_SHAPE), 0, 1, dtype=tf.float32)
-            output = _first_tensor(model(test_input))
+            output = self._first_tensor(model(test_input))
             if self.debug:
                 print(f"✅ Model inference test: output shape {output.shape}")
         except Exception as e:
@@ -568,7 +566,7 @@ class TFLiteModelManager:
         test_outputs = []
         for _ in range(5):
             test_input = tf.random.uniform([1] + list(params.INPUT_SHAPE), 0, 1, dtype=tf.float32)
-            output = _first_tensor(model(test_input))
+            output = self._first_tensor(model(test_input))
             test_outputs.append(output.numpy())
         
         all_outputs = np.concatenate(test_outputs)

@@ -774,9 +774,13 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
         with tqdm(total=data_len, desc="Evaluating classes", leave=False) as pbar:
             for x_batch, y_batch in self.val_ds:
                 preds = self.model(x_batch, training=False)
-                if isinstance(preds, (list, tuple)):
-                    preds = preds[0]
-                preds = preds.numpy()
+                # Multi-head models (v41) — combine tens+units into joint 100-class
+                if isinstance(preds, (list, tuple)) and len(preds) == 2:
+                    tens = preds[0].numpy()
+                    units = preds[1].numpy()
+                    preds = (tens[..., :, None] * units[..., None, :]).reshape(-1, 100)
+                else:
+                    preds = preds.numpy()
                 y_pred_all.append(np.argmax(preds, axis=-1))
                 if len(y_batch.shape) > 1 and y_batch.shape[-1] > 1:
                     y_true_all.append(np.argmax(y_batch, axis=-1))
@@ -938,10 +942,14 @@ class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
         with tqdm(total=data_len, desc="Validation Report", leave=False) as pbar:
             for x_batch, y_batch in self.val_ds:
                 preds = self.model(x_batch, training=False)
-                # Multi-head models (v41) return a list — use first head for validation
-                if isinstance(preds, (list, tuple)):
-                    preds = preds[0]
-                preds = preds.numpy()
+                # Multi-head models (v41) — combine tens+units into joint 100-class
+                if isinstance(preds, (list, tuple)) and len(preds) == 2:
+                    tens = preds[0].numpy()
+                    units = preds[1].numpy()
+                    # Outer product: (N, 10, 10) → (N, 100)
+                    preds = (tens[..., :, None] * units[..., None, :]).reshape(-1, 100)
+                else:
+                    preds = preds.numpy()
                 y_pred_all.append(np.argmax(preds, axis=-1))
                 
                 # Handle both sparse and one-hot labels

@@ -18,9 +18,7 @@ logger = logging.getLogger(__name__)
 import config as params
 
 
-def _unpack_preds(preds):
-    """For multi-head models (v41), return the first head's tensor."""
-    return preds[0] if isinstance(preds, (list, tuple)) else preds
+from models import combine_multiheads
 
 
 def get_analysis_samples(x_data, y_data):
@@ -366,14 +364,14 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
     
     # Test forward pass
     try:
-        test_output = _unpack_preds(model.predict(x_train_analysis[:1], verbose=0))
+        test_output = combine_multiheads(model.predict(x_train_analysis[:1], verbose=0))
         print(f"   Forward pass test: ✓ (output shape: {test_output.shape})")
     except Exception as e:
         print(f"   Forward pass test: ✗ ({e})")
     
     # Check model output range
     if debug:
-        sample_outputs = _unpack_preds(model.predict(x_train_analysis[:10], verbose=0))
+        sample_outputs = combine_multiheads(model.predict(x_train_analysis[:10], verbose=0))
         print(f"   Output range: [{sample_outputs.min():.3f}, {sample_outputs.max():.3f}]")
         print(f"   Output sum check: {np.sum(sample_outputs, axis=1)}")
 
@@ -385,7 +383,7 @@ def verify_model_predictions(model, x_sample, y_sample):
     # Use configured number of samples
     x_sample_analysis, y_sample_analysis = get_analysis_samples(x_sample, y_sample)
     
-    predictions = _unpack_preds(model.predict(x_sample_analysis, verbose=0))
+    predictions = combine_multiheads(model.predict(x_sample_analysis, verbose=0))
     
     print(f"   Input samples: {len(x_sample_analysis)}")
     print(f"   Predictions shape: {predictions.shape}")
@@ -443,7 +441,7 @@ def analyze_confusion_matrix(model, x_test, y_test, save_path=None):
     x_test_analysis, y_test_analysis = get_analysis_samples(x_test, y_test)
     
     # Get predictions
-    predictions = _unpack_preds(model.predict(x_test_analysis, verbose=0))
+    predictions = combine_multiheads(model.predict(x_test_analysis, verbose=0))
     pred_classes = np.argmax(predictions, axis=1)
     
     if len(y_test_analysis.shape) > 1:
