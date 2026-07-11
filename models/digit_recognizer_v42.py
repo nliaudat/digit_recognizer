@@ -229,16 +229,21 @@ def create_digit_recognizer_v42():
     # Model Construction
     # ==================================================================
 
+    # Export individual decimal heads as additional outputs so that
+    # TFLite evaluation can reconstruct the correct joint prediction:
+    #   integer_pred = argmax(integer_probs)
+    #   decimal_pred = argmax(decimal_head_{integer_pred}_probs)
+    # The 10 extra heads have zero loss weight during training.
     model = tf.keras.Model(
         inputs=inputs,
-        outputs=[integer_probs, decimal_probs],
+        outputs=[integer_probs, decimal_probs] + decimal_heads,
         name='digit_recognizer_v42'
     )
 
     p = model.count_params()
     print(f"✅ v42 Full Soft Conditioning model created — {p:,} params")
     print(f"   Estimated INT8: ~{p * 1.1 / 1024:.1f} KB")
-    print(f"   Outputs: integer_probs [batch,10], decimal_probs [batch,10]")
+    print(f"   Outputs: integer_probs + decimal_probs + 10 decimal heads")
     print(f"   Head dims: int={int_dense_units} shared_dec={dec_dense_units} head={head_units}  dropout={dropout_rate}")
 
     return model

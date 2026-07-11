@@ -64,25 +64,17 @@ def _evaluate_keras_multihead(keras_model, x_test, y_test_orig):
     is_v42 = hasattr(keras_model, 'output_names') and 'integer_probs' in keras_model.output_names
 
     if is_v42:
-        # Build a temporary model exposing individual decimal heads
-        dec_layers = [keras_model.get_layer(f'decimal_head_{i}_probs') for i in range(10)]
-        eval_model = tf.keras.Model(
-            inputs=keras_model.input,
-            outputs=[keras_model.get_layer('integer_probs').output] + [l.output for l in dec_layers]
-        )
+        # Model now exports individual decimal heads as outputs 2-11.
+        # Use them directly instead of building a temporary model.
         x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
-        outputs = eval_model.predict(x_test_analysis, verbose=0)
-        int_probs = outputs[0]
-        dec_heads = outputs[1:]  # list of 10 arrays each [N, 10]
+        outputs = keras_model.predict(x_test_analysis, verbose=0)
+        int_probs = outputs[0]   # [N, 10]
+        dec_heads = outputs[2:]  # list of 10 arrays each [N, 10]
         int_preds = np.argmax(int_probs, axis=-1)
-        # Pick the decimal head corresponding to the predicted integer for each sample
-        # Vectorized: stack heads then select via advanced indexing
         stacked_dec_heads = np.stack(dec_heads, axis=1)  # (N, 10, 10)
         selected_heads = stacked_dec_heads[np.arange(len(int_preds)), int_preds]  # (N, 10)
         dec_preds = np.argmax(selected_heads, axis=-1)
         pred_cls = int_preds * 10 + dec_preds
-        # Clean up temporary model (Python GC handles memory)
-        del eval_model
     else:
         # v41: standard argmax combination (both heads are independent 10-class)
         x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
@@ -188,11 +180,11 @@ def _eval_two_heads(interpreter, input_details, output_details, input_dtype,
         out_a = interpreter.get_tensor(output_details[idx_a]['index'])
         out_b = interpreter.get_tensor(output_details[idx_b]['index'])
         if output_details[idx_a]['dtype'] in [np.uint8, np.int8]:
-            s, zp = output_details[idx_a]['quantization']
+            s, zp = output_details[idx_a].get('quantization', (None, None))
             if s is not None and s > 0.0:
                 out_a = (out_a.astype(np.float32) - zp) * s
         if output_details[idx_b]['dtype'] in [np.uint8, np.int8]:
-            s, zp = output_details[idx_b]['quantization']
+            s, zp = output_details[idx_b].get('quantization', (None, None))
             if s is not None and s > 0.0:
                 out_b = (out_b.astype(np.float32) - zp) * s
         pred = int(np.argmax(out_a[0])) * 10 + int(np.argmax(out_b[0]))
@@ -231,7 +223,8 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
     def _head_by_substr(head_map, substr):
         """Return (detail, index) for output whose name contains substr, else (None, None)."""
         for name, detail in head_map.items():
-            if substr in name:
+            name_str = name.decode('utf-8') if isinstance(name, bytes) else name
+            if substr in name_str:
                 return detail, detail['index']
         return None, None
 
@@ -260,9 +253,9 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
         print(f"   Positional A→B: {acc_ab:.4f}  B→A: {acc_ba:.4f}  → taking max: {accuracy:.4f}")
         return accuracy
     
-    # Pre-fetch dequantization params per head
-    q_int = det_int['quantization'] if det_int['dtype'] in [np.uint8, np.int8] else None
-    q_dec = det_dec['quantization'] if det_dec['dtype'] in [np.uint8, np.int8] else None
+    # Pre-fetch dequantization params per head (safe .get to avoid KeyError)
+    q_int = det_int.get('quantization', (None, None)) if det_int['dtype'] in [np.uint8, np.int8] else None
+    q_dec = det_dec.get('quantization', (None, None)) if det_dec['dtype'] in [np.uint8, np.int8] else None
     
     correct = 0
     y_true_arr = np.asarray(y_orig).flatten()

@@ -36,10 +36,21 @@ def combine_multiheads(model_outputs, model=None):
         Single tensor/array of shape (N, 100) containing joint probabilities.
         Returns input unchanged if not a 2-element list (single-head models).
     """
-    if not isinstance(model_outputs, (list, tuple)) or len(model_outputs) != 2:
+    if not isinstance(model_outputs, (list, tuple)):
         return model_outputs
 
-    head0, head1 = model_outputs
+    # v42 now exports 12 outputs (integer_probs, decimal_probs, 10× decimal_head).
+    # Detect this by checking for more than 2 outputs plus integer_probs in model names.
+    if len(model_outputs) >= 12 and model is not None and hasattr(model, 'output_names'):
+        if 'integer_probs' in model.output_names and 'decimal_head_0_probs' in model.output_names:
+            # Use only the first 2 outputs (integer and decimal marginal)
+            head0, head1 = model_outputs[0], model_outputs[1]
+        else:
+            return model_outputs
+    elif len(model_outputs) != 2:
+        return model_outputs
+    else:
+        head0, head1 = model_outputs
 
     # Auto-detect v42 by checking output names if model is provided.
     is_v42 = False
@@ -55,7 +66,7 @@ def combine_multiheads(model_outputs, model=None):
         # For precise v42 evaluation use _evaluate_keras_multihead() which extracts
         # individual decimal_head_{i}_probs.  During training callbacks the ~1%
         # discrepancy from the marginal approximation is acceptable for early stopping.
-        is_tf = hasattr(head0, 'shape')
+        is_tf = tf.is_tensor(head0)
         if is_tf:
             int_pred = tf.cast(tf.argmax(head0, axis=-1), tf.int32)
             dec_pred = tf.cast(tf.argmax(head1, axis=-1), tf.int32)
@@ -70,7 +81,7 @@ def combine_multiheads(model_outputs, model=None):
             return joint
 
     # v41 (and default fallback): outer product joint distribution.
-    if hasattr(head0, 'shape'):
+    if tf.is_tensor(head0):
         joint = head0[..., :, tf.newaxis] * head1[..., tf.newaxis, :]
         return tf.reshape(joint, (-1, 100))
     else:
