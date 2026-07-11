@@ -73,6 +73,11 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
     
     # Use configured number of samples
     x_test_analysis, y_test_analysis = get_analysis_samples(x_test, y_test)
+    # Pre-convert to numpy once to avoid per-sample overhead in the loop.
+    if hasattr(x_test_analysis, 'numpy'):
+        x_test_analysis = x_test_analysis.numpy()
+    else:
+        x_test_analysis = np.asarray(x_test_analysis, dtype=np.float32)
     total_samples = len(x_test_analysis)
     
     # Load TFLite model
@@ -90,11 +95,7 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
     
     # Use tqdm for progress tracking
     for i in tqdm(range(total_samples), desc="Evaluating TFLite", leave=False):
-        # Prepare input — convert TF tensor slice to numpy if needed
         input_data = x_test_analysis[i:i+1]
-        if hasattr(input_data, 'numpy'):
-            input_data = input_data.numpy()
-        input_data = np.array(input_data, dtype=np.float32)  # ensure float32 before conversion
         
         # Convert input based on model requirements
         if input_dtype == np.int8:
@@ -149,6 +150,11 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
     """
     print("🧪 Evaluating TFLite model (multi-head)...")
     x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
+    # Pre-convert to numpy once to avoid per-sample overhead in the loop.
+    if hasattr(x_test_analysis, 'numpy'):
+        x_test_analysis = x_test_analysis.numpy()
+    else:
+        x_test_analysis = np.asarray(x_test_analysis, dtype=np.float32)
     total_samples = len(x_test_analysis)
     
     interpreter = tf.lite.Interpreter(model_path=tflite_path)
@@ -192,7 +198,7 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
     y_true_arr = np.asarray(y_orig).flatten()
     
     for i in tqdm(range(total_samples), desc="Evaluating TFLite", leave=False):
-        input_data = np.array(x_test_analysis[i:i+1], dtype=np.float32)
+        input_data = x_test_analysis[i:i+1]
         if input_dtype == np.int8:
             input_data = np.clip(np.round(input_data * 255.0 - 128.0), -128, 127).astype(np.int8)
         elif input_dtype == np.uint8:

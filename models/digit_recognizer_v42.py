@@ -316,7 +316,9 @@ def create_qat_model(base_model=None):
         print("Warning: QAT not available. Returning base model.")
         return base_model
     try:
-        with tfmot.quantization.keras.quantize_scope():
+        with tfmot.quantization.keras.quantize_scope(
+            {'NoOpQuantizeConfig': NoOpQuantizeConfig, 'SoftConditioningCombine': SoftConditioningCombine}
+        ):
             qat_model = tfmot.quantization.keras.quantize_model(base_model)
         print("✅ QAT model created for digit_recognizer_v42")
         return qat_model
