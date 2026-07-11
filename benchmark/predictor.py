@@ -80,13 +80,17 @@ class TFLiteDigitPredictor:
             if 'tens_probs' in head_map and 'units_probs' in head_map:
                 self.idx_int = head_map['tens_probs']['index']
                 self.idx_dec = head_map['units_probs']['index']
-                self.q_int = head_map['tens_probs'].get('quantization', (None, None))
-                self.q_dec = head_map['units_probs'].get('quantization', (None, None))
+                _t = head_map['tens_probs']
+                _u = head_map['units_probs']
+                self.q_int = _t.get('quantization', (None, None)) if _t['dtype'] in [np.uint8, np.int8] else None
+                self.q_dec = _u.get('quantization', (None, None)) if _u['dtype'] in [np.uint8, np.int8] else None
             elif 'integer_probs' in head_map and 'decimal_probs' in head_map:
                 self.idx_int = head_map['integer_probs']['index']
                 self.idx_dec = head_map['decimal_probs']['index']
-                self.q_int = head_map['integer_probs'].get('quantization', (None, None))
-                self.q_dec = head_map['decimal_probs'].get('quantization', (None, None))
+                _t = head_map['integer_probs']
+                _u = head_map['decimal_probs']
+                self.q_int = _t.get('quantization', (None, None)) if _t['dtype'] in [np.uint8, np.int8] else None
+                self.q_dec = _u.get('quantization', (None, None)) if _u['dtype'] in [np.uint8, np.int8] else None
             else:
                 found = [od['name'] for od in self.output_details]
                 raise ValueError(

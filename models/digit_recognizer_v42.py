@@ -209,8 +209,11 @@ def create_digit_recognizer_v42():
 
     for i in range(10):
         # Condition on specific integer via a constant scalar.
-        # tf.ones_like already returns float32, so float(i) avoids redundant cast.
-        integer_condition = tf.ones_like(integer_probs[:, 0:1]) * float(i)
+        # Must wrap tf.op in Lambda (KerasTensors forbid raw TF ops in TF2/Keras3).
+        integer_condition = tf.keras.layers.Lambda(
+            lambda x, c=float(i): tf.ones_like(x) * c,
+            name=f'decimal_cond_{i}_scalar'
+        )(integer_probs[:, 0:1])
 
         # Concatenate shared features with integer condition
         conditioned = tf.keras.layers.Concatenate(
@@ -242,21 +245,15 @@ def create_digit_recognizer_v42():
     # Weighted Combination (Soft Conditioning)
     # ==================================================================
 
-    # Stack all decimal heads: [batch, 10, 10]
-    stacked_decimal_heads = tf.stack(decimal_heads, axis=1)  # [batch, 10, 10]
-
-    # Expand integer_probs for broadcasting: [batch, 10, 1]
-    integer_probs_expanded = tf.expand_dims(integer_probs, axis=2)  # [batch, 10, 1]
-
     # Weighted combination: Σ P(integer=i) × P(decimal|integer=i)
-    weighted_decimals = tf.reduce_sum(
-        stacked_decimal_heads * integer_probs_expanded,
-        axis=1
-    )  # [batch, 10]
-
+    # Must wrap in Lambda (KerasTensors forbid raw TF ops in TF2/Keras3).
     decimal_probs = tf.keras.layers.Lambda(
-        lambda x: x, name='decimal_probs'
-    )(weighted_decimals)
+        lambda args: tf.reduce_sum(
+            tf.stack(args[0], axis=1) * tf.expand_dims(args[1], axis=2),
+            axis=1
+        ),
+        name='decimal_probs'
+    )([decimal_heads, integer_probs])
 
     # ==================================================================
     # Model Construction
