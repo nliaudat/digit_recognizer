@@ -194,7 +194,36 @@ The table below summarizes the trade-offs between accuracy and model size across
 | **v18** | 98.9% / 97.1KB | — | 90.2% / 109.4KB | 89.4% / 109.7KB | New variant with very strong performance hovering around 100KB. |
 | **v19** | 98.9% / 131.9KB | — | 91.6% / 145.6KB | 91.4% / 146.0KB | New high-capacity variant built for challenging 100-class scenarios. |
 | **v24** | — | **98.9% / 69.0KB** | — | — | Best all-round TQT RGB model: near-v16 accuracy at half the size. |
+| **v41** | — | — | **TBD** / ~135KB | **TBD** / ~135KB | Multi-head (tens+units) based on v16 backbone. Decomposes 100-class into two 10-class heads. |
+| **v42** | — | — | **TBD** / ~165KB | **TBD** / ~165KB | Full soft conditioning hierarchical model. 10 decimal heads weighted by integer classifier probabilities. |
 | **original_haverland** | 98.2% / 203.3KB | — | 81.7% / 228.2KB | 83.8% / 228.8KB | Legacy baseline, superseded by v16 and newer variants. |
+
+## Multi-Head Hierarchical Models (v41 & v42)
+
+For 100-class digit recognition (0.0-9.9), v41 and v42 decompose the problem into two stages instead of a single 100-way softmax. Both share a common MobileNetV2 backbone extracted to `models/_backbone_v16.py`.
+
+### v41 — Multi-Head (Tens + Units)
+
+Two independent 10-class heads on the shared backbone. Labels are decomposed as `tens = digit // 10`, `units = digit % 10`. Inference combines them as `argmax(tens) × 10 + argmax(units)`.
+
+| Property | Value |
+|----------|-------|
+| Size (INT8) | ~135 KB |
+| Outputs | `tens_probs` [batch, 10], `units_probs` [batch, 10] |
+| Config | `V41_HEAD_DENSE_UNITS`, `V41_HEAD_DROPOUT` in `config/models.py` |
+
+### v42 — Full Soft Conditioning
+
+An integer classifier (10-class) produces probabilities over the tens digit. A separate `SoftConditioningCombine` layer computes the weighted sum `Σ P(integer=i) × P(decimal | integer=i)`, allowing gradient flow through all 10 decimal heads simultaneously.
+
+| Property | Value |
+|----------|-------|
+| Size (INT8) | ~165 KB |
+| Outputs | `integer_probs` [batch, 10], `decimal_probs` [batch, 10] |
+| Config | `V42_INTEGER_DENSE_UNITS`, `V42_SHARED_DECIMAL_DENSE_UNITS`, `V42_HEAD_DENSE_UNITS`, `V42_DROPOUT`, `V42_LOSS_WEIGHT_SCHEDULE` in `config/models.py` |
+| Custom Layer | `SoftConditioningCombine` — QAT-compatible with `NoOpQuantizeConfig` |
+
+> **Note**: Accuracy figures for v41 and v42 are marked TBD until baseline training completes. The INT8 size estimates are based on parameter counts.
 
 ## Related Projects
 
