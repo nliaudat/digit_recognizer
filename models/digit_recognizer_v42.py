@@ -23,7 +23,7 @@ Architecture:
              └── For each integer i (0-9):
                    └── Decimal Head i:
                          Dense(32) → ReLU6 → Dropout → Dense(10, softmax)
-                         (conditioned on integer=i via scalar concat)
+                         (heads specialize through independent weights, not explicit conditioning)
              └── Weighted average: Σ P(integer=i) × DecimalHead_i(decimal)
 
 Model Size: ~165 KB INT8 (vs ~135 KB for hard conditioning)
@@ -160,6 +160,9 @@ def create_digit_recognizer_v42():
     Outputs:
       - integer_probs: [batch, 10] - probability of each integer (0-9)
       - decimal_probs: [batch, 10] - probability-weighted decimal prediction
+
+    For 10-class mode (NB_CLASSES ≤ 10), falls back to a single-head
+    standard v16 output named 'output'.
     """
     # Soft conditioning requires probabilities for weighted combination.
     if params.USE_LOGITS:
@@ -167,6 +170,10 @@ def create_digit_recognizer_v42():
             "v42 soft conditioning requires USE_LOGITS=False "
             "(probability-weighted combination needs softmax, not logits)"
         )
+
+    # 10-class fallback: single-head like v16
+    if params.NB_CLASSES <= 10:
+        return _create_single_head_v42()
 
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
 
@@ -302,6 +309,55 @@ def create_digit_recognizer_v42():
     print(f"   Outputs: integer_probs [batch,10], decimal_probs [batch,10]")
     print(f"   Head dims: int={int_dense_units} shared_dec={dec_dense_units} head={head_units}  dropout={dropout_rate}")
 
+    return model
+
+
+# ---------------------------------------------------------------------------
+# 10-class fallback: single-head model (identical to v16)
+# ---------------------------------------------------------------------------
+
+def _create_single_head_v42():
+    """Single-head model for NB_CLASSES <= 10 (behaves like standard v16)."""
+    inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
+
+    x = tf.keras.layers.Conv2D(
+        16, (3, 3), padding='same',
+        kernel_initializer='he_normal', use_bias=False,
+        name='entry_conv'
+    )(inputs)
+    x = tf.keras.layers.BatchNormalization(name='entry_bn')(x)
+    x = tf.keras.layers.ReLU(max_value=6.0, name='entry_relu6')(x)
+
+    inv_res_config = [
+        (24, 4, 2), (24, 4, 1), (40, 4, 2), (40, 6, 1), (56, 6, 1),
+    ]
+    for i, (out_ch, t, s) in enumerate(inv_res_config):
+        x = _inv_res(x, filters_out=out_ch, expand_ratio=t, stride=s,
+                     name_prefix=f'ir{i+1}')
+
+    x = tf.keras.layers.Conv2D(
+        96, (1, 1), padding='same',
+        kernel_initializer='he_normal', use_bias=False,
+        name='head_conv'
+    )(x)
+    x = tf.keras.layers.BatchNormalization(name='head_bn')(x)
+    x = tf.keras.layers.ReLU(max_value=6.0, name='head_relu6')(x)
+    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name='gap')(x)
+    x = tf.keras.layers.Flatten(name='flatten')(x)
+
+    if params.USE_LOGITS:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, activation=None, name='logits'
+        )(x)
+    else:
+        outputs = tf.keras.layers.Dense(
+            params.NB_CLASSES, activation='softmax', name='output'
+        )(x)
+
+    model = tf.keras.Model(
+        inputs=inputs, outputs=outputs, name='digit_recognizer_v42'
+    )
+    print(f"✅ v42 single-head fallback ({params.NB_CLASSES}cls) — {model.count_params():,} params")
     return model
 
 

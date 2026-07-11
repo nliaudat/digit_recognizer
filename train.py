@@ -1096,13 +1096,15 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                 verbose=0
             )
         else:
-            # Compute class weights to handle imbalanced datasets
+            # Compute class weights to handle imbalanced datasets.
+            # For multi-head models, y_train_final is a dict; use the raw labels.
+            _class_weight_labels = y_train_raw if is_multihead else y_train_final
             try:
-                unique_classes = np.unique(y_train_final)
+                unique_classes = np.unique(_class_weight_labels)
                 weights = compute_class_weight(
                     class_weight='balanced',
                     classes=unique_classes,
-                    y=y_train_final
+                    y=_class_weight_labels
                 )
                 class_weight_dict = dict(zip(unique_classes, weights))
                 print(f"⚖️  Using class weights for {len(unique_classes)} classes (max ratio: {max(weights)/min(weights):.2f}x)")

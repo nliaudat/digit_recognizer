@@ -336,7 +336,7 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
                 # val_data is (x_val, y_val) arrays — predict on the whole set at once
                 x_val, y_val = self.val_data
                 preds = self.model.predict(x_val, verbose=0, batch_size=params.BATCH_SIZE)
-                joint = combine_multiheads(preds)
+                joint = combine_multiheads(preds, model=self.model)
                 if isinstance(joint, tf.Tensor):
                     joint = joint.numpy()
                 pred_cls = np.argmax(joint, axis=-1)

@@ -17,15 +17,21 @@ from .model_factory import (
 import tensorflow as tf
 import numpy as np
 
-def combine_multiheads(model_outputs):
+def combine_multiheads(model_outputs, model=None):
     """
-    Combine tens and units head outputs into joint 100-class probability distribution.
+    Combine head outputs into joint 100-class probability distribution.
 
     For v41 multi-head models: output is list [tens_probs, units_probs]
     each of shape (N, 10).  Joint probability P(digit = t*10+u) = P(tens=t) * P(units=u).
 
+    For v42: output is [integer_probs, decimal_probs] where decimal_probs is already
+    Σ P(integer=i) × P(decimal|integer=i).  Re-doing the outer product would
+    double-count integer weights, so we use argmax(integer)*10+argmax(decimal) and
+    return a one-hot 100-class distribution.
+
     Args:
         model_outputs: tensor, numpy array, or list of 2 tensors/arrays.
+        model: optional Keras model (used to detect v42 by output names).
     Returns:
         Single tensor/array of shape (N, 100) containing joint probabilities.
         Returns input unchanged if not a 2-element list (single-head models).
@@ -33,16 +39,36 @@ def combine_multiheads(model_outputs):
     if not isinstance(model_outputs, (list, tuple)) or len(model_outputs) != 2:
         return model_outputs
 
-    tens, units = model_outputs
-    # Compute outer product: (N, 10, 10) then flatten to (N, 100)
-    # Works for both TF tensors and numpy arrays
-    if hasattr(tens, 'shape'):
-        # TF tensors
-        joint = tens[..., :, tf.newaxis] * units[..., tf.newaxis, :]
+    head0, head1 = model_outputs
+
+    # Auto-detect v42 by checking output names if model is provided.
+    is_v42 = False
+    if model is not None and hasattr(model, 'output_names') and len(model.output_names) >= 2:
+        is_v42 = 'integer_probs' in model.output_names and 'decimal_probs' in model.output_names
+
+    if is_v42:
+        # v42: decimal_probs is already the soft-weighted combination.
+        # Use argmax(integer) * 10 + argmax(decimal) and return one-hot 100-class.
+        is_tf = hasattr(head0, 'shape')
+        if is_tf:
+            int_pred = tf.cast(tf.argmax(head0, axis=-1), tf.int32)
+            dec_pred = tf.cast(tf.argmax(head1, axis=-1), tf.int32)
+            combined = int_pred * 10 + dec_pred  # (N,)
+            return tf.one_hot(combined, 100, dtype=tf.float32)
+        else:
+            int_pred = np.argmax(head0, axis=-1)
+            dec_pred = np.argmax(head1, axis=-1)
+            combined = int_pred * 10 + dec_pred  # (N,)
+            joint = np.zeros((len(combined), 100), dtype=np.float32)
+            joint[np.arange(len(combined)), combined] = 1.0
+            return joint
+
+    # v41 (and default fallback): outer product joint distribution.
+    if hasattr(head0, 'shape'):
+        joint = head0[..., :, tf.newaxis] * head1[..., tf.newaxis, :]
         return tf.reshape(joint, (-1, 100))
     else:
-        # numpy arrays
-        joint = tens[..., :, np.newaxis] * units[..., np.newaxis, :]
+        joint = head0[..., :, np.newaxis] * head1[..., np.newaxis, :]
         return joint.reshape((-1, 100))
 
 # Core models will be loaded dynamically via model_factory.py to respect run-time parameters

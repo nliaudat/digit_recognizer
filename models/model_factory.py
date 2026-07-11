@@ -230,7 +230,7 @@ def get_model_info(model_name=None):
             all_info[model_name] = get_model_info(model_name)
         return all_info
 
-def _compile_multihead_model(model, optimizer):
+def _compile_multihead_model(model, optimizer, resolved_loss='sparse_categorical_crossentropy'):
     """
     Compile a multi-head transition model (v25, v26).
     Detected automatically when the model has more than one output tensor.
@@ -241,19 +241,24 @@ def _compile_multihead_model(model, optimizer):
         transition_prob  → binary_crossentropy              (weight 0.5)
         transition_dir   → binary_crossentropy              (weight 0.5)
 
-    Any output not in the map above gets binary_crossentropy with weight 0.1.
+    Args:
+        resolved_loss: The loss function resolved by compile_model().
+                       If a DynamicSparseFocalLoss instance, it is used for
+                       classification heads instead of sparse_categorical_crossentropy.
     """
+    # Detect if resolved_loss is a focal loss object (not a string)
+    is_focal = not isinstance(resolved_loss, str)
     _LOSS_MAP = {
         'digit_probs':      ('sparse_categorical_crossentropy', 1.0),
         'digit_confidence': ('binary_crossentropy',             0.1),
         'transition_prob':  ('binary_crossentropy',             0.5),
         'transition_dir':   ('binary_crossentropy',             0.5),
         # v41 multi-head (tens + units)
-        'tens_probs':       ('sparse_categorical_crossentropy', 1.0),
-        'units_probs':      ('sparse_categorical_crossentropy', 1.0),
-        # v42 soft conditioning (integer + decimal)
-        'integer_probs':    ('sparse_categorical_crossentropy', 1.0),
-        'decimal_probs':    ('sparse_categorical_crossentropy', 1.0),
+        'tens_probs':       (resolved_loss if is_focal else 'sparse_categorical_crossentropy', 1.0),
+        'units_probs':      (resolved_loss if is_focal else 'sparse_categorical_crossentropy', 1.0),
+        # v42 soft conditioning (integer + decimal) — weights from config
+        'integer_probs':    (resolved_loss if is_focal else 'sparse_categorical_crossentropy', getattr(params, 'V42_LOSS_WEIGHT_INTEGER', 1.0)),
+        'decimal_probs':    (resolved_loss if is_focal else 'sparse_categorical_crossentropy', getattr(params, 'V42_LOSS_WEIGHT_DECIMAL', 1.0)),
     }
 
     output_names = model.output_names          # e.g. ['digit_probs', 'digit_confidence', ...]
@@ -476,7 +481,7 @@ def compile_model(model, loss_type='sparse'):
     # --- Multi-head detection (v25, v26 and future transition models) ---
     if hasattr(model, 'outputs') and len(model.outputs) > 1:
         print("🔀 Multi-head model detected — using per-output loss compilation")
-        _compile_multihead_model(model, optimizer)
+        _compile_multihead_model(model, optimizer, resolved_loss=loss)
     else:
         model.compile(
             optimizer=optimizer,
