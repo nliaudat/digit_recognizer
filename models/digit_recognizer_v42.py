@@ -119,6 +119,13 @@ def create_digit_recognizer_v42():
       - integer_probs: [batch, 10] - probability of each integer (0-9)
       - decimal_probs: [batch, 10] - probability-weighted decimal prediction
     """
+    # Soft conditioning requires probabilities for weighted combination.
+    if params.USE_LOGITS:
+        raise ValueError(
+            "v42 soft conditioning requires USE_LOGITS=False "
+            "(probability-weighted combination needs softmax, not logits)"
+        )
+
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
 
     # ==================================================================
@@ -201,9 +208,9 @@ def create_digit_recognizer_v42():
     decimal_heads = []
 
     for i in range(10):
-        # Condition on specific integer via a constant scalar
-        integer_condition = tf.ones_like(integer_probs[:, 0:1]) * i
-        integer_condition = tf.cast(integer_condition, tf.float32)
+        # Condition on specific integer via a constant scalar.
+        # tf.ones_like already returns float32, so float(i) avoids redundant cast.
+        integer_condition = tf.ones_like(integer_probs[:, 0:1]) * float(i)
 
         # Concatenate shared features with integer condition
         conditioned = tf.keras.layers.Concatenate(

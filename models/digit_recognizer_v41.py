@@ -114,6 +114,14 @@ def create_digit_recognizer_v41():
     if params.NB_CLASSES <= 10:
         return _create_single_head_v41()
 
+    # Multi-head combination (argmax) works correctly with logits, but the
+    # training pipeline and downstream consumers expect softmax probabilities.
+    if params.USE_LOGITS:
+        raise ValueError(
+            "v41 multi-head model requires USE_LOGITS=False "
+            "(downstream consumers expect softmax probabilities)"
+        )
+
     inputs = tf.keras.Input(shape=params.INPUT_SHAPE, name='input')
 
     # ==================================================================

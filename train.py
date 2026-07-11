@@ -839,7 +839,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         elif is_multihead:
             # Decompose 100-class labels into head-specific dicts
             # Keys must match the model's output layer names.
-            if params.MODEL_ARCHITECTURE == "digit_recognizer_v42":
+            if "v42" in params.MODEL_ARCHITECTURE:
                 def _decompose_labels(y):
                     return {
                         'integer_probs': y // 10,

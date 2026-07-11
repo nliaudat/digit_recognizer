@@ -164,8 +164,9 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
     # TFLite preserves Keras layer names in output_details[i]['name'].
     # v41: tens_probs / units_probs ;  v42: integer_probs / decimal_probs
     head_map = {od['name']: od for od in output_details}
-    idx_int = 0   # fallback: index of the integer/tens head
-    idx_dec = 1   # fallback: index of the decimal/units head
+    # All if/elif branches below set these unconditionally, or raise ValueError.
+    idx_int = None  # will be set to actual tensor index from head_map
+    idx_dec = None
     det_int = None  # output_detail for integer/tens head (for dequant params)
     det_dec = None  # output_detail for decimal/units head
     has_named_heads = False
@@ -182,9 +183,12 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
         det_dec = head_map['decimal_probs']
         has_named_heads = True
     else:
-        # Fallback: positional (legacy models without named heads)
-        det_int = output_details[0]
-        det_dec = output_details[1]
+        found_names = [od['name'] for od in output_details]
+        raise ValueError(
+            "Multi-head TFLite model detected but output names are not "
+            "recognized. Expected 'tens_probs'+'units_probs' (v41) or "
+            f"'integer_probs'+'decimal_probs' (v42). Found: {found_names}"
+        )
     
     # Pre-fetch dequantization params per head
     q_int = det_int['quantization'] if det_int['dtype'] in [np.uint8, np.int8] else None

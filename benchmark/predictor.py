@@ -70,8 +70,8 @@ class TFLiteDigitPredictor:
         )
         if is_multihead_model and has_two_10way:
             self.multi_head = True
-            self.idx_int = 0   # index of the integer/tens head tensor
-            self.idx_dec = 1   # index of the decimal/units head tensor
+            self.idx_int = self.output_details[0]['index']   # actual tensor index (overwritten by name resolution below)
+            self.idx_dec = self.output_details[1]['index']   # actual tensor index
             self.q_int = None  # dequant params for integer/tens head
             self.q_dec = None  # dequant params for decimal/units head
             # Resolve head indices by NAME to survive TFLite converter reordering.
@@ -88,9 +88,12 @@ class TFLiteDigitPredictor:
                 self.q_int = head_map['integer_probs'].get('quantization', (None, None))
                 self.q_dec = head_map['decimal_probs'].get('quantization', (None, None))
             else:
-                # Fallback: positional (legacy / unnamed heads)
-                self.q_int = self.output_details[0].get('quantization', (None, None))
-                self.q_dec = self.output_details[1].get('quantization', (None, None))
+                found = [od['name'] for od in self.output_details]
+                raise ValueError(
+                    "Multi-head TFLite model detected but output names are not "
+                    "recognized. Expected 'tens_probs'+'units_probs' (v41) or "
+                    f"'integer_probs'+'decimal_probs' (v42). Found: {found}"
+                )
             logger.info(f"🔀 Multi-head model detected: integer@{self.idx_int} decimal@{self.idx_dec} ({stem})")
         else:
             self.multi_head = False
