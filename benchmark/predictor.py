@@ -99,13 +99,39 @@ class TFLiteDigitPredictor:
                     "recognized. Expected 'tens_probs'+'units_probs' (v41) or "
                     f"'integer_probs'+'decimal_probs' (v42). Found: {found}"
                 )
-            self.idx_int = det_int['index']
-            self.idx_dec = det_dec['index']
-            _dtype_int = det_int['dtype']
-            _dtype_dec = det_dec['dtype']
-            self.q_int = det_int.get('quantization', (None, None)) if _dtype_int in [np.uint8, np.int8] else None
-            self.q_dec = det_dec.get('quantization', (None, None)) if _dtype_dec in [np.uint8, np.int8] else None
-            logger.info(f"🔀 Multi-head model detected: integer@{self.idx_int} decimal@{self.idx_dec} ({stem})")
+            # Detect v42 12-output model: check for decimal_head_0_probs in output names
+            is_v42_12 = False
+            if det_int is not None and det_dec is not None and len(self.output_details) >= 12:
+                det_0 = _head_by_substr(head_map, 'decimal_head_0_probs')
+                det_9 = _head_by_substr(head_map, 'decimal_head_9_probs')
+                is_v42_12 = det_0 is not None and det_9 is not None
+
+            if is_v42_12:
+                # Store indices for all 10 individual decimal heads.
+                # The predictor reads integer_probs, then selects decimal_head_{int_pred}_probs.
+                self.idx_int = det_int['index']
+                _dtype_int = det_int['dtype']
+                self.q_int = det_int.get('quantization', (None, None)) if _dtype_int in [np.uint8, np.int8] else None
+                self.idx_dec = None  # not used; replaced by idx_dec_heads
+                self.q_dec = None
+                self.idx_dec_heads = []
+                self.q_dec_heads = []
+                for i in range(10):
+                    det_i = _head_by_substr(head_map, f'decimal_head_{i}_probs')
+                    self.idx_dec_heads.append(det_i['index'])
+                    _dtype = det_i['dtype']
+                    self.q_dec_heads.append(det_i.get('quantization', (None, None)) if _dtype in [np.uint8, np.int8] else None)
+                logger.info(f"🔀 v42 12-output model: integer@{self.idx_int} + 10 decimal heads ({stem})")
+            else:
+                self.idx_int = det_int['index']
+                self.idx_dec = det_dec['index']
+                _dtype_int = det_int['dtype']
+                _dtype_dec = det_dec['dtype']
+                self.q_int = det_int.get('quantization', (None, None)) if _dtype_int in [np.uint8, np.int8] else None
+                self.q_dec = det_dec.get('quantization', (None, None)) if _dtype_dec in [np.uint8, np.int8] else None
+                self.idx_dec_heads = None
+                self.q_dec_heads = None
+                logger.info(f"🔀 Multi-head model detected: integer@{self.idx_int} decimal@{self.idx_dec} ({stem})")
         else:
             self.multi_head = False
 

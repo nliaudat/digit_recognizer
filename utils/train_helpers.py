@@ -676,34 +676,14 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                 print(f"   ✅ Successfully updated γ to {new_gamma:.1f} (No model re-compile)")
         else:
             print(f"   ⚠️  Model loss is not a DynamicFocalLoss instance ({type(loss_obj)}).")
-            print("      Falling back to legacy recompile method (WARNING: may crash in Keras 3)")
-            
-            # Store old learning rate
-            if hasattr(self.model.optimizer.learning_rate, 'numpy'):
-                old_lr = self.model.optimizer.learning_rate.numpy()
-            else:
-                old_lr = float(self.model.optimizer.learning_rate)
-            
-            # Create new loss based on architecture
-            if params.MODEL_ARCHITECTURE == "original_haverland":
-                new_loss_fn = focal_loss(gamma=new_gamma, alpha=self.alpha)
-            else:
-                new_loss_fn = sparse_focal_loss(gamma=new_gamma, alpha=self.alpha)
-            
-            # Recompile
-            self.model.compile(
-                optimizer=self.model.optimizer,
-                loss=new_loss_fn,
-                metrics=['accuracy']
-            )
-            
-            # Restore learning rate
-            if hasattr(self.model.optimizer.learning_rate, 'assign'):
-                self.model.optimizer.learning_rate.assign(old_lr)
-            else:
-                self.model.optimizer.learning_rate = old_lr
-            
-            print(f"   ✅ Legacy recompile successful (γ={new_gamma:.1f})")
+        if isinstance(loss_obj, dict):
+            for name, head_loss in loss_obj.items():
+                if isinstance(head_loss, (DynamicSparseFocalLoss, DynamicFocalLoss)):
+                    head_loss.gamma.assign(float(new_gamma))
+                    head_loss.alpha.assign(tf.ones(10, dtype=tf.float32) * float(tf.reduce_mean(self.alpha).numpy() if hasattr(self.alpha, "numpy") else self.alpha))
+            print(f"   Updated all {len(loss_obj)} heads (gamma={new_gamma:.1f}, no recompile)")
+        else:
+            print(f"   Unsupported loss type: {type(loss_obj)} - skipping gamma update")
 
         # Update state (for ramp, current_gamma will be updated each epoch by _tick_gamma_ramp)
         if self.gamma_ramp_epochs == 0:
