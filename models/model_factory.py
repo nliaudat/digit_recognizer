@@ -285,17 +285,17 @@ def _compile_multihead_model(model, optimizer, resolved_loss='sparse_categorical
         # v42 soft conditioning (integer + decimal) — weights from config
         'integer_probs':    (_head_loss if is_focal else 'sparse_categorical_crossentropy', getattr(params, 'V42_LOSS_WEIGHT_INTEGER', 1.0)),
         'decimal_probs':    (_head_loss if is_focal else 'sparse_categorical_crossentropy', getattr(params, 'V42_LOSS_WEIGHT_DECIMAL', 1.0)),
-        # v42 individual decimal heads (None loss = no targets needed, for evaluation only)
-        'decimal_head_0_probs': (None, 0.0),
-        'decimal_head_1_probs': (None, 0.0),
-        'decimal_head_2_probs': (None, 0.0),
-        'decimal_head_3_probs': (None, 0.0),
-        'decimal_head_4_probs': (None, 0.0),
-        'decimal_head_5_probs': (None, 0.0),
-        'decimal_head_6_probs': (None, 0.0),
-        'decimal_head_7_probs': (None, 0.0),
-        'decimal_head_8_probs': (None, 0.0),
-        'decimal_head_9_probs': (None, 0.0),
+        # v42 individual decimal heads (zero loss weight — no targets needed, evaluation only)
+        'decimal_head_0_probs': (_head_loss if is_focal else 'sparse_categorical_crossentropy', 0.0),
+        'decimal_head_1_probs': (_head_loss if is_focal else 'sparse_categorical_crossentropy', 0.0),
+        'decimal_head_2_probs': (_head_loss if is_focal else 'sparse_categorical_crossentropy', 0.0),
+        'decimal_head_3_probs': (_head_loss if is_focal else 'sparse_categorical_crossentropy', 0.0),
+        'decimal_head_4_probs': (_head_loss if is_focal else 'sparse_categorical_crossentropy', 0.0),
+        'decimal_head_5_probs': (_head_loss if is_focal else 'sparse_categorical_crossentropy', 0.0),
+        'decimal_head_6_probs': (_head_loss if is_focal else 'sparse_categorical_crossentropy', 0.0),
+        'decimal_head_7_probs': (_head_loss if is_focal else 'sparse_categorical_crossentropy', 0.0),
+        'decimal_head_8_probs': (_head_loss if is_focal else 'sparse_categorical_crossentropy', 0.0),
+        'decimal_head_9_probs': (_head_loss if is_focal else 'sparse_categorical_crossentropy', 0.0),
     }
 
     output_names = model.output_names          # e.g. ['digit_probs', 'digit_confidence', ...]
@@ -323,7 +323,10 @@ def _compile_multihead_model(model, optimizer, resolved_loss='sparse_categorical
 
     print("✅ Multi-head model compiled:")
     for name in output_names:
-        print(f"   - {name}: loss={loss_dict[name]}, weight={weight_dict[name]}")
+        if name in loss_dict:
+            print(f"   - {name}: loss={loss_dict[name]}, weight={weight_dict[name]}")
+        else:
+            print(f"   - {name}: (no loss — evaluation only)")
     return model
 
 

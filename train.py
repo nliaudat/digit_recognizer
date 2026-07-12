@@ -848,7 +848,7 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                 keys = ('integer_probs', 'decimal_probs') if 'v42' in params.MODEL_ARCHITECTURE else ('tens_probs', 'units_probs')
                 def _decompose_labels(y):
                     d = {keys[0]: y // 10, keys[1]: y % 10}
-                    # v42 also exports 10 individual decimal heads (zero loss weight)
+                    # v42 also exports 10 individual decimal heads
                     if 'v42' in params.MODEL_ARCHITECTURE:
                         for i in range(10):
                             d[f'decimal_head_{i}_probs'] = y % 10

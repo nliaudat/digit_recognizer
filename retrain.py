@@ -211,8 +211,16 @@ def main():
             extracted_name = extracted_name.replace("train_", "").replace("digit_recognizer_", "")
             model_name_stem = extracted_name
     
-    # Update params.MODEL_ARCHITECTURE so subsequent calls (TQT, MLflow) use the clean name
-    params.MODEL_ARCHITECTURE = model_name_stem
+    # Use the loaded model's actual name (preserved from original training) for TFLite naming
+    loaded_model_name = getattr(model, 'name', None) or model_name_stem
+    # Restore full digit_recognizer_ prefix if missing (config default may be 'v16')
+    if not loaded_model_name.startswith('digit_recognizer_'):
+        loaded_model_name = f'digit_recognizer_{loaded_model_name}'
+    params.MODEL_ARCHITECTURE = loaded_model_name
+    # Also sync the underlying config.models module (get_tflite_filename() reads from there)
+    import config.models as _cfg_m
+    _cfg_m.MODEL_ARCHITECTURE = loaded_model_name
+    print(f"📛 Model architecture set to: {params.MODEL_ARCHITECTURE}")
     
     export_folder = f"retrained_{model_name_stem}_{params.NB_CLASSES}cls_{color_suffix}_{quant_suffix}_{activation_suffix}"
     export_dir = os.path.join("exported_models", f"{params.NB_CLASSES}cls_{color_suffix}", export_folder)

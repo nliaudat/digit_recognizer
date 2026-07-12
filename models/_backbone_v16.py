@@ -51,25 +51,28 @@ def _inv_res(x, filters_out, expand_ratio, stride, name_prefix):
     return y
 
 
-def create_v16_backbone(inputs, name='backbone'):
+def create_v16_backbone(inputs, name=''):
     """
     Create the shared v16 feature extractor.
     
     Args:
         inputs: Keras Input tensor [batch, H, W, C]
-        name: Scope prefix for layer names.
+        name: Scope prefix for layer names.  When '' (default), uses bare names
+              for backward compatibility with existing v16/v41 checkpoints.
     
     Returns:
         96-dim flattened feature vector [batch, 96]
     """
+    prefix = f"{name}_" if name else ""
+    
     # Entry conv
     x = tf.keras.layers.Conv2D(
         16, (3, 3), padding='same',
         kernel_initializer='he_normal', use_bias=False,
-        name=f'{name}_entry_conv'
+        name=f'{prefix}entry_conv'
     )(inputs)
-    x = tf.keras.layers.BatchNormalization(name=f'{name}_entry_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name=f'{name}_entry_relu6')(x)
+    x = tf.keras.layers.BatchNormalization(name=f'{prefix}entry_bn')(x)
+    x = tf.keras.layers.ReLU(max_value=6.0, name=f'{prefix}entry_relu6')(x)
 
     # Inverted residual stages
     inv_res_config = [
@@ -81,19 +84,19 @@ def create_v16_backbone(inputs, name='backbone'):
     ]
     for i, (out_ch, t, s) in enumerate(inv_res_config):
         x = _inv_res(x, filters_out=out_ch, expand_ratio=t, stride=s,
-                     name_prefix=f'{name}_ir{i+1}')
+                     name_prefix=f'{prefix}ir{i+1}')
 
     # Head conv
     x = tf.keras.layers.Conv2D(
         96, (1, 1), padding='same',
         kernel_initializer='he_normal', use_bias=False,
-        name=f'{name}_head_conv'
+        name=f'{prefix}head_conv'
     )(x)
-    x = tf.keras.layers.BatchNormalization(name=f'{name}_head_bn')(x)
-    x = tf.keras.layers.ReLU(max_value=6.0, name=f'{name}_head_relu6')(x)
+    x = tf.keras.layers.BatchNormalization(name=f'{prefix}head_bn')(x)
+    x = tf.keras.layers.ReLU(max_value=6.0, name=f'{prefix}head_relu6')(x)
 
     # Global average pooling → shared feature vector
-    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name=f'{name}_gap')(x)
-    shared = tf.keras.layers.Flatten(name=f'{name}_flatten')(x)
+    x = tf.keras.layers.GlobalAveragePooling2D(keepdims=True, name=f'{prefix}gap')(x)
+    shared = tf.keras.layers.Flatten(name=f'{prefix}flatten')(x)
 
     return shared
