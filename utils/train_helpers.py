@@ -674,9 +674,7 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                     target_loss.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
                 
                 print(f"   ✅ Successfully updated γ to {new_gamma:.1f} (No model re-compile)")
-        else:
-            print(f"   ⚠️  Model loss is not a DynamicFocalLoss instance ({type(loss_obj)}).")
-        if isinstance(loss_obj, dict):
+        elif isinstance(loss_obj, dict):
             for name, head_loss in loss_obj.items():
                 if isinstance(head_loss, (DynamicSparseFocalLoss, DynamicFocalLoss)):
                     head_loss.gamma.assign(float(new_gamma))
@@ -690,6 +688,7 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                     head_loss.alpha.assign(tf.ones(10, dtype=tf.float32) * tf.cast(alpha_scalar, tf.float32))
             print(f"   Updated all {len(loss_obj)} heads (gamma={new_gamma:.1f}, no recompile)")
         else:
+            print(f"   ⚠️  Model loss is not a DynamicFocalLoss instance ({type(loss_obj)}).")
             print(f"   Unsupported loss type: {type(loss_obj)} - skipping gamma update")
 
         # Update state (for ramp, current_gamma will be updated each epoch by _tick_gamma_ramp)

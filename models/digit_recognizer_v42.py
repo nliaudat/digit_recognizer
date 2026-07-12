@@ -88,6 +88,9 @@ class SoftConditioningCombine(tf.keras.layers.Layer):
             axis=1
         )
 
+    def get_quantize_config(self):
+        return NoOpQuantizeConfig()
+
     def get_config(self):
         return super().get_config()
 

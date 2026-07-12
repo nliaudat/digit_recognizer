@@ -159,12 +159,12 @@ class TFLiteDigitPredictor:
         # Robustly ensure input is scaled correctly based on what this specific model expects
         expected_dtype = self.input_details[0]['dtype']
         if expected_dtype == np.uint8:
-            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+            if input_data.dtype == np.float32 and input_data.max() <= 1.01:
                 input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
             else:
                 input_data = input_data.astype(np.uint8)
         elif expected_dtype == np.int8:
-            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+            if input_data.dtype == np.float32 and input_data.max() <= 1.01:
                 input_data = np.clip(np.round(input_data * 255.0 - 128.0), -128, 127).astype(np.int8)
             elif input_data.dtype == np.uint8:
                 input_data = (input_data.astype(np.int32) - 128).astype(np.int8)
@@ -313,7 +313,7 @@ class TFLiteDigitPredictor:
         # feed it directly. If it expects int8, subtract 128.
         if expected_dtype == np.uint8:
             # Model accepts raw camera bytes
-            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+            if input_data.dtype == np.float32 and input_data.max() <= 1.01:
                 input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
             elif input_data.dtype == np.int8:
                 # int8 [-128,127] → uint8 [0,255]  (modulo cast is wrong!)
@@ -326,7 +326,7 @@ class TFLiteDigitPredictor:
 
         elif expected_dtype == np.int8:
             # Model expects int8 [-128, 127] (ESP-DL path)
-            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+            if input_data.dtype == np.float32 and input_data.max() <= 1.01:
                 input_uint8 = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
             elif input_data.dtype == np.int8:
                 # int8 [-128,127] → uint8 [0,255]  (modulo cast is wrong!)
