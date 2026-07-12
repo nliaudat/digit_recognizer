@@ -61,9 +61,11 @@ def _evaluate_keras_multihead(keras_model, x_test, y_test_orig):
     We extract the individual decimal_head_{i}_probs layers to compute
     the correct joint: argmax(integer) × 10 + head[argmax(integer)].
     """
-    is_v42 = hasattr(keras_model, 'output_names') and 'integer_probs' in keras_model.output_names
+    is_v42_12 = (hasattr(keras_model, 'output_names')
+                 and 'integer_probs' in keras_model.output_names
+                 and len(keras_model.outputs) >= 12)
 
-    if is_v42:
+    if is_v42_12:
         # Model now exports individual decimal heads as outputs 2-11.
         # Use them directly instead of building a temporary model.
         x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
@@ -236,22 +238,13 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
         det_int, idx_int = _head_by_substr(head_map, 'tens_probs')
         det_dec, idx_dec = _head_by_substr(head_map, 'units_probs')
     if det_int is None or det_dec is None:
-        # Fallback: generic names (e.g. Identity:0) — try both orderings, take max accuracy.
-        # Swapping integer/decimal inverts digits (e.g. 35 ↔ 53), giving ~10% vs true accuracy.
         found_names = [od['name'] for od in output_details]
-        print(f"⚠️  Unrecognized output names: {found_names} — trying both head orderings")
-        # Evaluate with positional order A→B, then B→A
-        acc_ab = _eval_two_heads(
-            interpreter, input_details, output_details, input_dtype,
-            x_test_analysis, y_orig, idx_a=0, idx_b=1
+        raise ValueError(
+            "Multi-head TFLite model has unrecognized output tensor names. "
+            "Expected 'integer_probs'+'decimal_probs' (v42) or "
+            "'tens_probs'+'units_probs' (v41). "
+            f"Found: {found_names}"
         )
-        acc_ba = _eval_two_heads(
-            interpreter, input_details, output_details, input_dtype,
-            x_test_analysis, y_orig, idx_a=1, idx_b=0
-        )
-        accuracy = max(acc_ab, acc_ba)
-        print(f"   Positional A→B: {acc_ab:.4f}  B→A: {acc_ba:.4f}  → taking max: {accuracy:.4f}")
-        return accuracy
     
     # Pre-fetch dequantization params per head (safe .get to avoid KeyError)
     q_int = det_int.get('quantization', (None, None)) if det_int['dtype'] in [np.uint8, np.int8] else None
@@ -270,11 +263,15 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
         # Pre-fetch indices and dequantization for all 10 individual decimal heads
         for hi in range(10):
             det_hi, idx_hi = _head_by_substr(head_map, f'decimal_head_{hi}_probs')
-            if det_hi is not None:
-                idx_dec_heads.append(idx_hi)
-                q_dec_heads.append(
-                    det_hi.get('quantization', (None, None)) if det_hi['dtype'] in [np.uint8, np.int8] else None
+            if det_hi is None:
+                raise ValueError(
+                    f"v42 12-output model expected decimal_head_{hi}_probs but "
+                    f"it was not found in output tensor names."
                 )
+            idx_dec_heads.append(idx_hi)
+            q_dec_heads.append(
+                det_hi.get('quantization', (None, None)) if det_hi['dtype'] in [np.uint8, np.int8] else None
+            )
     
     correct = 0
     y_true_arr = np.asarray(y_orig).flatten()

@@ -63,11 +63,10 @@ class TFLiteDigitPredictor:
         # Auto-detect multi-head (v41 / v42); respect explicit self.multi_head if set
         stem = Path(self.model_path).stem.lower()
         is_multihead_model = self.multi_head if self.multi_head is not None else ('v41' in stem or 'v42' in stem)
-        has_two_10way = (
-            len(self.output_details) >= 2
-            and self.output_details[0]['shape'][-1] == 10
-            and self.output_details[1]['shape'][-1] == 10
-        )
+        has_two_10way = sum(
+            1 for od in self.output_details
+            if len(od['shape']) > 0 and od['shape'][-1] == 10
+        ) >= 2
         if is_multihead_model and has_two_10way:
             self.multi_head = True
             self.idx_int = None  # resolved by name resolution below

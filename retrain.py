@@ -168,7 +168,13 @@ def main():
         loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=params.USE_LOGITS)
         print(f"🎯 Using Standard SparseCategoricalCrossentropy")
     
-    model.compile(optimizer=optimizer, loss=loss_fn, metrics=['accuracy'])
+    # Multi-head models (v41/v42) retain their per-head loss from the loaded .keras file.
+    # Recompiling them with a single loss destroys the per-output mapping and breaks eval.
+    if hasattr(model, 'outputs') and len(model.outputs) > 1:
+        from models.model_factory import _compile_multihead_model
+        _compile_multihead_model(model, optimizer, resolved_loss=loss_fn)
+    else:
+        model.compile(optimizer=optimizer, loss=loss_fn, metrics=['accuracy'])
     
     # 5. Fine-Tune
     print("\n🔥 Starting Fine-Tuning Training loop...")
