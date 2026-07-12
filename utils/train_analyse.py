@@ -257,6 +257,25 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
     q_int = det_int.get('quantization', (None, None)) if det_int['dtype'] in [np.uint8, np.int8] else None
     q_dec = det_dec.get('quantization', (None, None)) if det_dec['dtype'] in [np.uint8, np.int8] else None
     
+    # Detect 12-output v42 model: check for decimal_head_0_probs in output names
+    is_v42_12 = False
+    idx_dec_heads = []
+    q_dec_heads = []
+    if len(output_details) >= 12:
+        det_0, _ = _head_by_substr(head_map, 'decimal_head_0_probs')
+        det_9, _ = _head_by_substr(head_map, 'decimal_head_9_probs')
+        is_v42_12 = det_0 is not None and det_9 is not None
+    
+    if is_v42_12:
+        # Pre-fetch indices and dequantization for all 10 individual decimal heads
+        for hi in range(10):
+            det_hi, idx_hi = _head_by_substr(head_map, f'decimal_head_{hi}_probs')
+            if det_hi is not None:
+                idx_dec_heads.append(idx_hi)
+                q_dec_heads.append(
+                    det_hi.get('quantization', (None, None)) if det_hi['dtype'] in [np.uint8, np.int8] else None
+                )
+    
     correct = 0
     y_true_arr = np.asarray(y_orig).flatten()
     
@@ -271,14 +290,24 @@ def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
         interpreter.invoke()
         
         int_out = interpreter.get_tensor(idx_int)
-        dec_out = interpreter.get_tensor(idx_dec)
         if q_int is not None and q_int[0] is not None and q_int[0] > 0.0:
             s, zp = q_int
             int_out = (int_out.astype(np.float32) - zp) * s
-        if q_dec is not None and q_dec[0] is not None and q_dec[0] > 0.0:
-            s, zp = q_dec
-            dec_out = (dec_out.astype(np.float32) - zp) * s
         int_pred = int(np.argmax(int_out[0]))
+        
+        # Decimal: use conditional head for 12-output v42, marginal decimal_probs otherwise
+        if is_v42_12 and idx_dec_heads:
+            dec_out = interpreter.get_tensor(idx_dec_heads[int_pred])
+            q_dec_i = q_dec_heads[int_pred]
+            if q_dec_i is not None and q_dec_i[0] is not None and q_dec_i[0] > 0.0:
+                s, zp = q_dec_i
+                dec_out = (dec_out.astype(np.float32) - zp) * s
+        else:
+            dec_out = interpreter.get_tensor(idx_dec)
+            if q_dec is not None and q_dec[0] is not None and q_dec[0] > 0.0:
+                s, zp = q_dec
+                dec_out = (dec_out.astype(np.float32) - zp) * s
+        
         dec_pred = int(np.argmax(dec_out[0]))
         pred = int_pred * 10 + dec_pred
         

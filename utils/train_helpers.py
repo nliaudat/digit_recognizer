@@ -680,7 +680,14 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
             for name, head_loss in loss_obj.items():
                 if isinstance(head_loss, (DynamicSparseFocalLoss, DynamicFocalLoss)):
                     head_loss.gamma.assign(float(new_gamma))
-                    head_loss.alpha.assign(tf.ones(10, dtype=tf.float32) * float(tf.reduce_mean(self.alpha).numpy() if hasattr(self.alpha, "numpy") else self.alpha))
+                    # alpha can be a numpy array, tf tensor, or scalar — normalise to scalar first
+                    if isinstance(self.alpha, (list, tuple, np.ndarray)):
+                        alpha_scalar = float(np.mean(self.alpha))
+                    elif hasattr(self.alpha, "numpy"):
+                        alpha_scalar = float(tf.reduce_mean(self.alpha).numpy())
+                    else:
+                        alpha_scalar = float(self.alpha)
+                    head_loss.alpha.assign(tf.ones(10, dtype=tf.float32) * tf.cast(alpha_scalar, tf.float32))
             print(f"   Updated all {len(loss_obj)} heads (gamma={new_gamma:.1f}, no recompile)")
         else:
             print(f"   Unsupported loss type: {type(loss_obj)} - skipping gamma update")

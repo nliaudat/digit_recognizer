@@ -24,33 +24,62 @@ def combine_multiheads(model_outputs, model=None):
     For v41 multi-head models: output is list [tens_probs, units_probs]
     each of shape (N, 10).  Joint probability P(digit = t*10+u) = P(tens=t) * P(units=u).
 
-    For v42: output is [integer_probs, decimal_probs] where decimal_probs is already
-    Σ P(integer=i) × P(decimal|integer=i).  Re-doing the outer product would
-    double-count integer weights, so we use argmax(integer)*10+argmax(decimal) and
-    return a one-hot 100-class distribution.
+    For v42 with 12 outputs: output is [integer_probs, decimal_probs, decimal_head_0..9_probs].
+    Uses the individual decimal heads to compute the correct joint prediction:
+        digit = argmax(integer_probs) * 10 + argmax(decimal_head_{int_pred}_probs)
+
+    For v42 with 2 outputs: falls back to argmax(integer_probs) * 10 + argmax(decimal_probs)
+    (marginal approximation; minor accuracy impact for training callbacks).
 
     Args:
-        model_outputs: tensor, numpy array, or list of 2 tensors/arrays.
+        model_outputs: tensor, numpy array, or list of 2+ tensors/arrays.
         model: optional Keras model (used to detect v42 by output names).
     Returns:
         Single tensor/array of shape (N, 100) containing joint probabilities.
-        Returns input unchanged if not a 2-element list (single-head models).
+        Returns input unchanged if not a list/tuple (single-head models).
     """
     if not isinstance(model_outputs, (list, tuple)):
         return model_outputs
 
-    # v42 now exports 12 outputs (integer_probs, decimal_probs, 10× decimal_head).
-    # Detect this by checking for more than 2 outputs plus integer_probs in model names.
-    if len(model_outputs) >= 12 and model is not None and hasattr(model, 'output_names'):
-        if 'integer_probs' in model.output_names and 'decimal_head_0_probs' in model.output_names:
-            # Use only the first 2 outputs (integer and decimal marginal)
-            head0, head1 = model_outputs[0], model_outputs[1]
+    # ── Detect v42 12-output model by checking output count and names ──
+    is_v42_12 = (
+        len(model_outputs) >= 12
+        and model is not None
+        and hasattr(model, 'output_names')
+        and 'integer_probs' in model.output_names
+        and 'decimal_head_0_probs' in model.output_names
+    )
+
+    if is_v42_12:
+        # v42 12-output: integer_probs[0], decimal_probs[1], heads[2:12]
+        int_head = model_outputs[0]
+        dec_heads_list = model_outputs[2:12]  # 10 arrays/tensors each (N, 10)
+
+        is_tf = tf.is_tensor(int_head)
+        if is_tf:
+            int_pred = tf.cast(tf.argmax(int_head, axis=-1), tf.int32)  # (N,)
+            stacked = tf.stack(dec_heads_list, axis=1)  # (N, 10, 10)
+            batch_size = tf.shape(stacked)[0]
+            idx = tf.stack([tf.range(batch_size), int_pred], axis=1)  # (N, 2)
+            selected = tf.gather_nd(stacked, idx)  # (N, 10)
+            dec_pred = tf.cast(tf.argmax(selected, axis=-1), tf.int32)
+            combined = int_pred * 10 + dec_pred
+            return tf.one_hot(combined, 100, dtype=tf.float32)
         else:
-            return model_outputs
-    elif len(model_outputs) != 2:
+            int_pred = np.atleast_1d(np.argmax(int_head, axis=-1))  # (N,)
+            stacked = np.stack(dec_heads_list, axis=1)  # (N, 10, 10)
+            selected = stacked[np.arange(len(int_pred)), int_pred]  # (N, 10)
+            dec_pred = np.atleast_1d(np.argmax(selected, axis=-1))
+            combined = int_pred * 10 + dec_pred
+            joint = np.zeros((len(combined), 100), dtype=np.float32)
+            joint[np.arange(len(combined)), combined] = 1.0
+            return joint
+
+    # ── 2-output models (v41, v42 2-out, or unknown multi-head) ──
+    if len(model_outputs) != 2:
         return model_outputs
-    else:
-        head0, head1 = model_outputs
+
+    head0, head1 = model_outputs
 
     # Auto-detect v42 by checking output names if model is provided.
     is_v42 = False
