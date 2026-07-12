@@ -51,12 +51,55 @@ def evaluate_keras_model(keras_model, x_test, y_test):
     return accuracy
 
 
+def _evaluate_keras_multihead(keras_model, x_test, y_test_orig):
+    """
+    Evaluate multi-head Keras model (v41/v42) using combined accuracy.
+    y_test_orig: scalar labels (0-99).
+
+    For v42: decimal_probs is the marginal Σ P(int=t)×P(dec|int=t), so
+    argmax(decimal_probs) can select a decimal from the wrong integer.
+    We extract the individual decimal_head_{i}_probs layers to compute
+    the correct joint: argmax(integer) × 10 + head[argmax(integer)].
+    """
+    is_v42_12 = (hasattr(keras_model, 'output_names')
+                 and 'integer_probs' in keras_model.output_names
+                 and len(keras_model.outputs) >= 12)
+
+    if is_v42_12:
+        # Model now exports individual decimal heads as outputs 2-11.
+        # Use them directly instead of building a temporary model.
+        x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
+        outputs = keras_model.predict(x_test_analysis, verbose=0)
+        int_probs = outputs[0]   # [N, 10]
+        dec_heads = outputs[2:]  # list of 10 arrays each [N, 10]
+        int_preds = np.argmax(int_probs, axis=-1)
+        stacked_dec_heads = np.stack(dec_heads, axis=1)  # (N, 10, 10)
+        selected_heads = stacked_dec_heads[np.arange(len(int_preds)), int_preds]  # (N, 10)
+        dec_preds = np.argmax(selected_heads, axis=-1)
+        pred_cls = int_preds * 10 + dec_preds
+    else:
+        # v41: standard argmax combination (both heads are independent 10-class)
+        x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
+        preds = keras_model.predict(x_test_analysis, verbose=0)
+        pred_cls = np.argmax(preds[0], axis=-1) * 10 + np.argmax(preds[1], axis=-1)
+
+    y_true = np.asarray(y_orig).flatten()
+    accuracy = float(np.mean(pred_cls == y_true))
+    print(f"Keras Model Combined Accuracy: {accuracy:.4f} (on {len(x_test_analysis)} samples)")
+    return accuracy
+
+
 def evaluate_tflite_model(tflite_path, x_test, y_test):
-    """Evaluate TFLite model accuracy"""
+    """Evaluate TFLite model accuracy (single-head)."""
     print("🧪 Evaluating TFLite model...")
     
     # Use configured number of samples
     x_test_analysis, y_test_analysis = get_analysis_samples(x_test, y_test)
+    # Pre-convert to numpy once to avoid per-sample overhead in the loop.
+    if hasattr(x_test_analysis, 'numpy'):
+        x_test_analysis = x_test_analysis.numpy()
+    else:
+        x_test_analysis = np.asarray(x_test_analysis, dtype=np.float32)
     total_samples = len(x_test_analysis)
     
     # Load TFLite model
@@ -74,19 +117,14 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
     
     # Use tqdm for progress tracking
     for i in tqdm(range(total_samples), desc="Evaluating TFLite", leave=False):
-        # Prepare input — convert TF tensor slice to numpy if needed
         input_data = x_test_analysis[i:i+1]
-        if hasattr(input_data, 'numpy'):
-            input_data = input_data.numpy()
-        input_data = np.array(input_data, dtype=np.float32)  # ensure float32 before conversion
         
         # Convert input based on model requirements
         if input_dtype == np.int8:
-            # Convert float [0,1] to int8 [-128, 127]
-            input_data = (input_data * 255.0 - 128.0).astype(np.int8)
+            # Round + clip before cast to match training quantisation
+            input_data = np.clip(np.round(input_data * 255.0 - 128.0), -128, 127).astype(np.int8)
         elif input_dtype == np.uint8:
-            # Convert float [0,1] to uint8 [0, 255]
-            input_data = (input_data * 255.0).astype(np.uint8)
+            input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
         else:
             input_data = input_data.astype(np.float32)
         
@@ -122,6 +160,159 @@ def evaluate_tflite_model(tflite_path, x_test, y_test):
     accuracy = correct_predictions / total_samples
     print(f"TFLite Model Accuracy: {accuracy:.4f} ({correct_predictions}/{total_samples})")
     
+    return accuracy
+
+
+def _eval_two_heads(interpreter, input_details, output_details, input_dtype,
+                     x_test, y_orig, idx_a, idx_b):
+    """Evaluate two 10-head outputs at positional indices idx_a, idx_b, combined as A*10+B."""
+    total = len(x_test)
+    y_true = np.asarray(y_orig).flatten()
+    correct = 0
+    for i in tqdm(range(total), desc="Evaluating TFLite", leave=False):
+        input_data = x_test[i:i+1]
+        if input_dtype == np.int8:
+            input_data = np.clip(np.round(input_data * 255.0 - 128.0), -128, 127).astype(np.int8)
+        elif input_dtype == np.uint8:
+            input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
+
+        interpreter.set_tensor(input_details[0]['index'], input_data)
+        interpreter.invoke()
+
+        out_a = interpreter.get_tensor(output_details[idx_a]['index'])
+        out_b = interpreter.get_tensor(output_details[idx_b]['index'])
+        if output_details[idx_a]['dtype'] in [np.uint8, np.int8]:
+            s, zp = output_details[idx_a].get('quantization', (None, None))
+            if s is not None and s > 0.0:
+                out_a = (out_a.astype(np.float32) - zp) * s
+        if output_details[idx_b]['dtype'] in [np.uint8, np.int8]:
+            s, zp = output_details[idx_b].get('quantization', (None, None))
+            if s is not None and s > 0.0:
+                out_b = (out_b.astype(np.float32) - zp) * s
+        pred = int(np.argmax(out_a[0])) * 10 + int(np.argmax(out_b[0]))
+        if pred == y_true[i]:
+            correct += 1
+    return correct / total
+
+
+def _evaluate_tflite_multihead(tflite_path, x_test, y_test_orig):
+    """
+    Evaluate multi-head TFLite model (v41/v42) using combined accuracy.
+    Matches output tensors by NAME (not position) to handle converter reordering.
+    Both heads are 10-class; combined as head0*10+head1.
+    y_test_orig: scalar labels (0-99).
+    """
+    print("🧪 Evaluating TFLite model (multi-head)...")
+    x_test_analysis, y_orig = get_analysis_samples(x_test, y_test_orig)
+    # Pre-convert to numpy once to avoid per-sample overhead in the loop.
+    if hasattr(x_test_analysis, 'numpy'):
+        x_test_analysis = x_test_analysis.numpy()
+    else:
+        x_test_analysis = np.asarray(x_test_analysis, dtype=np.float32)
+    total_samples = len(x_test_analysis)
+    
+    interpreter = tf.lite.Interpreter(model_path=tflite_path)
+    interpreter.allocate_tensors()
+    
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    input_dtype = input_details[0]['dtype']
+    
+    # Resolve integer/units head index by name (substring match), not position.
+    # TFLite may decorate output names (e.g. 'serving_default_tens_probs:0')
+    # so we use substring matching rather than exact names.
+    # v41: tens_probs / units_probs ;  v42: integer_probs / decimal_probs
+    def _head_by_substr(head_map, substr):
+        """Return (detail, index) for output whose name contains substr, else (None, None)."""
+        for name, detail in head_map.items():
+            name_str = name.decode('utf-8') if isinstance(name, bytes) else name
+            if substr in name_str:
+                return detail, detail['index']
+        return None, None
+
+    head_map = {od['name']: od for od in output_details}
+    det_int, idx_int = _head_by_substr(head_map, 'integer_probs')
+    det_dec, idx_dec = _head_by_substr(head_map, 'decimal_probs')
+    if det_int is None or det_dec is None:
+        # Fallback: try v41 naming (tens_probs / units_probs)
+        det_int, idx_int = _head_by_substr(head_map, 'tens_probs')
+        det_dec, idx_dec = _head_by_substr(head_map, 'units_probs')
+    if det_int is None or det_dec is None:
+        found_names = [od['name'] for od in output_details]
+        raise ValueError(
+            "Multi-head TFLite model has unrecognized output tensor names. "
+            "Expected 'integer_probs'+'decimal_probs' (v42) or "
+            "'tens_probs'+'units_probs' (v41). "
+            f"Found: {found_names}"
+        )
+    
+    # Pre-fetch dequantization params per head (safe .get to avoid KeyError)
+    q_int = det_int.get('quantization', (None, None)) if det_int['dtype'] in [np.uint8, np.int8] else None
+    q_dec = det_dec.get('quantization', (None, None)) if det_dec['dtype'] in [np.uint8, np.int8] else None
+    
+    # Detect 12-output v42 model: check for decimal_head_0_probs in output names
+    is_v42_12 = False
+    idx_dec_heads = []
+    q_dec_heads = []
+    if len(output_details) >= 12:
+        det_0, _ = _head_by_substr(head_map, 'decimal_head_0_probs')
+        det_9, _ = _head_by_substr(head_map, 'decimal_head_9_probs')
+        is_v42_12 = det_0 is not None and det_9 is not None
+    
+    if is_v42_12:
+        # Pre-fetch indices and dequantization for all 10 individual decimal heads
+        for hi in range(10):
+            det_hi, idx_hi = _head_by_substr(head_map, f'decimal_head_{hi}_probs')
+            if det_hi is None:
+                raise ValueError(
+                    f"v42 12-output model expected decimal_head_{hi}_probs but "
+                    f"it was not found in output tensor names."
+                )
+            idx_dec_heads.append(idx_hi)
+            q_dec_heads.append(
+                det_hi.get('quantization', (None, None)) if det_hi['dtype'] in [np.uint8, np.int8] else None
+            )
+    
+    correct = 0
+    y_true_arr = np.asarray(y_orig).flatten()
+    
+    for i in tqdm(range(total_samples), desc="Evaluating TFLite", leave=False):
+        input_data = x_test_analysis[i:i+1]
+        if input_dtype == np.int8:
+            input_data = np.clip(np.round(input_data * 255.0 - 128.0), -128, 127).astype(np.int8)
+        elif input_dtype == np.uint8:
+            input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
+        
+        interpreter.set_tensor(input_details[0]['index'], input_data)
+        interpreter.invoke()
+        
+        int_out = interpreter.get_tensor(idx_int)
+        if q_int is not None and q_int[0] is not None and q_int[0] > 0.0:
+            s, zp = q_int
+            int_out = (int_out.astype(np.float32) - zp) * s
+        int_pred = int(np.argmax(int_out[0]))
+        
+        # Decimal: use conditional head for 12-output v42, marginal decimal_probs otherwise
+        if is_v42_12 and idx_dec_heads:
+            dec_out = interpreter.get_tensor(idx_dec_heads[int_pred])
+            q_dec_i = q_dec_heads[int_pred]
+            if q_dec_i is not None and q_dec_i[0] is not None and q_dec_i[0] > 0.0:
+                s, zp = q_dec_i
+                dec_out = (dec_out.astype(np.float32) - zp) * s
+        else:
+            dec_out = interpreter.get_tensor(idx_dec)
+            if q_dec is not None and q_dec[0] is not None and q_dec[0] > 0.0:
+                s, zp = q_dec
+                dec_out = (dec_out.astype(np.float32) - zp) * s
+        
+        dec_pred = int(np.argmax(dec_out[0]))
+        pred = int_pred * 10 + dec_pred
+        
+        if pred == y_true_arr[i]:
+            correct += 1
+    
+    accuracy = correct / total_samples
+    print(f"TFLite Model Accuracy: {accuracy:.4f} ({correct}/{total_samples})")
     return accuracy
 
 
@@ -219,9 +410,18 @@ def analyze_quantization_impact(keras_model, x_test, y_test, tflite_path, debug=
         # Use configured number of samples
         x_test_analysis, y_test_analysis = get_analysis_samples(x_test, y_test)
         
-        # Accuracy comparison
-        keras_accuracy = evaluate_keras_model(keras_model, x_test_analysis, y_test_analysis)
-        tflite_accuracy = evaluate_tflite_model(tflite_path, x_test_analysis, y_test_analysis)
+        # Detect multi-head model by checking config (v41: tens_probs/units_probs, v42: integer_probs/decimal_probs)
+        is_multihead = hasattr(keras_model, 'output_names') and len(keras_model.output_names) >= 2 and (
+            all(n in keras_model.output_names for n in ('tens_probs', 'units_probs')) or
+            all(n in keras_model.output_names for n in ('integer_probs', 'decimal_probs')))
+
+        # Accuracy comparison — use multi-head-aware evaluation when needed
+        if is_multihead:
+            keras_accuracy = _evaluate_keras_multihead(keras_model, x_test_analysis, y_test_analysis)
+            tflite_accuracy = _evaluate_tflite_multihead(tflite_path, x_test_analysis, y_test_analysis)
+        else:
+            keras_accuracy = evaluate_keras_model(keras_model, x_test_analysis, y_test_analysis)
+            tflite_accuracy = evaluate_tflite_model(tflite_path, x_test_analysis, y_test_analysis)
         
         print(f"📊 ACCURACY COMPARISON:")
         print(f"   Keras Model:    {keras_accuracy:.4f}")
@@ -364,14 +564,14 @@ def training_diagnostics(model, x_train, y_train, x_val, y_val, debug=False):
     
     # Test forward pass
     try:
-        test_output = combine_multiheads(model.predict(x_train_analysis[:1], verbose=0))
+        test_output = combine_multiheads(model.predict(x_train_analysis[:1], verbose=0), model=model)
         print(f"   Forward pass test: ✓ (output shape: {test_output.shape})")
     except Exception as e:
         print(f"   Forward pass test: ✗ ({e})")
     
     # Check model output range
     if debug:
-        sample_outputs = combine_multiheads(model.predict(x_train_analysis[:10], verbose=0))
+        sample_outputs = combine_multiheads(model.predict(x_train_analysis[:10], verbose=0), model=model)
         print(f"   Output range: [{sample_outputs.min():.3f}, {sample_outputs.max():.3f}]")
         print(f"   Output sum check: {np.sum(sample_outputs, axis=1)}")
 
@@ -383,7 +583,7 @@ def verify_model_predictions(model, x_sample, y_sample):
     # Use configured number of samples
     x_sample_analysis, y_sample_analysis = get_analysis_samples(x_sample, y_sample)
     
-    predictions = combine_multiheads(model.predict(x_sample_analysis, verbose=0))
+    predictions = combine_multiheads(model.predict(x_sample_analysis, verbose=0), model=model)
     
     print(f"   Input samples: {len(x_sample_analysis)}")
     print(f"   Predictions shape: {predictions.shape}")
@@ -441,7 +641,7 @@ def analyze_confusion_matrix(model, x_test, y_test, save_path=None):
     x_test_analysis, y_test_analysis = get_analysis_samples(x_test, y_test)
     
     # Get predictions
-    predictions = combine_multiheads(model.predict(x_test_analysis, verbose=0))
+    predictions = combine_multiheads(model.predict(x_test_analysis, verbose=0), model=model)
     pred_classes = np.argmax(predictions, axis=1)
     
     if len(y_test_analysis.shape) > 1:

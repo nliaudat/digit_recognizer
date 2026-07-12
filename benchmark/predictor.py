@@ -30,9 +30,11 @@ class TFLiteDigitPredictor:
     Multi-head detection is automatic when:
       - len(output_details) == 2
       - each output_detail shape[-1] == 10
-      - the model name contains 'v41'
+      - the model name contains 'v41' or 'v42'
 
     Can also be set explicitly via the `multi_head` attribute.
+    Head tensors are resolved by NAME (not position), so TFLite converter
+    reordering does not silently swap integer and decimal outputs.
     """
 
     def __init__(self, model_path):
@@ -58,16 +60,82 @@ class TFLiteDigitPredictor:
         for i, od in enumerate(self.output_details):
             logger.info(f"Output {i}: shape={od['shape']}, dtype={od['dtype']}")
 
-        # Auto-detect multi-head (v41)
-        is_v41 = 'v41' in Path(self.model_path).stem.lower()
-        has_two_10way = (
-            len(self.output_details) == 2
-            and self.output_details[0]['shape'][-1] == 10
-            and self.output_details[1]['shape'][-1] == 10
-        )
-        if is_v41 and has_two_10way:
+        # Auto-detect multi-head (v41 / v42); respect explicit self.multi_head if set
+        stem = Path(self.model_path).stem.lower()
+        is_multihead_model = self.multi_head if self.multi_head is not None else ('v41' in stem or 'v42' in stem)
+        has_two_10way = sum(
+            1 for od in self.output_details
+            if len(od['shape']) > 0 and od['shape'][-1] == 10
+        ) >= 2
+        if is_multihead_model and has_two_10way:
             self.multi_head = True
-            logger.info("🔀 Multi-head model detected (v41): combining tens*10+units")
+            self.idx_int = None  # resolved by name resolution below
+            self.idx_dec = None
+            self.q_int = None  # dequant params for integer/tens head
+            self.q_dec = None  # dequant params for decimal/units head
+            # Resolve head indices by NAME (substring match), not position.
+            # TFLite may decorate output names (e.g. 'serving_default_tens_probs:0')
+            # so we use substring matching rather than exact names.
+            # v41: tens_probs / units_probs ;  v42: integer_probs / decimal_probs
+            def _head_by_substr(head_map, substr):
+                """Return detail for output whose name contains substr, else None."""
+                for name, detail in head_map.items():
+                    name_str = name.decode('utf-8') if isinstance(name, bytes) else name
+                    if substr in name_str:
+                        return detail
+                return None
+
+            head_map = {od['name']: od for od in self.output_details}
+            det_int = _head_by_substr(head_map, 'integer_probs')
+            det_dec = _head_by_substr(head_map, 'decimal_probs')
+            if det_int is None or det_dec is None:
+                det_int = _head_by_substr(head_map, 'tens_probs')
+                det_dec = _head_by_substr(head_map, 'units_probs')
+            if det_int is None or det_dec is None:
+                found = [od['name'] for od in self.output_details]
+                raise ValueError(
+                    "Multi-head TFLite model detected but output names are not "
+                    "recognized. Expected 'tens_probs'+'units_probs' (v41) or "
+                    f"'integer_probs'+'decimal_probs' (v42). Found: {found}"
+                )
+            # Detect v42 12-output model: check for decimal_head_0_probs in output names
+            is_v42_12 = False
+            if det_int is not None and det_dec is not None and len(self.output_details) >= 12:
+                det_0 = _head_by_substr(head_map, 'decimal_head_0_probs')
+                det_9 = _head_by_substr(head_map, 'decimal_head_9_probs')
+                is_v42_12 = det_0 is not None and det_9 is not None
+
+            if is_v42_12:
+                # Store indices for all 10 individual decimal heads.
+                # The predictor reads integer_probs, then selects decimal_head_{int_pred}_probs.
+                self.idx_int = det_int['index']
+                _dtype_int = det_int['dtype']
+                self.q_int = det_int.get('quantization', (None, None)) if _dtype_int in [np.uint8, np.int8] else None
+                self.idx_dec = None  # not used; replaced by idx_dec_heads
+                self.q_dec = None
+                self.idx_dec_heads = []
+                self.q_dec_heads = []
+                for i in range(10):
+                    det_i = _head_by_substr(head_map, f'decimal_head_{i}_probs')
+                    if det_i is None:
+                        raise ValueError(
+                            f"v42 12-output model expected decimal_head_{i}_probs but "
+                            f"it was not found in output tensor names."
+                        )
+                    self.idx_dec_heads.append(det_i['index'])
+                    _dtype = det_i['dtype']
+                    self.q_dec_heads.append(det_i.get('quantization', (None, None)) if _dtype in [np.uint8, np.int8] else None)
+                logger.info(f"🔀 v42 12-output model: integer@{self.idx_int} + 10 decimal heads ({stem})")
+            else:
+                self.idx_int = det_int['index']
+                self.idx_dec = det_dec['index']
+                _dtype_int = det_int['dtype']
+                _dtype_dec = det_dec['dtype']
+                self.q_int = det_int.get('quantization', (None, None)) if _dtype_int in [np.uint8, np.int8] else None
+                self.q_dec = det_dec.get('quantization', (None, None)) if _dtype_dec in [np.uint8, np.int8] else None
+                self.idx_dec_heads = None
+                self.q_dec_heads = None
+                logger.info(f"🔀 Multi-head model detected: integer@{self.idx_int} decimal@{self.idx_dec} ({stem})")
         else:
             self.multi_head = False
 
@@ -90,13 +158,13 @@ class TFLiteDigitPredictor:
         # Robustly ensure input is scaled correctly based on what this specific model expects
         expected_dtype = self.input_details[0]['dtype']
         if expected_dtype == np.uint8:
-            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
-                input_data = (input_data * 255.0).astype(np.uint8)
+            if input_data.dtype == np.float32 and input_data.max() <= 1.01:
+                input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
             else:
                 input_data = input_data.astype(np.uint8)
         elif expected_dtype == np.int8:
-            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
-                input_data = (input_data * 255.0 - 128).astype(np.int8)
+            if input_data.dtype == np.float32 and input_data.max() <= 1.01:
+                input_data = np.clip(np.round(input_data * 255.0 - 128.0), -128, 127).astype(np.int8)
             elif input_data.dtype == np.uint8:
                 input_data = (input_data.astype(np.int32) - 128).astype(np.int8)
             else:
@@ -131,38 +199,47 @@ class TFLiteDigitPredictor:
             # Run inference
             self.interpreter.invoke()
 
-            # ── Multi-head (v41) path: read both head outputs ──
+            # ── Multi-head (v41/v42) path: read both head outputs ──
             if self.multi_head and len(self.output_details) >= 2:
-                # Read tens head (index 0) and units head (index 1)
-                tens_data = self.interpreter.get_tensor(self.output_details[0]['index'])
-                units_data = self.interpreter.get_tensor(self.output_details[1]['index'])
+                # Read integer head by resolved index (name-based, survives converter reordering)
+                int_data = self.interpreter.get_tensor(self.idx_int)
+                if self.q_int is not None and self.q_int[0] is not None and self.q_int[0] > 0.0:
+                    s, zp = self.q_int
+                    int_data = (int_data.astype(np.float32) - zp) * s
+                int_vec = int_data[0]
+                int_is_softmax = (np.isclose(np.sum(int_vec), 1.0, atol=0.02)
+                                  and np.all(int_vec >= -0.05) and np.all(int_vec <= 1.05))
+                if not int_is_softmax:
+                    int_vec = np.exp(int_vec - np.max(int_vec)) / np.sum(np.exp(int_vec - np.max(int_vec)))
+                int_pred = int(np.argmax(int_vec))
 
-                # Dequantize both if needed
-                if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
-                    s, zp = self.output_details[0]['quantization']
-                    tens_data = (tens_data.astype(np.float32) - zp) * s
-                if self.output_details[1]['dtype'] in [np.uint8, np.int8]:
-                    s, zp = self.output_details[1]['quantization']
-                    units_data = (units_data.astype(np.float32) - zp) * s
+                # Decimal: use individual heads for v42 12-output, marginal decimal_probs otherwise
+                if self.idx_dec_heads:
+                    # v42 12-output: select conditional decimal head
+                    dec_data = self.interpreter.get_tensor(self.idx_dec_heads[int_pred])
+                    q_dec = self.q_dec_heads[int_pred]
+                elif self.idx_dec is not None:
+                    dec_data = self.interpreter.get_tensor(self.idx_dec)
+                    q_dec = self.q_dec
+                else:
+                    # No dec head available — return error placeholder
+                    output_vector = np.zeros(100, dtype=np.float32)
+                    output_vector[int_pred * 10] = 1.0
+                    return int_pred * 10, 0.0, output_vector
 
-                tens_vec = tens_data[0]
-                units_vec = units_data[0]
+                if q_dec is not None and q_dec[0] is not None and q_dec[0] > 0.0:
+                    s, zp = q_dec
+                    dec_data = (dec_data.astype(np.float32) - zp) * s
+                dec_vec = dec_data[0]
+                dec_is_softmax = (np.isclose(np.sum(dec_vec), 1.0, atol=0.02)
+                                  and np.all(dec_vec >= -0.05) and np.all(dec_vec <= 1.05))
+                if not dec_is_softmax:
+                    dec_vec = np.exp(dec_vec - np.max(dec_vec)) / np.sum(np.exp(dec_vec - np.max(dec_vec)))
+                dec_pred = int(np.argmax(dec_vec))
 
-                # Softmax if logits — robust check matching single-head path
-                tens_is_softmax = (np.isclose(np.sum(tens_vec), 1.0, atol=0.02)
-                                  and np.all(tens_vec >= -0.05) and np.all(tens_vec <= 1.05))
-                if not tens_is_softmax:
-                    tens_vec = np.exp(tens_vec - np.max(tens_vec)) / np.sum(np.exp(tens_vec - np.max(tens_vec)))
-                units_is_softmax = (np.isclose(np.sum(units_vec), 1.0, atol=0.02)
-                                    and np.all(units_vec >= -0.05) and np.all(units_vec <= 1.05))
-                if not units_is_softmax:
-                    units_vec = np.exp(units_vec - np.max(units_vec)) / np.sum(np.exp(units_vec - np.max(units_vec)))
-
-                tens_pred = int(np.argmax(tens_vec))
-                units_pred = int(np.argmax(units_vec))
-                prediction = tens_pred * 10 + units_pred
-                # Combined confidence: geometric mean of both head confidences
-                confidence = float(np.sqrt(np.max(tens_vec) * np.max(units_vec)))
+                prediction = int_pred * 10 + dec_pred
+                # Combined confidence: min of both head confidences (bottleneck)
+                confidence = float(min(np.max(int_vec), np.max(dec_vec)))
                 output_vector = np.zeros(100, dtype=np.float32)
                 output_vector[prediction] = 1.0  # one-hot for the combined class
 
@@ -235,7 +312,7 @@ class TFLiteDigitPredictor:
         # feed it directly. If it expects int8, subtract 128.
         if expected_dtype == np.uint8:
             # Model accepts raw camera bytes
-            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+            if input_data.dtype == np.float32 and input_data.max() <= 1.01:
                 input_data = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
             elif input_data.dtype == np.int8:
                 # int8 [-128,127] → uint8 [0,255]  (modulo cast is wrong!)
@@ -248,7 +325,7 @@ class TFLiteDigitPredictor:
 
         elif expected_dtype == np.int8:
             # Model expects int8 [-128, 127] (ESP-DL path)
-            if input_data.dtype == np.float32 and input_data.max() <= 1.0:
+            if input_data.dtype == np.float32 and input_data.max() <= 1.01:
                 input_uint8 = np.clip(np.round(input_data * 255.0), 0, 255).astype(np.uint8)
             elif input_data.dtype == np.int8:
                 # int8 [-128,127] → uint8 [0,255]  (modulo cast is wrong!)
@@ -278,26 +355,41 @@ class TFLiteDigitPredictor:
             self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
             self.interpreter.invoke()
 
-            # ── Multi-head (v41) ESP32 path ──
+            # ── Multi-head (v41/v42) ESP32 path ──
             if self.multi_head and len(self.output_details) >= 2:
-                tens_data = self.interpreter.get_tensor(self.output_details[0]['index'])
-                units_data = self.interpreter.get_tensor(self.output_details[1]['index'])
-                if self.output_details[0]['dtype'] in [np.uint8, np.int8]:
-                    s, zp = self.output_details[0]['quantization']
-                    tens_data = (tens_data.astype(np.float32) - zp) * s
-                if self.output_details[1]['dtype'] in [np.uint8, np.int8]:
-                    s, zp = self.output_details[1]['quantization']
-                    units_data = (units_data.astype(np.float32) - zp) * s
-                tens_vec = tens_data[0]; units_vec = units_data[0]
-                tens_is_sm = np.isclose(np.sum(tens_vec), 1.0, atol=0.02) and np.all(tens_vec >= -0.05) and np.all(tens_vec <= 1.05)
-                if not tens_is_sm:
-                    tens_vec = np.exp(tens_vec - np.max(tens_vec)) / np.sum(np.exp(tens_vec - np.max(tens_vec)))
-                units_is_sm = np.isclose(np.sum(units_vec), 1.0, atol=0.02) and np.all(units_vec >= -0.05) and np.all(units_vec <= 1.05)
-                if not units_is_sm:
-                    units_vec = np.exp(units_vec - np.max(units_vec)) / np.sum(np.exp(units_vec - np.max(units_vec)))
-                tens_pred = int(np.argmax(tens_vec)); units_pred = int(np.argmax(units_vec))
-                prediction = tens_pred * 10 + units_pred
-                confidence = float(np.sqrt(np.max(tens_vec) * np.max(units_vec)))
+                int_data = self.interpreter.get_tensor(self.idx_int)
+                if self.q_int is not None and self.q_int[0] is not None and self.q_int[0] > 0.0:
+                    s, zp = self.q_int
+                    int_data = (int_data.astype(np.float32) - zp) * s
+                int_vec = int_data[0]
+                int_is_sm = np.isclose(np.sum(int_vec), 1.0, atol=0.02) and np.all(int_vec >= -0.05) and np.all(int_vec <= 1.05)
+                if not int_is_sm:
+                    int_vec = np.exp(int_vec - np.max(int_vec)) / np.sum(np.exp(int_vec - np.max(int_vec)))
+                int_pred = int(np.argmax(int_vec))
+
+                # Decimal: use individual heads for v42 12-output, marginal decimal_probs otherwise
+                if self.idx_dec_heads:
+                    dec_data = self.interpreter.get_tensor(self.idx_dec_heads[int_pred])
+                    q_dec = self.q_dec_heads[int_pred]
+                elif self.idx_dec is not None:
+                    dec_data = self.interpreter.get_tensor(self.idx_dec)
+                    q_dec = self.q_dec
+                else:
+                    output_vector = np.zeros(100, dtype=np.float32)
+                    output_vector[int_pred * 10] = 1.0
+                    return int_pred * 10, 0.0, output_vector
+
+                if q_dec is not None and q_dec[0] is not None and q_dec[0] > 0.0:
+                    s, zp = q_dec
+                    dec_data = (dec_data.astype(np.float32) - zp) * s
+                dec_vec = dec_data[0]
+                dec_is_sm = np.isclose(np.sum(dec_vec), 1.0, atol=0.02) and np.all(dec_vec >= -0.05) and np.all(dec_vec <= 1.05)
+                if not dec_is_sm:
+                    dec_vec = np.exp(dec_vec - np.max(dec_vec)) / np.sum(np.exp(dec_vec - np.max(dec_vec)))
+                dec_pred = int(np.argmax(dec_vec))
+
+                prediction = int_pred * 10 + dec_pred
+                confidence = float(min(np.max(int_vec), np.max(dec_vec)))
                 output_vector = np.zeros(100, dtype=np.float32)
                 output_vector[prediction] = 1.0
                 return prediction, confidence, output_vector

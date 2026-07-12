@@ -331,21 +331,39 @@ def create_callbacks(output_dir, tflite_manager, representative_data, total_epoc
             def on_epoch_end(self, epoch, logs=None):
                 if logs is None:
                     return
+                # Skip multi-head logic for single-head fallback (NB_CLASSES <= 10)
+                if len(self.model.outputs) <= 1:
+                    return
                 correct = 0
                 total = 0
                 # val_data is (x_val, y_val) arrays — predict on the whole set at once
                 x_val, y_val = self.val_data
                 preds = self.model.predict(x_val, verbose=0, batch_size=params.BATCH_SIZE)
-                joint = combine_multiheads(preds)
+                joint = combine_multiheads(preds, model=self.model)
                 if isinstance(joint, tf.Tensor):
                     joint = joint.numpy()
                 pred_cls = np.argmax(joint, axis=-1)
                 # Recombine dict labels to scalar 0-99
                 if isinstance(y_val, dict):
-                    y_true = np.squeeze(y_val['tens_probs']) * 10 + np.squeeze(y_val['units_probs'])
+                    # v41: tens_probs / units_probs ;  v42: integer_probs / decimal_probs
+                    if 'tens_probs' in y_val:
+                        y_true = np.squeeze(y_val['tens_probs']) * 10 + np.squeeze(y_val['units_probs'])
+                        y_true_int = np.squeeze(y_val['tens_probs'])
+                        y_true_dec = np.squeeze(y_val['units_probs'])
+                    else:
+                        y_true = np.squeeze(y_val['integer_probs']) * 10 + np.squeeze(y_val['decimal_probs'])
+                        y_true_int = np.squeeze(y_val['integer_probs'])
+                        y_true_dec = np.squeeze(y_val['decimal_probs'])
                 else:
                     y_true = np.squeeze(y_val)
+                    y_true_int = y_true // 10
+                    y_true_dec = y_true % 10
                 logs['val_accuracy'] = float(np.mean(pred_cls == y_true))
+                # Per-head accuracy for CSV logging
+                pred_int = np.argmax(preds[0], axis=-1)
+                pred_dec = np.argmax(preds[1], axis=-1)
+                logs['val_integer_acc'] = float(np.mean(pred_int == np.squeeze(y_true_int)))
+                logs['val_decimal_acc'] = float(np.mean(pred_dec == np.squeeze(y_true_dec)))
 
         _multihead_cb = CombinedAccuracyCallback(validation_data)
         callbacks.insert(0, _multihead_cb)

@@ -837,16 +837,26 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
             y_val_final = tf.keras.utils.to_categorical(y_val_raw, params.NB_CLASSES) 
             y_test_final = tf.keras.utils.to_categorical(y_test_raw, params.NB_CLASSES)
         elif is_multihead:
-            # Decompose 100-class labels into tens + units dicts
-            def _decompose_labels(y):
-                return {
-                    'tens_probs': y // 10,
-                    'units_probs': y % 10,
-                }
-            y_train_final = _decompose_labels(y_train_raw)
-            y_val_final = _decompose_labels(y_val_raw)
-            y_test_final = _decompose_labels(y_test_raw)
-            print("🔀 v41 multi-head: labels decomposed into tens_probs + units_probs")
+            if params.NB_CLASSES <= 10:
+                # Single-head fallback: use raw labels, not dict
+                y_train_final = y_train_raw.copy()
+                y_val_final = y_val_raw.copy()
+                y_test_final = y_test_raw.copy()
+            else:
+                # Decompose 100-class labels into head-specific dicts.
+                # Keys must match the model's output layer names.
+                keys = ('integer_probs', 'decimal_probs') if 'v42' in params.MODEL_ARCHITECTURE else ('tens_probs', 'units_probs')
+                def _decompose_labels(y):
+                    d = {keys[0]: y // 10, keys[1]: y % 10}
+                    # v42 also exports 10 individual decimal heads
+                    if 'v42' in params.MODEL_ARCHITECTURE:
+                        for i in range(10):
+                            d[f'decimal_head_{i}_probs'] = y % 10
+                    return d
+                y_train_final = _decompose_labels(y_train_raw)
+                y_val_final = _decompose_labels(y_val_raw)
+                y_test_final = _decompose_labels(y_test_raw)
+                print(f"🔀 {params.MODEL_ARCHITECTURE} multi-head: labels decomposed into {keys[0]} + {keys[1]}")
         else:
             y_train_final = y_train_raw.copy()
             y_val_final = y_val_raw.copy()
@@ -1097,16 +1107,32 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
                 verbose=0
             )
         else:
-            # Compute class weights to handle imbalanced datasets
+            # Compute class weights to handle imbalanced datasets.
+            # For multi-head models: compute per-head 10-class dicts
+            # (Keras applies separate weight dicts per output).
+            # For single-head: single dict matching label range.
             try:
-                unique_classes = np.unique(y_train_final)
-                weights = compute_class_weight(
-                    class_weight='balanced',
-                    classes=unique_classes,
-                    y=y_train_final
-                )
-                class_weight_dict = dict(zip(unique_classes, weights))
-                print(f"⚖️  Using class weights for {len(unique_classes)} classes (max ratio: {max(weights)/min(weights):.2f}x)")
+                if is_multihead and isinstance(y_train_final, dict):
+                    class_weight_dict = {}
+                    for key in y_train_final.keys():
+                        head_labels = y_train_final[key]
+                        unique_classes = np.unique(head_labels)
+                        weights = compute_class_weight(
+                            class_weight='balanced',
+                            classes=unique_classes,
+                            y=head_labels
+                        )
+                        class_weight_dict[key] = dict(zip(unique_classes, weights))
+                    print(f"⚖️  Using multi-head class weights for heads: {list(class_weight_dict.keys())}")
+                else:
+                    unique_classes = np.unique(y_train_final)
+                    weights = compute_class_weight(
+                        class_weight='balanced',
+                        classes=unique_classes,
+                        y=y_train_final
+                    )
+                    class_weight_dict = dict(zip(unique_classes, weights))
+                    print(f"⚖️  Using class weights for {len(unique_classes)} classes (max ratio: {max(weights)/min(weights):.2f}x)")
             except Exception as e:
                 print(f"⚠️  Could not compute class weights: {e}. Training without class weighting.")
                 class_weight_dict = None
@@ -1132,26 +1158,27 @@ def train_model(debug: bool = False, best_hps=None, no_cleanup: bool = False, fu
         print("\n📈 Evaluating models...")
         
         # Evaluate Keras model
-        if is_multihead:
-            # For multi-head models, compute combined accuracy manually
-            def _v41_combined_accuracy(model, x, y_orig):
-                """
-                y_orig: original integer labels (0-99)
-                Returns combined accuracy (0-1 scale) where model's argmax predictions
-                are combined as tens*10 + units and compared to y_orig.
-                """
-                preds = model.predict(x, verbose=0)
-                # preds is a list [tens_probs, units_probs]
-                tens_pred = tf.argmax(preds[0], axis=-1).numpy()
-                units_pred = tf.argmax(preds[1], axis=-1).numpy()
-                combined = tens_pred * 10 + units_pred
-                # Squeeze y_orig to ensure 1D comparison — prevents (N,) vs (N,1) broadcasting
-                return float(np.mean(combined == np.squeeze(y_orig)))
-
-            train_accuracy = _v41_combined_accuracy(model, x_train, y_train_raw)
-            val_accuracy = _v41_combined_accuracy(model, x_val, y_val_raw)
-            test_accuracy = _v41_combined_accuracy(model, x_test, y_test_raw)
-            print(f"✅ v41 Combined Accuracy (tens*10+units):")
+        if is_multihead and len(model.outputs) > 1:
+            # For multi-head models, compute combined accuracy manually.
+            # For v42, use _evaluate_keras_multihead which extracts individual decimal
+            # heads to avoid the marginal argmax issue.  For v41, use head0*10+head1.
+            is_v42 = 'v42' in params.MODEL_ARCHITECTURE
+            if is_v42:
+                from utils.train_analyse import _evaluate_keras_multihead
+                train_accuracy = _evaluate_keras_multihead(model, x_train, y_train_raw)
+                val_accuracy = _evaluate_keras_multihead(model, x_val, y_val_raw)
+                test_accuracy = _evaluate_keras_multihead(model, x_test, y_test_raw)
+            else:
+                def _combined_accuracy(model, x, y_orig):
+                    preds = model.predict(x, verbose=0)
+                    head0_pred = np.argmax(preds[0], axis=-1)
+                    head1_pred = np.argmax(preds[1], axis=-1)
+                    combined = head0_pred * 10 + head1_pred
+                    return float(np.mean(combined == np.squeeze(y_orig)))
+                train_accuracy = _combined_accuracy(model, x_train, y_train_raw)
+                val_accuracy = _combined_accuracy(model, x_val, y_val_raw)
+                test_accuracy = _combined_accuracy(model, x_test, y_test_raw)
+            print(f"✅ Multi-head Combined Accuracy:")
         else:
             train_accuracy = model.evaluate(x_train, y_train_final, verbose=0)[1]
             val_accuracy = model.evaluate(x_val, y_val_final, verbose=0)[1]

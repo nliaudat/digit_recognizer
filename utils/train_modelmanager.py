@@ -41,9 +41,21 @@ class TFLiteModelManager:
     #  Sanity check before conversion
     # -----------------------------------------------------------------
     def _first_tensor(self, x):
-        """For multi-head models (v41), combine tens and units heads into 100-class probabilities."""
-        if isinstance(x, (list, tuple)) and len(x) == 2:
-            return tf.reshape(x[0][:, :, tf.newaxis] * x[1][:, tf.newaxis, :], [-1, 100])
+        """For multi-head models (v41/v42), combine heads into 100-class probabilities."""
+        if isinstance(x, (list, tuple)):
+            if len(x) == 2:
+                return tf.reshape(x[0][:, :, tf.newaxis] * x[1][:, tf.newaxis, :], [-1, 100])
+            if len(x) == 12:
+                int_head = x[0]
+                dec_heads_list = x[2:12]
+                int_pred = tf.cast(tf.argmax(int_head, axis=-1), tf.int32)
+                stacked = tf.stack(dec_heads_list, axis=1)
+                batch_size = tf.shape(stacked)[0]
+                idx = tf.stack([tf.range(batch_size), int_pred], axis=1)
+                selected = tf.gather_nd(stacked, idx)
+                dec_pred = tf.cast(tf.argmax(selected, axis=-1), tf.int32)
+                combined = int_pred * 10 + dec_pred
+                return tf.one_hot(combined, 100, dtype=tf.float32)
         return x
 
     def verify_model_for_conversion(self, model: tf.keras.Model) -> bool:

@@ -674,36 +674,22 @@ class AdaptiveFocalLossController(tf.keras.callbacks.Callback):
                     target_loss.alpha.assign(np.ones(nb_classes, dtype=np.float32) * float(self.alpha))
                 
                 print(f"   ✅ Successfully updated γ to {new_gamma:.1f} (No model re-compile)")
+        elif isinstance(loss_obj, dict):
+            for name, head_loss in loss_obj.items():
+                if isinstance(head_loss, (DynamicSparseFocalLoss, DynamicFocalLoss)):
+                    head_loss.gamma.assign(float(new_gamma))
+                    # alpha can be a numpy array, tf tensor, or scalar — normalise to scalar first
+                    if isinstance(self.alpha, (list, tuple, np.ndarray)):
+                        alpha_scalar = float(np.mean(self.alpha))
+                    elif hasattr(self.alpha, "numpy"):
+                        alpha_scalar = float(tf.reduce_mean(self.alpha).numpy())
+                    else:
+                        alpha_scalar = float(self.alpha)
+                    head_loss.alpha.assign(tf.ones(10, dtype=tf.float32) * tf.cast(alpha_scalar, tf.float32))
+            print(f"   Updated all {len(loss_obj)} heads (gamma={new_gamma:.1f}, no recompile)")
         else:
             print(f"   ⚠️  Model loss is not a DynamicFocalLoss instance ({type(loss_obj)}).")
-            print("      Falling back to legacy recompile method (WARNING: may crash in Keras 3)")
-            
-            # Store old learning rate
-            if hasattr(self.model.optimizer.learning_rate, 'numpy'):
-                old_lr = self.model.optimizer.learning_rate.numpy()
-            else:
-                old_lr = float(self.model.optimizer.learning_rate)
-            
-            # Create new loss based on architecture
-            if params.MODEL_ARCHITECTURE == "original_haverland":
-                new_loss_fn = focal_loss(gamma=new_gamma, alpha=self.alpha)
-            else:
-                new_loss_fn = sparse_focal_loss(gamma=new_gamma, alpha=self.alpha)
-            
-            # Recompile
-            self.model.compile(
-                optimizer=self.model.optimizer,
-                loss=new_loss_fn,
-                metrics=['accuracy']
-            )
-            
-            # Restore learning rate
-            if hasattr(self.model.optimizer.learning_rate, 'assign'):
-                self.model.optimizer.learning_rate.assign(old_lr)
-            else:
-                self.model.optimizer.learning_rate = old_lr
-            
-            print(f"   ✅ Legacy recompile successful (γ={new_gamma:.1f})")
+            print(f"   Unsupported loss type: {type(loss_obj)} - skipping gamma update")
 
         # Update state (for ramp, current_gamma will be updated each epoch by _tick_gamma_ramp)
         if self.gamma_ramp_epochs == 0:
@@ -771,21 +757,26 @@ class IntelligentFocalLossController(AdaptiveFocalLossController):
         elif hasattr(self.val_ds, "__len__"):
             data_len = len(self.val_ds)
         
+        from models import combine_multiheads
         with tqdm(total=data_len, desc="Evaluating classes", leave=False) as pbar:
             for x_batch, y_batch in self.val_ds:
                 preds = self.model(x_batch, training=False)
-                # Multi-head models (v41) — combine tens+units into joint 100-class
-                if isinstance(preds, (list, tuple)) and len(preds) == 2:
-                    tens = preds[0].numpy()
-                    units = preds[1].numpy()
-                    preds = (tens[..., :, None] * units[..., None, :]).reshape(-1, 100)
+                # Multi-head models (v41/v42) — use combine_multiheads (handles both)
+                if isinstance(preds, (list, tuple)) and len(preds) >= 2:
+                    preds = combine_multiheads(preds, model=self.model)
+                    if hasattr(preds, 'numpy'):
+                        preds = preds.numpy()
                 else:
                     preds = preds.numpy()
                 y_pred_all.append(np.argmax(preds, axis=-1))
-                # v41 dict labels: recombine to scalar 0-99
+                # v41/v42 dict labels: recombine to scalar 0-99
                 if isinstance(y_batch, dict) and 'tens_probs' in y_batch:
                     t = y_batch['tens_probs'].numpy().flatten()
                     u = y_batch['units_probs'].numpy().flatten()
+                    y_true_all.append(t * 10 + u)
+                elif isinstance(y_batch, dict) and 'integer_probs' in y_batch:
+                    t = y_batch['integer_probs'].numpy().flatten()
+                    u = y_batch['decimal_probs'].numpy().flatten()
                     y_true_all.append(t * 10 + u)
                 elif len(y_batch.shape) > 1 and y_batch.shape[-1] > 1:
                     y_true_all.append(np.argmax(y_batch, axis=-1))
@@ -944,23 +935,28 @@ class PerClassAccuracyCallback(tf.keras.callbacks.Callback):
         elif hasattr(self.val_ds, "__len__"):
             data_len = len(self.val_ds)
 
+        from models import combine_multiheads
         with tqdm(total=data_len, desc="Validation Report", leave=False) as pbar:
             for x_batch, y_batch in self.val_ds:
                 preds = self.model(x_batch, training=False)
-                # Multi-head models (v41) — combine tens+units into joint 100-class
-                if isinstance(preds, (list, tuple)) and len(preds) == 2:
-                    tens = preds[0].numpy()
-                    units = preds[1].numpy()
-                    # Outer product: (N, 10, 10) → (N, 100)
-                    preds = (tens[..., :, None] * units[..., None, :]).reshape(-1, 100)
+                # Multi-head models (v41/v42) — use combine_multiheads (handles both)
+                if isinstance(preds, (list, tuple)) and len(preds) >= 2:
+                    preds = combine_multiheads(preds, model=self.model)
+                    if hasattr(preds, 'numpy'):
+                        preds = preds.numpy()
                 else:
                     preds = preds.numpy()
                 y_pred_all.append(np.argmax(preds, axis=-1))
 
-                # v41 dict labels: recombine tens*10+units to scalar 0-99
+                # v41/v42 dict labels: recombine head0*10+head1 to scalar 0-99
                 if isinstance(y_batch, dict) and 'tens_probs' in y_batch:
                     t = y_batch['tens_probs'].numpy().flatten()
                     u = y_batch['units_probs'].numpy().flatten()
+                    y_batch_flat = t * 10 + u
+                    y_true_all.append(y_batch_flat)
+                elif isinstance(y_batch, dict) and 'integer_probs' in y_batch:
+                    t = y_batch['integer_probs'].numpy().flatten()
+                    u = y_batch['decimal_probs'].numpy().flatten()
                     y_batch_flat = t * 10 + u
                     y_true_all.append(y_batch_flat)
                 # Handle both sparse and one-hot labels
