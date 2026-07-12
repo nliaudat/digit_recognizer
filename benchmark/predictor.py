@@ -91,16 +91,21 @@ class TFLiteDigitPredictor:
             if det_int is None or det_dec is None:
                 det_int = _head_by_substr(head_map, 'tens_probs')
                 det_dec = _head_by_substr(head_map, 'units_probs')
-            if det_int is None or det_dec is None:
-                found = [od['name'] for od in self.output_details]
-                raise ValueError(
-                    "Multi-head TFLite model detected but output names are not "
-                    "recognized. Expected 'tens_probs'+'units_probs' (v41) or "
-                    f"'integer_probs'+'decimal_probs' (v42). Found: {found}"
-                )
-            # Detect v42 12-output model: check for decimal_head_0_probs in output names
             is_v42_12 = False
-            if det_int is not None and det_dec is not None and len(self.output_details) >= 12:
+            if det_int is None or det_dec is None:
+                # Fallback: generic names (e.g. Identity, Identity_1) from converter.
+                # Use positional: output[0] = integer/tens, output[1] = decimal/units.
+                found = [od['name'] for od in self.output_details]
+                logger.warning(
+                    f"Multi-head TFLite model has unrecognized output names: {found}. "
+                    "Using positional fallback (output 0 = integer, output 1 = decimal)."
+                )
+                det_int = self.output_details[0]
+                det_dec = self.output_details[1]
+                # Generic names → cannot detect v42 12-output, skip that path.
+                is_v42_12 = False
+            elif len(self.output_details) >= 12:
+                # v42 12-output detection: check for decimal_head_0_probs in output names
                 det_0 = _head_by_substr(head_map, 'decimal_head_0_probs')
                 det_9 = _head_by_substr(head_map, 'decimal_head_9_probs')
                 is_v42_12 = det_0 is not None and det_9 is not None
