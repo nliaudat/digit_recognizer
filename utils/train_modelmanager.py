@@ -42,8 +42,11 @@ class TFLiteModelManager:
     # -----------------------------------------------------------------
     def _first_tensor(self, x):
         """For multi-head models (v41), combine tens and units heads into 100-class probabilities."""
-        if isinstance(x, (list, tuple)) and len(x) == 2:
-            return tf.reshape(x[0][:, :, tf.newaxis] * x[1][:, tf.newaxis, :], [-1, 100])
+        if isinstance(x, (list, tuple)):
+            if len(x) == 2:
+                return tf.reshape(x[0][:, :, tf.newaxis] * x[1][:, tf.newaxis, :], [-1, 100])
+            # v42 12-output: return first tensor for validation
+            return x[0] if len(x) > 0 else x
         return x
 
     def verify_model_for_conversion(self, model: tf.keras.Model) -> bool:
