@@ -84,6 +84,7 @@ if "DIGIT_INPUT_CHANNELS" not in os.environ:
     os.environ["DIGIT_INPUT_CHANNELS"] = "1"
 
 import config as params
+import config.distillation as dist_cfg
 from config.validation import validate_full_config
 from utils.train_distill_helper import (
     STUDENTS, TEACHERS, load_distillation_data, run_distillation_pipeline,
@@ -211,21 +212,32 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Weights for each teacher in the ensemble"
     )
+    parser.add_argument(
+        "--auto-teachers",
+        action="store_true",
+        default=None,
+        help="Auto-discover all available teachers from exported_models/ + weight proportionally by Float32_Accuracy"
+    )
+    parser.add_argument(
+        "--no-auto-teachers",
+        action="store_true",
+        help="Disable auto-teacher discovery"
+    )
 
     # ── Distillation ───────────────────────────────────────────────────────
     parser.add_argument(
         "--epochs",
         type=int,
-        default=60,
+        default=dist_cfg.DISTILLATION_EPOCHS,
         metavar="N",
-        help="Student distillation epochs (default: 60)"
+        help=f"Student distillation epochs (default: {dist_cfg.DISTILLATION_EPOCHS})"
     )
     parser.add_argument(
         "--lr",
         type=float,
-        default=1e-3,
+        default=dist_cfg.DISTILLATION_LEARNING_RATE,
         metavar="LR",
-        help="Student learning rate (default: 0.001)"
+        help=f"Student learning rate (default: {dist_cfg.DISTILLATION_LEARNING_RATE})"
     )
     parser.add_argument(
         "--temperature",
@@ -256,13 +268,22 @@ def parse_args() -> argparse.Namespace:
         help="Use ProgressiveDistiller (dynamic temperature & alpha)"
     )
 
+    # ── exclude self-distillation ──────────────────────────────────────────
+    parser.add_argument(
+        "--exclude-self",
+        action="store_true",
+        default=False,
+        help="Exclude the student's own frozen checkpoint from the teacher ensemble "
+             "(self-distillation is enabled by default)"
+    )
+
     # ── shared / infrastructure ────────────────────────────────────────────
     parser.add_argument(
         "--batch",
         type=int,
-        default=32,
+        default=dist_cfg.DISTILLATION_BATCH_SIZE,
         metavar="B",
-        help="Batch size for both teacher and student training (default: 32)"
+        help=f"Batch size for both teacher and student training (default: {dist_cfg.DISTILLATION_BATCH_SIZE})"
     )
     parser.add_argument(
         "--checkpoint-dir",
@@ -286,12 +307,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tqt",
         action="store_true",
-        default=None,
-        help="Enable TQT/ESP-DL quantization pipeline for the student"
+        default=True,
+        help="Enable TQT/ESP-DL quantization pipeline for the student (default: enabled)"
     )
     parser.add_argument(
         "--no-tqt",
-        action="store_true",
+        action="store_false",
+        dest="tqt",
         help="Disable TQT/ESP-DL quantization pipeline for the student"
     )
     parser.add_argument(
@@ -403,12 +425,23 @@ def main() -> None:
     export_quant  = not args.no_quantize
 
     # Quantization overrides
+    # ── Auto-teachers resolution ───────────────────────────────────────────
+    # --auto-teachers/--no-auto-teachers override; default is True when no
+    # explicit --load-teachers is given.
+    if args.no_auto_teachers:
+        auto_teachers = False
+    elif args.auto_teachers is not None:
+        auto_teachers = True
+    else:
+        # Default: enable auto-discovery when no explicit paths provided
+        auto_teachers = args.load_teachers is None
+
     if args.tqt:
         params.USE_TQT_PIPELINE = True
     
     if args.device:
         params.TQT_COLLECTING_DEVICE = args.device
-    if args.no_tqt:
+    if not args.tqt:
         params.USE_TQT_PIPELINE = False
 
     logger.info("=" * 60)
@@ -496,6 +529,8 @@ def main() -> None:
             export_quantized=export_quant,
             use_tqt=params.USE_TQT_PIPELINE,
             target_hardware=args.target_hardware,
+            exclude_self=args.exclude_self,
+            auto_teachers=auto_teachers,
         )
 
     else:  # "all"
@@ -523,6 +558,8 @@ def main() -> None:
             export_quantized=export_quant,
             use_tqt=params.USE_TQT_PIPELINE,
             target_hardware=args.target_hardware,
+            exclude_self=args.exclude_self,
+            auto_teachers=auto_teachers,
         )
 
         logger.info("\n" + "=" * 60)

@@ -50,9 +50,9 @@ from utils.augmentation import (
 )
 from utils.distiller import (
     DistillationProgressCallback, Distiller, MixedInputDistiller,
-    ProgressiveDistiller
+    ProgressiveDistiller, AdaptiveEnsembleDistiller
 )
-from utils.ensemble_teacher import EnsembleTeacher
+from utils.ensemble_teacher import EnsembleTeacher, AdaptiveEnsembleTeacher
 from utils.export_onnx import export_keras_to_onnx
 from utils.losses import (
     DynamicFocalLoss, DynamicSparseFocalLoss, focal_loss, sparse_focal_loss
@@ -300,6 +300,7 @@ def train_student_distillation(
     use_progressive: bool = False,
     checkpoint_dir: str = "checkpoints",
     student_checkpoint: Optional[str] = None,
+    adaptive_teacher: Optional[AdaptiveEnsembleTeacher] = None,
 ) -> Tuple[Distiller, Dict]:
     """
     Train a student model via knowledge distillation from a frozen teacher.
@@ -373,69 +374,81 @@ def train_student_distillation(
 
     # ── Build distiller ────────────────────────────────────────────────────
     
-    # Check for channel mismatch (e.g. Grayscale student, RGB teacher)
-    teacher_channels = teacher.input_shape[-1]
-    student_channels = student.input_shape[-1]
-    
-    teacher_input_fn = None
-    if student_channels == 1 and teacher_channels == 3:
-        logger.info("Detected mismatched channels: Grayscale student -> RGB teacher. Using MixedInputDistiller.")
-        teacher_input_fn = lambda x: tf.image.grayscale_to_rgb(x)
-    
-    if use_progressive:
-        # Derive final values from config (config/distillation.py).
-        progressive_final_temp = max(
-            dist_cfg.PROGRESSIVE_MIN_FINAL_TEMP,
-            temperature * dist_cfg.PROGRESSIVE_FINAL_TEMP_RATIO
+    # If AdaptiveEnsembleTeacher was passed, use AdaptiveEnsembleDistiller
+    if adaptive_teacher is not None:
+        logger.info("🎯 Using AdaptiveEnsembleDistiller for training...")
+        distiller = AdaptiveEnsembleDistiller(
+            student=student,
+            adaptive_teacher=adaptive_teacher,
+            mode=mode,
+            alpha=alpha,
         )
-        progressive_final_alpha = min(
-            dist_cfg.PROGRESSIVE_MAX_FINAL_ALPHA,
-            alpha + dist_cfg.PROGRESSIVE_FINAL_ALPHA_SHIFT
-        )
-
-        if teacher_input_fn:
-            logger.warning("ProgressiveDistiller does not natively support MixedInputDistiller logic yet. Using standard MixedInputDistiller.")
-            distiller = MixedInputDistiller(
-                student=student,
-                teacher=teacher,
-                teacher_input_fn=teacher_input_fn,
-                temperature=temperature,
-                alpha=alpha,
-                mode=mode,
-            )
-        else:
-            logger.info(
-                f"ProgressiveDistiller: initial T={temperature} α={alpha} "
-                f"→ final T={progressive_final_temp} α={progressive_final_alpha}"
-            )
-            distiller = ProgressiveDistiller(
-                student=student,
-                teacher=teacher,
-                initial_temperature=temperature,
-                final_temperature=progressive_final_temp,
-                initial_alpha=alpha,
-                final_alpha=progressive_final_alpha,
-                total_epochs=epochs,
-                mode=mode,
-            )
+        distiller.set_total_epochs(epochs)
+        logger.info(f"   total_epochs={epochs} (for self-teacher weight ramp)")
     else:
-        if teacher_input_fn:
-            distiller = MixedInputDistiller(
-                student=student,
-                teacher=teacher,
-                teacher_input_fn=teacher_input_fn,
-                temperature=temperature,
-                alpha=alpha,
-                mode=mode,
+        # Check for channel mismatch (e.g. Grayscale student, RGB teacher)
+        teacher_channels = teacher.input_shape[-1]
+        student_channels = student.input_shape[-1]
+        
+        teacher_input_fn = None
+        if student_channels == 1 and teacher_channels == 3:
+            logger.info("Detected mismatched channels: Grayscale student -> RGB teacher. Using MixedInputDistiller.")
+            teacher_input_fn = lambda x: tf.image.grayscale_to_rgb(x)
+        
+        if use_progressive:
+            # Derive final values from config (config/distillation.py).
+            progressive_final_temp = max(
+                dist_cfg.PROGRESSIVE_MIN_FINAL_TEMP,
+                temperature * dist_cfg.PROGRESSIVE_FINAL_TEMP_RATIO
             )
+            progressive_final_alpha = min(
+                dist_cfg.PROGRESSIVE_MAX_FINAL_ALPHA,
+                alpha + dist_cfg.PROGRESSIVE_FINAL_ALPHA_SHIFT
+            )
+
+            if teacher_input_fn:
+                logger.warning("ProgressiveDistiller does not natively support MixedInputDistiller logic yet. Using standard MixedInputDistiller.")
+                distiller = MixedInputDistiller(
+                    student=student,
+                    teacher=teacher,
+                    teacher_input_fn=teacher_input_fn,
+                    temperature=temperature,
+                    alpha=alpha,
+                    mode=mode,
+                )
+            else:
+                logger.info(
+                    f"ProgressiveDistiller: initial T={temperature} α={alpha} "
+                    f"→ final T={progressive_final_temp} α={progressive_final_alpha}"
+                )
+                distiller = ProgressiveDistiller(
+                    student=student,
+                    teacher=teacher,
+                    initial_temperature=temperature,
+                    final_temperature=progressive_final_temp,
+                    initial_alpha=alpha,
+                    final_alpha=progressive_final_alpha,
+                    total_epochs=epochs,
+                    mode=mode,
+                )
         else:
-            distiller = Distiller(
-                student=student,
-                teacher=teacher,
-                temperature=temperature,
-                alpha=alpha,
-                mode=mode,
-            )
+            if teacher_input_fn:
+                distiller = MixedInputDistiller(
+                    student=student,
+                    teacher=teacher,
+                    teacher_input_fn=teacher_input_fn,
+                    temperature=temperature,
+                    alpha=alpha,
+                    mode=mode,
+                )
+            else:
+                distiller = Distiller(
+                    student=student,
+                    teacher=teacher,
+                    temperature=temperature,
+                    alpha=alpha,
+                    mode=mode,
+                )
 
     # Use optimizer from config (config/models.py OPTIMIZER_TYPE)
     lr = learning_rate
@@ -575,6 +588,142 @@ def train_student_distillation(
 
 
 # ---------------------------------------------------------------------------
+# Auto-discover teachers from exported_models/ + model_comparison.csv
+# ---------------------------------------------------------------------------
+
+def _parse_model_name(dirname: str) -> str:
+    """Extract model name from a directory like
+    ``digit_recognizer_v37_teacher_10cls_RGB_TQT_SOFTMAX_0709_1625`` → ``v37_teacher``
+    """
+    # Strip 'digit_recognizer_' prefix
+    name = dirname
+    if name.startswith("digit_recognizer_"):
+        name = name[len("digit_recognizer_"):]
+    # The model name ends at the first _<N>cls_ pattern
+    m = re.match(r"^(.+?)_\d+cls_", name)
+    if m:
+        return m.group(1)
+    return name
+
+
+def discover_teachers(
+    num_classes: int,
+    color_mode: str,
+    exclude_model: str = "",
+) -> Tuple[List[str], List[str], List[float]]:
+    """Auto-discover teacher .keras checkpoints + proportional accuracy weights
+    from ``exported_models/{n}cls_{color}/`` and its ``model_comparison.csv``.
+
+    Returns:
+        (teacher_names, checkpoint_paths, teacher_weights)
+    """
+    color_label = color_mode.upper()
+    models_dir = os.path.join("exported_models", f"{num_classes}cls_{color_label}")
+    csv_path = os.path.join(models_dir, "test_results", "model_comparison.csv")
+
+    # ── 1. Find all directories with best_model.keras ──────────────────────
+    candidates: Dict[str, str] = {}  # dirname → best_model.keras path
+    if os.path.isdir(models_dir):
+        for entry in os.listdir(models_dir):
+            full = os.path.join(models_dir, entry)
+            ckpt = os.path.join(full, "best_model.keras")
+            if os.path.isdir(full) and os.path.isfile(ckpt):
+                # Exclude student model itself
+                if exclude_model and exclude_model in entry:
+                    continue
+                candidates[entry] = ckpt
+
+    if not candidates:
+        logger.warning("No teacher candidates found in %s", models_dir)
+        return [], [], []
+
+    # ── 2. Read model_comparison.csv for Float32_Accuracy ──────────────────
+    acc_map: Dict[str, float] = {}  # dirname → Float32_Accuracy
+    if os.path.isfile(csv_path):
+        import csv
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                dname = row.get("Directory", "").strip()
+                try:
+                    acc = float(row.get("Float32_Accuracy", "0"))
+                except ValueError:
+                    acc = 0.0
+                if dname:
+                    # The CSV's Directory column is the folder name (no path prefix)
+                    acc_map[dname] = max(acc_map.get(dname, 0.0), acc)
+
+    # ── 3. Look up student's own baseline accuracy from the CSV ────────────
+    student_acc: Optional[float] = None
+    if exclude_model and os.path.isfile(csv_path):
+        import csv
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                dname = row.get("Directory", "").strip()
+                try:
+                    acc = float(row.get("Float32_Accuracy", "0"))
+                except ValueError:
+                    acc = 0.0
+                if dname and _parse_model_name(dname) == exclude_model and acc > 0:
+                    if student_acc is None or acc > student_acc:
+                        student_acc = acc
+
+    # ── 4. Filter candidates: only keep teachers better than the student ───
+    margin = getattr(dist_cfg, 'AUTO_TEACHER_MIN_ACCURACY_MARGIN', 0.001)
+    min_threshold = (student_acc + margin) if student_acc is not None else 0.0
+
+    raw: List[Tuple[float, str, str]] = []  # (acc, dirname, ckpt_path)
+    for dname, ckpt_path in candidates.items():
+        acc = acc_map.get(dname, 0.0)
+        if acc <= 0:
+            logger.debug("  Skipping %s (no accuracy in CSV or acc=0)", dname)
+            continue
+        if min_threshold > 0 and acc < min_threshold:
+            logger.info("  Skipping %s (acc=%.4f < threshold %.4f)", dname, acc, min_threshold)
+            continue
+        raw.append((acc, dname, ckpt_path))
+
+    if not raw:
+        logger.warning("No teachers with positive accuracy found in the CSV.")
+        return [], [], []
+
+    # Dedup by parsed model name — keep highest accuracy per model
+    best_by_model: Dict[str, Tuple[float, str, str]] = {}
+    for acc, dname, ckpt in raw:
+        mname = _parse_model_name(dname)
+        if mname not in best_by_model or acc > best_by_model[mname][0]:
+            best_by_model[mname] = (acc, dname, ckpt)
+
+    scored = list(best_by_model.values())
+    scored.sort(key=lambda t: t[0], reverse=True)
+
+    total_acc = sum(t[0] for t in scored)
+    teacher_names: List[str] = []
+    checkpoint_paths: List[str] = []
+    teacher_weights: List[float] = []
+
+    logger.info("─" * 60)
+    logger.info("📡  Auto-discovered teachers (filtered + dedup'd, weighted by Float32_Accuracy)")
+    logger.info("  Student baseline: %s (acc=%.4f, threshold=%.4f)",
+                exclude_model or "?",
+                student_acc if student_acc is not None else 0.0,
+                min_threshold)
+    logger.info("─" * 60)
+    for acc, dname, ckpt in scored:
+        model_name = _parse_model_name(dname)
+        weight = acc / total_acc
+        teacher_names.append(model_name)
+        checkpoint_paths.append(ckpt)
+        teacher_weights.append(round(weight, 6))
+        logger.info("  %-20s  acc=%.4f  weight=%.6f  →  %s", model_name, acc, weight, dname)
+    logger.info("  (sum weight = %.4f)", sum(teacher_weights))
+    logger.info("─" * 60)
+
+    return teacher_names, checkpoint_paths, teacher_weights
+
+
+# ---------------------------------------------------------------------------
 # Full distillation pipeline
 # ---------------------------------------------------------------------------
 
@@ -606,6 +755,8 @@ def run_distillation_pipeline(
     export_quantized: bool = True,
     use_tqt: bool = False,
     target_hardware: str = "esp32",
+    auto_teachers: bool = False,
+    exclude_self: bool = False,
 ) -> Dict[str, Any]:
     """
     End-to-end distillation pipeline.
@@ -620,6 +771,44 @@ def run_distillation_pipeline(
     Returns:
         results dict with teacher + student metrics and paths.
     """
+    # ── Auto-discover teachers (if enabled and no explicit paths given) ────
+    if auto_teachers and not teacher_checkpoints:
+        # Exclude student's own model from discovery ONLY if --exclude-self is set
+        _exclude = student_variant if exclude_self else ""
+        discovered_names, discovered_ckpts, discovered_weights = discover_teachers(
+            num_classes=num_classes,
+            color_mode=color_mode,
+            exclude_model=_exclude,
+        )
+        if discovered_names:
+            teacher_types = discovered_names
+            teacher_checkpoints = discovered_ckpts
+            teacher_weights = discovered_weights
+            logger.info("Using auto-discovered teachers with proportional accuracy weights.")
+            
+            # If self-distillation is enabled, look for student's own checkpoint
+            if not exclude_self and student_variant not in discovered_names:
+                try:
+                    from utils.retrain_with_teacher import find_best_checkpoint
+                    student_ckpt = find_best_checkpoint(student_variant, num_classes, color_mode)
+                    if student_ckpt and os.path.exists(student_ckpt):
+                        teacher_types = list(discovered_names) + [student_variant]
+                        teacher_checkpoints = list(discovered_ckpts) + [student_ckpt]
+                        # Weight proportional to its accuracy (0.5 fallback if CSV missing)
+                        self_weight = 0.5
+                        teacher_weights = list(discovered_weights) + [self_weight]
+                        logger.info(f"   + Added {student_variant} as self-teacher (checkpoint: {student_ckpt})")
+                except Exception:
+                    pass
+            
+            # Refresh accuracy weights proportionally
+            if teacher_weights:
+                total_w = sum(teacher_weights)
+                if total_w > 0:
+                    teacher_weights = [w / total_w for w in teacher_weights]
+        else:
+            logger.warning("auto_teachers enabled but no teachers found — falling back to --teacher list.")
+
     # ── Output directory ───────────────────────────────────────────────────
     teacher_type_str = "+".join(teacher_types)
 
@@ -673,6 +862,11 @@ def run_distillation_pipeline(
 
     loaded_teachers = []
     
+    # Track per-teacher accuracies for AdaptiveEnsembleTeacher
+    teacher_accuracy_list: List[float] = []
+    # Detect if one of the teachers matches the student (self-distillation)
+    self_teacher_idx: Optional[int] = None
+    
     # Flags and caching for dataset loading
     teacher_data_loaded = False
     x_train_teacher, y_train_teacher, x_val_teacher, y_val_teacher = None, None, None, None
@@ -725,8 +919,43 @@ def run_distillation_pipeline(
         t_model = freeze_teacher_model(t_model)
         loaded_teachers.append(t_model)
 
+        # ── Check if this teacher matches the student (self-distillation) ──
+        if t_type == student_variant or student_variant in t_type or t_type in student_variant:
+            if self_teacher_idx is None:
+                self_teacher_idx = len(loaded_teachers) - 1
+                logger.info(f"🔁 Self-distillation detected: teacher {t_type} (idx={self_teacher_idx}) matches student {student_variant}")
+            else:
+                logger.info(f"  (duplicate self-teacher match for {t_type}, keeping first at idx={self_teacher_idx})")
+
+        # ── Track accuracy ──────────────────────────────────────────────────
+        try:
+            preds = t_model.predict(x_test[:500], verbose=0)
+            acc = float(np.mean(np.argmax(preds, axis=1) == y_test[:500]))
+            teacher_accuracy_list.append(acc)
+            logger.info(f"  Teacher {t_type} approx accuracy: {acc:.4f}")
+        except Exception:
+            # Fallback: proportional weight from CSV weights
+            if teacher_weights and i < len(teacher_weights):
+                teacher_accuracy_list.append(float(teacher_weights[i]))
+            else:
+                teacher_accuracy_list.append(0.5)
+                logger.warning(f"  Could not evaluate teacher {t_type} accuracy, using 0.5 fallback")
+
     if len(loaded_teachers) > 1:
-        teacher = EnsembleTeacher(loaded_teachers, teacher_weights=teacher_weights)
+        adaptive = dist_cfg.ENSEMBLE_PER_TEACHER_TEMPERATURE
+        if adaptive:
+            logger.info("🎯 Using AdaptiveEnsembleTeacher with per-teacher temperature scaling...")
+            # --temperature is used as the base temperature; AdaptiveEnsembleTeacher
+            # uses config defaults unless explicitly passed.
+            teacher = AdaptiveEnsembleTeacher(
+                teachers=loaded_teachers,
+                teacher_accuracies=teacher_accuracy_list,
+                teacher_weights=teacher_weights,
+                self_teacher_idx=self_teacher_idx,
+                temperature=temperature,
+            )
+        else:
+            teacher = EnsembleTeacher(loaded_teachers, teacher_weights=teacher_weights)
         teacher_size = sum(get_model_size_kb(t) for t in loaded_teachers)
     else:
         teacher = loaded_teachers[0]
@@ -781,7 +1010,31 @@ def run_distillation_pipeline(
     teacher_metrics = evaluate_distilled_model(teacher, (x_test, y_test))
     logger.info(f"Teacher test accuracy: {teacher_metrics['accuracy']:.4f}")
 
+    # ── Teacher summary log (before training starts) ──────────────────────
+    logger.info("")
+    logger.info("─" * 70)
+    logger.info("🎯  Teachers selected for distillation:")
+    logger.info("─" * 70)
+    logger.info(f"  {'#':>2}  {'Teacher':<22} {'Acc':>8} {'Weight':>8} {'T':>6}  {'Note'}")
+    logger.info("  " + "─" * 66)
+    for idx, t_type in enumerate(teacher_types):
+        acc = teacher_accuracy_list[idx] if idx < len(teacher_accuracy_list) else 0.0
+        w = teacher_weights[idx] if teacher_weights and idx < len(teacher_weights) else 0.0
+        # Estimate per-teacher temperature (same logic as AdaptiveEnsembleTeacher)
+        if isinstance(teacher, AdaptiveEnsembleTeacher):
+            t_val = teacher._teacher_temperatures[idx] if hasattr(teacher, '_teacher_temperatures') else 0.0
+        else:
+            t_val = temperature  # fallback: user-specified T
+        tag = " [SELF]" if (self_teacher_idx is not None and idx == self_teacher_idx) else ""
+        logger.info(f"  {idx:>2}  {t_type:<22} {acc:>8.4f} {w:>8.4f} {t_val:>6.2f}{tag}")
+    logger.info("─" * 70)
+    logger.info("")
+
     # ── 3. Distill student ────────────────────────────────────────────────
+    adaptive_teacher = teacher if isinstance(teacher, AdaptiveEnsembleTeacher) else None
+    if adaptive_teacher:
+        logger.info("  (AdaptiveEnsembleTeacher detected — will use per-teacher T + self-distillation)")
+        
     distiller, hist = train_student_distillation(
         teacher=teacher,
         student_variant=student_variant,
@@ -800,6 +1053,7 @@ def run_distillation_pipeline(
         use_progressive=use_progressive,
         checkpoint_dir=actual_checkpoint_dir,
         student_checkpoint=student_checkpoint,
+        adaptive_teacher=adaptive_teacher,
     )
 
     student = distiller.get_student()

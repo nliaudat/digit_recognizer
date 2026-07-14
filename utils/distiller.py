@@ -14,10 +14,11 @@ EnsembleDistiller – weighted combination of multiple teachers.
 
 import tensorflow as tf
 import numpy as np
-from typing import Optional, Callable, Dict, Any, Tuple, Union
+from typing import Optional, Callable, Dict, Any, Tuple, Union, List
 import logging
 import config as params
 import config.distillation as dist_cfg
+from utils.ensemble_teacher import AdaptiveEnsembleTeacher
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -492,6 +493,126 @@ class Distiller(tf.keras.Model):
             'mode': self.mode,
             'use_attention_transfer': self.use_attention_transfer,
             'attention_layer_names': self.attention_layer_names,
+        })
+        return config
+
+
+class AdaptiveEnsembleDistiller(Distiller):
+    """
+    Distillation from an AdaptiveEnsembleTeacher with per-teacher temperature
+    scaling + stop_gradient self-distillation.
+
+    This distiller drives the training progress signal into the
+    AdaptiveEnsembleTeacher so it can compute the self-teacher weight ramp.
+
+    All tunable values live in ``config/distillation.py``.
+    """
+
+    def __init__(
+        self,
+        student: tf.keras.Model,
+        adaptive_teacher: AdaptiveEnsembleTeacher,
+        mode: str = dist_cfg.DISTILLATION_MODE,
+        alpha: float = dist_cfg.DISTILLATION_ALPHA,
+        **kwargs
+    ):
+        # Set temperature=1.0 because the AdaptiveEnsembleTeacher already
+        # applies its own per-teacher temperature internally.  The distiller's
+        # KL loss does NOT need another T layer.
+        super().__init__(
+            student=student,
+            teacher=adaptive_teacher,
+            temperature=1.0,
+            alpha=alpha,
+            mode=mode,
+            **kwargs
+        )
+        self.adaptive_teacher = adaptive_teacher
+        self.total_epochs = 1  # updated by caller or schedule callback
+
+    def set_total_epochs(self, epochs: int):
+        """Set total epochs for self-teacher weight ramp calculation."""
+        self.total_epochs = max(1, epochs)
+
+    def _get_progress(self) -> float:
+        """Training progress [0, 1] for the self-teacher weight ramp."""
+        return min(1.0, self.current_epoch / max(1, self.total_epochs - 1))
+
+    def train_step(self, data: Tuple[tf.Tensor, tf.Tensor]) -> Dict[str, tf.Tensor]:
+        """Single training step with adaptive ensemble teacher."""
+        x, y = data
+        progress = self._get_progress()
+
+        # ── Teacher forward pass with progress param ──────────────────────
+        # The AdaptiveEnsembleTeacher uses `progress` to ramp self-distillation weight.
+        teacher_probs = self.adaptive_teacher(x, training=False, progress=progress)
+
+        with tf.GradientTape() as tape:
+            student_probs = self.student(x, training=True)
+
+            # Hard-label loss
+            student_loss = self.student_loss_fn(y, student_probs)
+
+            # Distillation loss (teacher → student)
+            distill_loss = self._compute_distillation_loss(
+                teacher_probs, student_probs, temperature=1.0
+            )
+
+            # Combined loss
+            loss = self.alpha * student_loss + (1 - self.alpha) * distill_loss
+
+        # Apply gradients
+        trainable_vars = self.student.trainable_variables
+        grads = tape.gradient(loss, trainable_vars)
+        self.optimizer.apply_gradients(zip(grads, trainable_vars))
+
+        # Update metrics
+        self.compiled_metrics.update_state(y, student_probs)
+        self.loss_tracker.update_state(loss)
+
+        results = {m.name: m.result() for m in self.metrics}
+        results.update({
+            "loss": self.loss_tracker.result(),
+            "student_loss": student_loss,
+            "distill_loss": distill_loss,
+            "self_weight": self.adaptive_teacher._get_self_weight(progress),
+        })
+        return results
+
+    def test_step(self, data: Tuple[tf.Tensor, tf.Tensor]) -> Dict[str, tf.Tensor]:
+        """Single test step."""
+        x, y = data
+        progress = self._get_progress()
+
+        teacher_probs = self.adaptive_teacher(x, training=False, progress=progress)
+        student_probs = self.student(x, training=False)
+
+        student_loss = self.student_loss_fn(y, student_probs)
+        distill_loss = self._compute_distillation_loss(
+            teacher_probs, student_probs, temperature=1.0
+        )
+        loss = self.alpha * student_loss + (1 - self.alpha) * distill_loss
+
+        self.loss_tracker.update_state(loss)
+
+        acc = tf.reduce_mean(
+            tf.cast(tf.equal(tf.argmax(student_probs, axis=-1, output_type=tf.int32), y), tf.float32)
+        )
+        results = {
+            "loss": self.loss_tracker.result(),
+            "accuracy": acc,
+            "student_loss": student_loss,
+            "distill_loss": distill_loss,
+        }
+        return results
+
+    def call(self, inputs: tf.Tensor, training: bool = False) -> tf.Tensor:
+        return self.student(inputs, training=training)
+
+    def get_config(self) -> Dict[str, Any]:
+        config = super().get_config()
+        config.update({
+            'total_epochs': self.total_epochs,
         })
         return config
 

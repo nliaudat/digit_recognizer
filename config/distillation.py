@@ -26,8 +26,8 @@ DISTILLATION_MODE = "soft"              # "soft" | "hard" | "hybrid"
 USE_PROGRESSIVE_DISTILLATION = False    # Dynamic temperature + alpha scheduling
 
 # Training hyperparameters
-DISTILLATION_EPOCHS = 150
-DISTILLATION_LEARNING_RATE = 0.001
+DISTILLATION_EPOCHS = 100
+DISTILLATION_LEARNING_RATE = 0.0005
 DISTILLATION_BATCH_SIZE = 64
 DISTILLATION_VALIDATION_SPLIT = 0.2
 DISTILLATION_EARLY_STOPPING_PATIENCE = 20
@@ -81,7 +81,7 @@ DISTILLATION_ENSEMBLE_MODEL_COUNT = 3
 DISTILLATION_USE_MIXUP = False
 DISTILLATION_USE_CUTMIX = False
 DISTILLATION_USE_RANDOM_ERASING = False
-DISTILLATION_USE_DATA_AUGMENTATION = True
+DISTILLATION_USE_DATA_AUGMENTATION = False
 DISTILLATION_AUGMENTATION_ZOOM_RANGE = 0.1
 DISTILLATION_AUGMENTATION_ROTATION_RANGE = 1.15
 DISTILLATION_AUGMENTATION_CONTRAST_RANGE = 0.1
@@ -100,6 +100,15 @@ DISTILLATION_ACCUMULATION_STEPS = 4
 DISTILLATION_USE_STOCHASTIC_WEIGHT_AVERAGING = False
 DISTILLATION_USE_CYCLICAL_LEARNING_RATE = False
 DISTILLATION_USE_LEARNING_RATE_FINDER = False
+
+# ==============================================================================
+# Auto-teacher discovery (train_distill.py --auto-teachers)
+# ==============================================================================
+
+AUTO_TEACHER_MIN_ACCURACY_MARGIN = 0.0  # Was 0.001 — set to 0.0 so lower-accuracy
+                                         # teachers are kept. Their "dark knowledge"
+                                         # (less confident soft targets) is extracted
+                                         # via per-teacher temperature boosting.
 
 # ==============================================================================
 # Progressive distillation schedule
@@ -124,3 +133,26 @@ SUPER_STUDENT_LR_FACTOR = 0.5            # LR reduction factor
 SUPER_STUDENT_LR_MIN = 1e-7              # Minimum LR
 SUPER_STUDENT_EARLY_STOP_PATIENCE = 30   # EarlyStopping patience
 SUPER_STUDENT_EARLY_STOP_MIN_DELTA = 5e-4  # EarlyStopping min delta
+
+# ==============================================================================
+# Adaptive multi-teacher ensemble distillation
+# ==============================================================================
+# These parameters control how lower-accuracy teachers are kept in the ensemble
+# rather than discarded, and how the student's own predictions (self-distillation)
+# are incorporated with stop_gradient.
+
+# Per-teacher temperature scaling
+ENSEMBLE_PER_TEACHER_TEMPERATURE = True          # Enable per-teacher T scaling
+ENSEMBLE_LOW_ACCURACY_TEMP_BOOST = 2.0           # Extra T added for lower-accuracy teachers
+                                                 # (extracts dark knowledge via flatter distributions)
+ENSEMBLE_BASE_TEMPERATURE = 4.0                  # Base temperature for median-accuracy teacher
+
+# Self-distillation
+ENSEMBLE_SELF_DISTILLATION_ENABLED = True        # Include student's own predictions as a teacher
+ENSEMBLE_SELF_DISTILL_WEIGHT_START = 0.1         # Self-teacher weight at epoch 0
+ENSEMBLE_SELF_DISTILL_WEIGHT_END = 0.25          # Self-teacher weight at final epoch
+ENSEMBLE_SELF_DISTILL_TEMPERATURE = 1.5          # Temperature for self-teacher (lower = sharper)
+
+# Gating network (advanced, experimental — default off)
+ENSEMBLE_USE_GATING = False                      # Learned gating network per-sample weighting
+ENSEMBLE_GATING_HIDDEN_SIZE = 16                 # Hidden units in gating MLP

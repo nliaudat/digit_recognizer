@@ -424,27 +424,46 @@ def load_teacher_from_checkpoint(
     timeout: int = 300,
 ) -> tf.keras.Model:
     """
-    Load a teacher model from a checkpoint by running
-    ``convert_teacher_checkpoints.py`` in a **separate** TF subprocess.
+    Load a teacher model from a saved ``best_model.keras`` checkpoint.
 
-    This avoids the ``free(): invalid pointer`` C++ memory corruption that
-    occurs when loading multiple models with complex custom layers
-    (v29's AdaptiveHybridBinarization, v28's AdaptiveMeanBinarization)
-    in the same CUDA context.
+    Strategy:
+        1. Try ``tf.keras.models.load_model(checkpoint_path)`` directly.
+           The .keras format stores full architecture + weights, so there is
+           zero risk of shape mismatch (unlike the old subprocess approach
+           that rebuilt the architecture from source code).
+        2. On failure (e.g. ``free(): invalid pointer`` on old CUDA), fall
+           back to the subprocess pipeline via ``convert_teacher_checkpoints.py``.
 
     Args:
-        model_name: Teacher model name (e.g. ``"v28"``, ``"v29"``).
-        checkpoint_path: Path to the saved checkpoint.
-        num_classes: Number of output classes.
-        input_shape: Input shape tuple (height, width, channels).
+        model_name: Teacher model name (for logging / fallback).
+        checkpoint_path: Path to ``best_model.keras``.
+        num_classes, input_shape: Used only by the subprocess fallback.
         timeout: Subprocess timeout in seconds (default 300).
 
     Returns:
         A Keras model with the teacher architecture and loaded weights.
-
-    Raises:
-        RuntimeError: If the subprocess fails or produces no output file.
     """
+    # ── Fast path: load_model from .keras (architecture + weights atomically) ──
+    try:
+        logger.info(f"Attempting direct load_model from {checkpoint_path}")
+        t_model = tf.keras.models.load_model(checkpoint_path, compile=False)
+        # Quick sanity: verify output shape matches expected number of classes
+        dummy = t_model(tf.zeros((1,) + tuple(t_model.input_shape[1:])))
+        if dummy.shape[-1] != num_classes:
+            logger.warning(
+                f"Loaded teacher has {dummy.shape[-1]} classes, expected {num_classes}. "
+                "Falling back to subprocess approach."
+            )
+            raise ValueError("Class count mismatch")
+        logger.info(f"✅ Teacher {model_name} loaded directly from .keras")
+        return t_model
+    except Exception as exc:
+        logger.warning(
+            f"Direct load_model failed for {model_name}: {exc}. "
+            "Falling back to subprocess convert_teacher_checkpoints."
+        )
+
+    # ── Fallback: subprocess convert (avoids CUDA free(): invalid pointer) ─────
     from models.model_factory import create_model_by_name
 
     with tempfile.TemporaryDirectory() as _tmpdir:

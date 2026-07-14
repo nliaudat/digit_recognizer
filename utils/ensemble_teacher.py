@@ -3,6 +3,8 @@ import numpy as np
 import logging
 from typing import List, Optional, Dict, Any, Union
 
+import config.distillation as dist_cfg
+
 logger = logging.getLogger(__name__)
 
 EPS = 1e-7
@@ -201,4 +203,269 @@ class EnsembleTeacher(tf.keras.Model):
         predictions = self.predict(x_test[:num_samples])
         acc = np.mean(np.argmax(predictions, axis=1) == y_test[:num_samples])
         logger.info(f"Ensemble teacher verification accuracy: {acc:.4f}")
+        return acc
+
+
+class AdaptiveEnsembleTeacher(tf.keras.Model):
+    """
+    Multi-teacher ensemble with per-teacher temperature scaling and
+    stop_gradient self-distillation support.
+
+    Core insight (from the literature):
+        Lower-accuracy teachers have *less confident* soft targets, which
+        paradoxically makes them *more informative* for distillation because
+        their probability distributions carry richer "dark knowledge" about
+        class relationships.  This class amplifies that signal by boosting
+        the temperature for low-accuracy teachers.
+
+    Features
+    --------
+    - Per-teacher temperature: T_i = base_T + boost * accuracy_deficit
+      where accuracy_deficit = (median_acc - acc_i) / (median_acc - min_acc + EPS).
+      Lower accuracy → higher T → flatter distribution → more dark knowledge.
+    - Self-teacher support: one index can be marked as the student's own
+      frozen prediction.  Its gradient is stopped so the student can't
+      "cheat" by matching its own output.
+    - Self-teacher weight ramps linearly over training (start→end)
+      via the `progress` parameter.
+    - All config values live in ``config/distillation.py``.
+
+    Parameters
+    ----------
+    teachers : list[tf.keras.Model]
+        The teacher models.
+    teacher_accuracies : list[float]
+        Float accuracy for each teacher (used to compute per-teacher T).
+    teacher_weights : list[float] or None
+        Fixed weights for each teacher (default: accuracy-proportional).
+    self_teacher_idx : int or None
+        Index in `teachers` that is the student's own frozen checkpoint.
+        If provided, stop_gradient is applied and its weight ramps.
+    temperature : float
+        Base temperature for the median-accuracy teacher.
+    **kwargs
+        Passed to tf.keras.Model.
+    """
+
+    def __init__(
+        self,
+        teachers: list[tf.keras.Model],
+        teacher_accuracies: list[float],
+        teacher_weights: Optional[list[float]] = None,
+        self_teacher_idx: Optional[int] = None,
+        temperature: Optional[float] = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.teachers = teachers
+        self.num_teachers = len(teachers)
+        self.teacher_accuracies = np.array(teacher_accuracies, dtype=np.float32)
+        self.self_teacher_idx = self_teacher_idx
+        self.base_temperature = temperature if temperature is not None else dist_cfg.ENSEMBLE_BASE_TEMPERATURE
+        self.low_acc_boost = dist_cfg.ENSEMBLE_LOW_ACCURACY_TEMP_BOOST
+
+        # ── Weights ────────────────────────────────────────────────────────
+        if teacher_weights is not None:
+            self.teacher_weights = np.array(teacher_weights, dtype=np.float32)
+        else:
+            # Default: softmax over accuracies (or uniform if all zero)
+            accs = self.teacher_accuracies.copy()
+            accs = np.maximum(accs, 1e-7)
+            self.teacher_weights = accs / accs.sum()
+
+        # ── Freeze teachers ────────────────────────────────────────────────
+        for teacher in self.teachers:
+            teacher.trainable = False
+
+        # ── Detect output format for each teacher ──────────────────────────
+        self._teacher_formats = []
+        for i, teacher in enumerate(self.teachers):
+            fmt = _detect_output_format(teacher)
+            self._teacher_formats.append(fmt)
+            logger.info(f"  AdaptiveTeacher {i} ({teacher.name}): format={fmt}, acc={teacher_accuracies[i]:.4f}")
+
+        # ── Pre-compute per-teacher temperatures ───────────────────────────
+        self._teacher_temperatures = self._compute_per_teacher_temps()
+        for i, t in enumerate(self._teacher_temperatures):
+            tag = " [SELF]" if i == self_teacher_idx else ""
+            logger.info(f"  → T[{i}] = {t:.2f}{tag}")
+
+        # ── Self-distillation ramp ─────────────────────────────────────────
+        self._self_weight_start = dist_cfg.ENSEMBLE_SELF_DISTILL_WEIGHT_START
+        self._self_weight_end = dist_cfg.ENSEMBLE_SELF_DISTILL_WEIGHT_END
+        self._self_temperature = dist_cfg.ENSEMBLE_SELF_DISTILL_TEMPERATURE
+        self._self_enabled = (
+            dist_cfg.ENSEMBLE_SELF_DISTILLATION_ENABLED
+            and self_teacher_idx is not None
+        )
+        if self._self_enabled:
+            logger.info(
+                f"  Self-distillation enabled: weight {self._self_weight_start} → {self._self_weight_end}, "
+                f"T={self._self_temperature}"
+            )
+
+        logger.info(
+            f"AdaptiveEnsembleTeacher: {self.num_teachers} teachers, "
+            f"base_T={temperature}, boost={self.low_acc_boost}"
+        )
+
+    # ── Helpers ──────────────────────────────────────────────────────────
+
+    def _compute_per_teacher_temps(self) -> np.ndarray:
+        """
+        Compute per-teacher temperatures based on accuracy rank.
+
+        Teacher at median accuracy → base temperature.
+        Teacher below median → boosted:  T_i = base_T + boost * deficit_factor
+        where deficit_factor linearly maps [min_acc, median_acc] → [1.0, 0.0].
+        """
+        accs = self.teacher_accuracies
+        n = len(accs)
+
+        if n <= 1:
+            return np.array([self.base_temperature], dtype=np.float32)
+
+        # Exclude self-teacher from median calculation if it's marked
+        if self.self_teacher_idx is not None and n > 1:
+            _accs = np.delete(accs, self.self_teacher_idx)
+        else:
+            _accs = accs
+
+        median_acc = float(np.median(_accs))
+        min_acc = float(_accs.min())
+        eps = 1e-7
+
+        temps = np.full(n, fill_value=self.base_temperature, dtype=np.float32)
+
+        for i in range(n):
+            if i == self.self_teacher_idx:
+                continue  # handled in call()
+            deficit = (median_acc - accs[i]) / (median_acc - min_acc + eps)
+            deficit = float(np.clip(deficit, 0.0, 1.0))
+            temps[i] = self.base_temperature + self.low_acc_boost * deficit
+
+        return temps
+
+    def _get_self_weight(self, progress: float) -> float:
+        """Linear ramp from start to end weight."""
+        progress = float(np.clip(progress, 0.0, 1.0))
+        return (
+            self._self_weight_start * (1.0 - progress)
+            + self._self_weight_end * progress
+        )
+
+    # ── Forward pass ────────────────────────────────────────────────────
+
+    def call(self, inputs: tf.Tensor, training: bool = False, progress: float = 1.0) -> tf.Tensor:
+        """
+        Forward pass with per-teacher temperature scaling.
+
+        Args:
+            inputs: Batch of input images.
+            training: Whether in training mode.
+            progress: Training progress [0, 1].  Controls the self-teacher
+                      weight ramp.  Default 1.0 (fully ramped).
+
+        Returns:
+            Weighted ensemble softmax probabilities.
+        """
+        # Step 1: collect and normalise each teacher's output to softmax
+        normalized_outputs = []
+        for i, teacher in enumerate(self.teachers):
+            raw = teacher(inputs, training=training)
+            probs = _normalize_to_softmax(teacher, raw)
+            normalized_outputs.append(probs)
+            logger.debug(f"  AdaptiveTeacher[{i}]: probs shape={probs.shape}")
+
+        # Step 2: apply per-teacher temperature and re-softmax
+        eps = 1e-7
+        tempered = []
+        for i, probs in enumerate(normalized_outputs):
+            if i == self.self_teacher_idx and self._self_enabled:
+                # Self-teacher: use self-distillation temperature
+                t = self._self_temperature
+            else:
+                t = self._teacher_temperatures[i]
+
+            # Recover pseudo-logits, scale by temperature, re-softmax
+            pseudo_logits = tf.math.log(tf.clip_by_value(probs, eps, 1.0))
+            softened = tf.nn.softmax(pseudo_logits / t)
+            tempered.append(softened)
+
+        # Step 3: weighted average
+        weights = tf.constant(self.teacher_weights, dtype=tf.float32)
+
+        # If self-teacher is active, adjust weights according to progress
+        if self._self_enabled:
+            w = self._get_self_weight(progress)
+            other_count = self.num_teachers - 1
+            if other_count > 0:
+                # Redistribute: self gets `w`, the rest share (1 - w) proportionally
+                self_w = tf.constant(w, dtype=tf.float32)
+                # Use numpy array self.teacher_weights (not tf.Tensor weights) to avoid
+                # "Scalar tensor has no len()" in graph mode.
+                other_weights = tf.constant(
+                    [self.teacher_weights[i] for i in range(self.num_teachers) if i != self.self_teacher_idx],
+                    dtype=tf.float32,
+                )
+                other_weights = other_weights / tf.reduce_sum(other_weights)
+                other_weights = other_weights * (1.0 - self_w)
+
+                # Rebuild full weight vector
+                full_weights = []
+                oi = 0
+                for i in range(self.num_teachers):
+                    if i == self.self_teacher_idx:
+                        full_weights.append(self_w)
+                    else:
+                        full_weights.append(other_weights[oi])
+                        oi += 1
+                weights = tf.stack(full_weights)
+        else:
+            # Normalize weights to sum to 1
+            weights = weights / tf.reduce_sum(weights)
+
+        # Apply weighted sum
+        weighted = tf.zeros_like(tempered[0])
+        for i, t_soft in enumerate(tempered):
+            w_i = weights[i]
+            if i == self.self_teacher_idx and self._self_enabled:
+                # ⚠️ Critical: stop gradient on self-teacher branch.
+                # The student should move TOWARD its own frozen predictions,
+                # not be able to change its predictions to perfectly match itself.
+                weighted += w_i * tf.stop_gradient(t_soft)
+            else:
+                weighted += w_i * t_soft
+
+        logger.debug(f"AdaptiveEnsembleTeacher output shape: {weighted.shape}")
+        return weighted
+
+    @property
+    def input_shape(self):
+        return self.teachers[0].input_shape
+
+    @property
+    def output_shape(self):
+        return self.teachers[0].output_shape
+
+    def count_params(self):
+        return sum(t.count_params() for t in self.teachers)
+
+    def get_config(self) -> Dict[str, Any]:
+        config = super().get_config()
+        config.update({
+            'num_teachers': self.num_teachers,
+            'teacher_weights': self.teacher_weights.tolist(),
+            'teacher_accuracies': self.teacher_accuracies.tolist(),
+            'self_teacher_idx': self.self_teacher_idx,
+            'base_temperature': float(self.base_temperature),
+        })
+        return config
+
+    def verify(self, test_data, num_samples=100):
+        """Verify teacher ensemble is working properly."""
+        x_test, y_test = test_data
+        predictions = self.predict(x_test[:num_samples])
+        acc = np.mean(np.argmax(predictions, axis=1) == y_test[:num_samples])
+        logger.info(f"AdaptiveEnsembleTeacher verification accuracy: {acc:.4f}")
         return acc

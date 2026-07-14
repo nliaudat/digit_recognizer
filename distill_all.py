@@ -174,6 +174,7 @@ def build_command(
     epochs: int,
     mode: str,
     progressive: bool,
+    exclude_self: bool,
     tqt: bool,
 ) -> list[str]:
     """
@@ -204,6 +205,8 @@ def build_command(
 
     if progressive:
         cmd.append("--progressive")
+    if exclude_self:
+        cmd.append("--exclude-self")
     if tqt:
         cmd.append("--tqt")
 
@@ -246,20 +249,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--temperature",
         type=float,
-        default=6.0,
-        help="Distillation temperature (default: 6.0)",
+        default=None,  # Resolved at runtime via config
+        help="Distillation temperature (default: per-class from config)",
     )
     parser.add_argument(
         "--alpha",
         type=float,
-        default=0.5,
-        help="Hard-label weight 0→1 (default: 0.5)",
+        default=None,  # Resolved at runtime via config
+        help="Hard-label weight 0→1 (default: per-class from config)",
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=250,
-        help="Max distillation epochs (default: 250, early stopping will stop earlier)",
+        default=dist_cfg.DISTILLATION_EPOCHS,
+        help=f"Max distillation epochs (default: {dist_cfg.DISTILLATION_EPOCHS}, early stopping will stop earlier)",
     )
     parser.add_argument(
         "--mode",
@@ -279,6 +282,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_false",
         dest="progressive",
         help="Disable ProgressiveDistiller",
+    )
+    parser.add_argument(
+        "--exclude-self",
+        action="store_true",
+        default=False,
+        help="Exclude student's own frozen checkpoint from teacher ensemble"
     )
     parser.add_argument(
         "--tqt",
@@ -344,23 +353,23 @@ def main() -> None:
         sys.exit(1)
 
     # ── Apply class-aware defaults if CLI didn't override ────────────────
-    # distill_all.py default values are 6.0/0.5 (see parse_args).  If the
-    # user didn't pass --temperature / --alpha explicitly, those defaults
-    # are set.  Replace them with class-appropriate values from config.
+    # Use config values; CLI overrides are detected by `is None`.
     temperature = args.temperature
     alpha = args.alpha
     if args.classes == 100:
-        if temperature == 6.0:  # user didn't override
+        if temperature is None:
             temperature = dist_cfg.DISTILLATION_TEMPERATURE_100CLS
             logger.info(f"   Auto-selected 100cls T={temperature}")
-        if alpha == 0.5:       # user didn't override
+        if alpha is None:
             alpha = dist_cfg.DISTILLATION_ALPHA_100CLS
             logger.info(f"   Auto-selected 100cls α={alpha}")
     else:
-        if temperature == 6.0:
+        if temperature is None:
             temperature = dist_cfg.DISTILLATION_TEMPERATURE_10CLS
-        if alpha == 0.5:
+            logger.info(f"   Auto-selected 10cls T={temperature}")
+        if alpha is None:
             alpha = dist_cfg.DISTILLATION_ALPHA_10CLS
+            logger.info(f"   Auto-selected 10cls α={alpha}")
 
     # ── Determine which students to process ───────────────────────────────
     if args.student:
@@ -394,6 +403,7 @@ def main() -> None:
             epochs=args.epochs,
             mode=args.mode,
             progressive=args.progressive,
+            exclude_self=args.exclude_self,
             tqt=args.tqt,
         )
 
