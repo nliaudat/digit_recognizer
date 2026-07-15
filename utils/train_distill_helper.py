@@ -631,6 +631,9 @@ def discover_teachers(
                 # Exclude student model itself
                 if exclude_model and exclude_model in entry:
                     continue
+                # Skip previous distillation outputs (students, never valid teachers)
+                if entry.startswith("distilled_"):
+                    continue
                 candidates[entry] = ckpt
 
     if not candidates:
